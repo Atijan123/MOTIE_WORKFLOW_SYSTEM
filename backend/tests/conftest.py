@@ -87,6 +87,16 @@ def test_database(alembic_cfg):
 
 
 @pytest.fixture
+def committing_engine():
+    """For the rare test that needs real commits on several connections (e.g. a race).
+
+    Data it commits stays until the next run rebuilds the test database, so such
+    tests must use their own unique emails and must not count rows globally.
+    """
+    return test_engine
+
+
+@pytest.fixture
 async def db_session():
     """A session whose changes are all rolled back when the test ends.
 

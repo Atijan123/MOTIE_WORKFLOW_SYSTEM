@@ -16,6 +16,33 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 3c — Cases moving through the workflow (2026-10-18)
+**Built:** `core.cases` (one row per file, holding its current status) and the workflow engine in backend/app/core/workflow/service.py, the only code that creates cases or changes their status. `change_status()` does five things:
+1. Locks the case row.
+2. Checks that the move exists from the current status (otherwise **409**).
+3. Checks that the caller has the role for it (otherwise **403**).
+4. Updates the status.
+5. Writes the audit row and commits both together.
+
+Four endpoints:
+- `POST /cases` opens a case.
+- `GET /cases/{id}` returns the case plus the actions *you* may take next.
+- `POST /cases/{id}/status` makes a move.
+- `GET /cases/{id}/history` returns the audit trail (staff only).
+
+Applicants see only their own cases. Someone else's case returns the same 404 as a case that doesn't exist.
+
+**Files:** backend/alembic/versions/0006_cases.py, backend/app/core/workflow/models.py (`Case`), backend/app/core/workflow/service.py, backend/app/core/workflow/schemas.py, backend/app/core/workflow/router.py, backend/app/main.py, backend/tests/core/test_cases.py, backend/tests/core/test_case_race.py
+**Try it:**
+1. `docker compose exec api alembic upgrade head`
+2. Create one user per role with the CLI (step 2b): `applicant`, `records_officer`, `minister`, `director`, `officer`.
+3. In `localhost:8000/docs`, log in as the applicant and `POST /cases` with `{"workflow": "etls_application"}`.
+4. Log in as the records officer, `GET /cases/1`, and look at `available_actions`. Then `POST /cases/1/status` with `{"to_status": "with_minister", "comment": "Registered"}`.
+5. Try something illegal, such as the officer approving straight away, and watch it get a 409 or 403.
+6. `GET /cases/1/history` as staff shows every step, with who and when.
+- `docker compose exec api pytest tests/core/test_cases.py tests/core/test_case_race.py -v`
+**New concepts:** Row locking (`SELECT ... FOR UPDATE`), Hiding existence with 404
+
 ### Step 3b — Workflow definitions as data (2026-10-18)
 **Built:** three tables that *describe* a workflow. `workflows` holds the process and the role that may start one. `workflow_statuses` holds its steps, with one marked initial and some marked final. `workflow_transitions` holds the allowed moves, each with the role that may make it. The database refuses a second initial status and refuses a move that points into another workflow's status. Migration `0005` seeds a placeholder ETLS workflow `[CONFIRM]`. Tests check that every workflow has exactly one start, no dead ends, no moves out of final statuses, and no unreachable statuses.
 **Files:** backend/alembic/versions/0004_workflow_definitions.py, backend/alembic/versions/0005_seed_etls_workflow.py, backend/app/core/workflow/models.py, backend/tests/core/test_workflow_definitions.py
@@ -183,6 +210,16 @@ One short explanation per concept, where it lives in this codebase, and one free
 **Here:** backend/alembic/versions/0005_seed_etls_workflow.py. Also the role list at the end of 0002.
 **Learn more:** [Alembic cookbook: data migrations](https://alembic.sqlalchemy.org/en/latest/cookbook.html#data-migrations-general-techniques)
 
+### Row locking (`SELECT ... FOR UPDATE`)
+**What:** two officers press "Approve" and "Reject" on the same file in the same second. Without care, both requests read "With the officer", both decide their move is allowed, and both save: the file is approved *and* rejected. `FOR UPDATE` locks the row when it's read. The second request waits until the first commits, then reads the *new* status (final) and is refused.
+**Here:** backend/app/core/workflow/service.py: `get_case(..., for_update=True)`, used by `change_status()`. Proven by backend/tests/core/test_case_race.py, which fails if you remove the lock (we tried it: 3 out of 3 failures).
+**Learn more:** [PostgreSQL docs: Row-level locks](https://www.postgresql.org/docs/16/explicit-locking.html#LOCKING-ROWS)
+
+### Hiding existence with 404
+**What:** if `/cases/41` said "403 not yours" and `/cases/9999` said "404 not found", an applicant could count how many cases exist, or test which ids are real. Returning the same 404 for both reveals nothing. We use 403 only when the user is allowed to *see* the thing but not to *do* the action.
+**Here:** backend/app/core/workflow/service.py `get_case()`. Tested by `test_applicants_only_see_their_own_cases`.
+**Learn more:** [OWASP: Insecure Direct Object Reference](https://cheatsheetseries.owasp.org/cheatsheets/Insecure_Direct_Object_Reference_Prevention_Cheat_Sheet.html)
+
 ## 3. Decisions
 
 | Date | Decision | Alternatives considered | Why |
@@ -221,6 +258,12 @@ One short explanation per concept, where it lives in this codebase, and one free
 | 2026-10-18 | One role may start a workflow (`workflows.start_role_id`) | a link table allowing several roles | Enough for ETLS. Becomes a table if Records also needs to open cases for walk-in applicants (see Open questions). |
 | 2026-10-18 | The ETLS definition is seeded in the shared migration chain | a separate `etls` module migration | There's only one Alembic chain so far. When the `etls` schema arrives, its data can move with it. |
 | 2026-10-18 | Database constraints guard the workflow's structure; tests guard its logic | everything in Python | Constraints (one initial status, statuses from the same workflow) protect against any client. Rules like "no dead ends" need a whole-graph check, which is easier as a test. |
+| 2026-10-18 | The generic table is called `cases` | `files`, `requests`, `applications` | "File" collides with uploaded documents, which come later. "Application" is ETLS-specific. Module tables (e.g. `etls.applications`) will point at `core.cases.id`. |
+| 2026-10-18 | The case's history lives only in `core.audit_log` | a separate `case_status_history` table | One source of truth. A second table could disagree with the audit log. |
+| 2026-10-18 | Pessimistic locking (`FOR UPDATE`) | optimistic locking (a version number, retry on conflict) | Simpler to read, and contention is tiny (a handful of officers per file). No retry logic needed. |
+| 2026-10-18 | 409 for "move not possible from here", 403 for "move exists but not for your role" | 400 for both | The frontend can show "this file has already moved on" (409) differently from "you can't do this" (403). |
+| 2026-10-18 | Engine errors are Python exceptions, turned into HTTP codes in one handler | raise `HTTPException` inside the service | The service stays usable from the CLI, background jobs and tests, without knowing about HTTP. |
+| 2026-10-18 | Applicants can't read the history | show applicants everything | History holds internal minutes and comments. Applicants see the current status only, until the Ministry decides otherwise. |
 
 ## 4. Open questions
 
@@ -235,10 +278,23 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 - [ ] **ETLS workflow steps:** is Submitted → Minister → Directorate → Officer → Approved/Rejected the real path? Are there steps such as "returned to applicant for more documents", a fee payment, or an inspection? See backend/alembic/versions/0005_seed_etls_workflow.py.
 - [ ] **Who signs the ETLS approval:** the subject officer, the Director, or the Minister/PS?
 - [ ] **Who may open an ETLS case:** only the applicant online, or can Records register walk-in applications too?
+- [ ] **Who may see a case:** right now, any staff member sees every case. Should staff see only cases in their directorate, or only cases assigned to them? See `can_view()` in backend/app/core/workflow/service.py.
+- [ ] **What applicants see:** only the current status, or also the steps taken (without internal comments)? See `case_history()` in backend/app/core/workflow/router.py.
+- [ ] **Deadlines:** how many days may a file sit at each step before it's overdue? (Needed for deadline tracking, not built yet.)
 
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 3c
+1. An officer sends `{"to_status": "approved"}` for a case that is still "Submitted". Which status code comes back, and which line decides it? Does anything get written to the audit log?
+2. Why does `get_case()` use `populate_existing=True` together with `with_for_update()`?
+3. An applicant asks for `GET /cases/57`, which belongs to another applicant. What do they get, and why not 403?
+
+#### Show answers
+1. **409 Conflict.** In `change_status()`, the query for moves from `submitted` to `approved` finds no rows, so it raises `TransitionNotAllowed`, which `_ERROR_STATUS` in router.py maps to 409. Nothing is written: the exception happens before `record_event()`, and nothing was committed.
+2. The lock makes a second request wait. But if the session already had the case in memory, SQLAlchemy would hand back the old copy with the old status. `populate_existing` forces it to use the freshly read row, so the decision is based on the status *after* the other request committed.
+3. **404 "Case not found."**, the same answer as for a case that doesn't exist. A 403 would confirm that case 57 exists, letting someone map out the Ministry's case ids.
 
 ### Step 3b
 1. The Ministry says Directors may now reject a file directly from "With the Directorate". What do you change: Python code, or something else?

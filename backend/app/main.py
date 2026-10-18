@@ -4,6 +4,8 @@ from fastapi import FastAPI
 
 from app.api import health
 from app.core.identity import router as identity
+from app.core.workflow import router as workflow
+from app.core.workflow.service import WorkflowError
 from app.db.session import engine
 
 
@@ -19,3 +21,5 @@ app = FastAPI(title="MOTIE Workflow Platform", lifespan=lifespan)
 
 app.include_router(health.router)
 app.include_router(identity.router)
+app.include_router(workflow.router)
+app.add_exception_handler(WorkflowError, workflow.workflow_error_handler)

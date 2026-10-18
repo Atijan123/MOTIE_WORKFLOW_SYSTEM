@@ -1,6 +1,10 @@
+from datetime import datetime
+
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
+    DateTime,
     ForeignKey,
     ForeignKeyConstraint,
     Identity,
@@ -10,6 +14,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     false,
+    func,
     text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -98,3 +103,43 @@ class WorkflowTransition(Base):
         viewonly=True,
     )
     required_role: Mapped[Role] = relationship(lazy="selectin", viewonly=True)
+
+
+class Case(Base):
+    """A file moving through a workflow. Created by alembic/versions/0006_cases.py.
+
+    Change current_status_id only through workflow/service.py change_status(),
+    which checks the move is allowed and writes the audit row.
+    """
+
+    __tablename__ = "cases"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["workflow_id", "current_status_id"],
+            ["core.workflow_statuses.workflow_id", "core.workflow_statuses.id"],
+            name="cases_status_fkey",
+        ),
+        Index("cases_created_by_idx", "created_by"),
+        {"schema": "core"},
+    )
+    __mapper_args__ = {"eager_defaults": True}
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    workflow_id: Mapped[int] = mapped_column(SmallInteger)
+    current_status_id: Mapped[int] = mapped_column(Integer)
+    created_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("core.users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    workflow: Mapped[Workflow] = relationship(
+        primaryjoin="Workflow.id == Case.workflow_id",
+        foreign_keys=[workflow_id],
+        lazy="selectin",
+        viewonly=True,
+    )
+    current_status: Mapped[WorkflowStatus] = relationship(
+        primaryjoin="WorkflowStatus.id == Case.current_status_id",
+        foreign_keys=[current_status_id],
+        lazy="selectin",
+        viewonly=True,
+    )

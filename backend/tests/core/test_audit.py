@@ -8,20 +8,21 @@ pytestmark = pytest.mark.anyio
 
 
 async def test_record_event_and_read_history(db_session, make_user):
+    # entity_type "test" so these rows can't mix with real case events.
     user = await make_user("officer")
-    record_event(db_session, actor=user, action="case.created", entity_type="case", entity_id=1)
+    record_event(db_session, actor=user, action="case.created", entity_type="test", entity_id=1)
     record_event(
         db_session,
         actor=user,
         action="case.status_changed",
-        entity_type="case",
+        entity_type="test",
         entity_id=1,
         details={"from": "submitted", "to": "with_minister"},
     )
-    record_event(db_session, actor=None, action="case.created", entity_type="case", entity_id=2)
+    record_event(db_session, actor=None, action="case.created", entity_type="test", entity_id=2)
     await db_session.commit()
 
-    events = await history(db_session, "case", 1)
+    events = await history(db_session, "test", 1)
 
     assert [e.action for e in events] == ["case.created", "case.status_changed"]
     assert events[0].actor_user_id == user.id
@@ -39,7 +40,7 @@ async def test_record_event_and_read_history(db_session, make_user):
     ids=["update", "delete", "truncate"],
 )
 async def test_audit_log_rejects_changes(db_session, statement):
-    record_event(db_session, actor=None, action="x", entity_type="case", entity_id=1)
+    record_event(db_session, actor=None, action="x", entity_type="test", entity_id=1)
     await db_session.commit()
 
     # Even raw SQL that bypasses our Python code is refused by the database.
