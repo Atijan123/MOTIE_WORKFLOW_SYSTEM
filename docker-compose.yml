@@ -1,0 +1,41 @@
+services:
+  db:
+    # Official Postgres 16 with the pgvector extension available (not enabled yet).
+    image: pgvector/pgvector:pg16
+    env_file: .env
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      # 127.0.0.1 = only this machine can connect. Never expose Postgres to the network.
+      # Host port 5433 because a Windows-installed Postgres may already own 5432.
+      # Containers still reach it as db:5432 over the Compose network.
+      - "127.0.0.1:5433:5432"
+    healthcheck:
+      # $$ escapes $ so the variable is read inside the container, not by Compose.
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ./backend
+      args:
+        REQUIREMENTS: requirements-dev.txt
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    environment:
+      # Host is "db" (the service name above), not localhost: each container has its own localhost.
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      # File-change events from a Windows bind mount often don't reach the container; poll instead.
+      WATCHFILES_FORCE_POLLING: "true"
+    volumes:
+      # Dev only: mount the source so edits reload without rebuilding the image.
+      - ./backend:/app
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
