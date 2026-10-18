@@ -9,6 +9,7 @@ mark a test module with `pytestmark = pytest.mark.anyio`.
 """
 
 import asyncio
+import itertools
 from pathlib import Path
 
 import asyncpg
@@ -21,8 +22,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from app.core.config import settings
+from app.core.identity.security import create_access_token
+from app.core.identity.service import create_user
 from app.db.session import get_session
 from app.main import app
+from tests.support import TEST_PASSWORD
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 
@@ -100,6 +104,34 @@ async def db_session():
         finally:
             await session.close()
             await outer.rollback()
+
+
+@pytest.fixture
+def make_user(db_session):
+    """Create users in the test database: `officer = await make_user("officer")`."""
+    numbers = itertools.count(1)
+
+    async def _make(*role_codes: str, email: str | None = None):
+        n = next(numbers)
+        return await create_user(
+            db_session,
+            email=email or f"user{n}@test.gm",
+            full_name=f"Test User {n}",
+            password=TEST_PASSWORD,
+            role_codes=list(role_codes),
+        )
+
+    return _make
+
+
+@pytest.fixture
+def auth_headers():
+    """Headers that log a request in as `user`: `client.get(..., headers=auth_headers(user))`."""
+
+    def _headers(user) -> dict[str, str]:
+        return {"Authorization": f"Bearer {create_access_token(user.id)}"}
+
+    return _headers
 
 
 @pytest.fixture
