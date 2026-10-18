@@ -16,6 +16,15 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 3a — Append-only audit log (2026-10-18)
+**Built:** `core.audit_log`, one row per event: who, what action, which record, when, and details as JSON. Postgres triggers reject every `UPDATE`, `DELETE` and `TRUNCATE` on it, so history can't be rewritten even with raw SQL. `record_event()` adds a row to the *current* transaction without committing, so the change and its audit row are saved together. `history()` lists a record's events, oldest first.
+**Files:** backend/alembic/versions/0003_audit_log.py, backend/app/core/audit/models.py, backend/app/core/audit/service.py, backend/app/models.py, backend/tests/core/test_audit.py
+**Try it:**
+- `docker compose exec api alembic upgrade head`
+- See the protection yourself: `docker compose exec db psql -U motie -d motie -c "DELETE FROM core.audit_log"` gives `ERROR: core.audit_log is append-only: DELETE is not allowed`.
+- `docker compose exec api pytest tests/core/test_audit.py -v`
+**New concepts:** Append-only audit log, Database triggers, Transactions (all-or-nothing)
+
 ### Step 2c — Login with tokens (2026-10-18)
 **Built:** `POST /auth/login` checks email and password and returns a signed token (JWT) valid for 60 minutes. `GET /auth/me` returns who the token belongs to. `get_current_user` and `require_role(...)` are the dependencies every protected endpoint will use. Login failures all look identical (same status, same message, same timing), so nobody can probe which emails have accounts.
 **Files:** backend/app/core/identity/security.py (tokens), backend/app/core/identity/service.py (`authenticate`), backend/app/core/identity/deps.py, backend/app/core/identity/schemas.py, backend/app/core/identity/router.py, backend/app/core/config.py, backend/app/main.py, docker-compose.yml, .env.example, backend/tests/core/test_auth.py, backend/tests/conftest.py (`make_user`, `auth_headers`)
@@ -120,6 +129,21 @@ One short explanation per concept, where it lives in this codebase, and one free
 **Here:** backend/app/core/identity/service.py: `authenticate()` and `_dummy_hash()`. backend/app/core/identity/router.py: `login()`.
 **Learn more:** [OWASP Authentication Cheat Sheet: authentication responses](https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html#authentication-and-error-messages)
 
+### Append-only audit log
+**What:** a record of everything that happened, where rows are only ever added, never changed or deleted. If someone could edit it, it would prove nothing. For a Ministry, the log answers "who approved this, and when?" years later.
+**Here:** backend/app/core/audit/service.py: `record_event()` and `history()`. The rule is enforced in backend/alembic/versions/0003_audit_log.py.
+**Learn more:** [OWASP Logging Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html)
+
+### Database triggers
+**What:** a function that Postgres runs automatically before or after certain statements on a table. Ours runs *before* any UPDATE, DELETE or TRUNCATE on `core.audit_log` and raises an error, which cancels the statement. Because it lives in the database, it protects the table from every client: our API, psql, a future reporting tool.
+**Here:** backend/alembic/versions/0003_audit_log.py: `core.audit_log_block_changes()` and the two `CREATE TRIGGER` statements.
+**Learn more:** [PostgreSQL docs: Triggers](https://www.postgresql.org/docs/16/plpgsql-trigger.html)
+
+### Transactions (all-or-nothing)
+**What:** a group of SQL statements that Postgres saves together at `COMMIT`, or not at all if anything fails (`ROLLBACK`). That's why `record_event()` doesn't commit: the caller changes the record, adds the audit row, then commits once. A crash in between leaves neither change behind.
+**Here:** backend/app/core/audit/service.py `record_event()` (adds, never commits). Step 3c's `change_status()` uses it.
+**Learn more:** [PostgreSQL tutorial: Transactions](https://www.postgresql.org/docs/16/tutorial-transactions.html)
+
 ## 3. Decisions
 
 | Date | Decision | Alternatives considered | Why |
@@ -150,6 +174,9 @@ One short explanation per concept, where it lives in this codebase, and one free
 | 2026-10-18 | No refresh tokens yet | short access token + long refresh token | Keeps step 2 small. Users log in again after 60 minutes. Revisit with the frontend. |
 | 2026-10-18 | Login takes a JSON body | OAuth2 password form (`OAuth2PasswordRequestForm`) | The form version needs another library (`python-multipart`). JSON is all the Next.js frontend needs. |
 | 2026-10-18 | `JWT_SECRET` must be at least 32 characters, or the app won't start | accept anything | A short secret can be brute-forced, which would let someone forge logins as anyone. |
+| 2026-10-18 | Append-only enforced by a database trigger | only "be careful in Python"; `REVOKE UPDATE, DELETE` permissions | A trigger protects against every client, and works even while the app connects as the table owner. Revoking permissions is added before go-live (see Open questions). |
+| 2026-10-18 | One generic audit table (`entity_type` + `entity_id` + JSON `details`) | a separate history table per record type | Every module can log to it, and "show everything user X did" is one query. |
+| 2026-10-18 | `record_event()` never commits | commit inside it | So a change and its audit row are always saved in the same transaction. |
 
 ## 4. Open questions
 
@@ -159,10 +186,22 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 - [ ] **Staff password policy:** does the Government of The Gambia have an ICT policy we must follow (length, expiry, two-factor)?
 - [ ] **Session length:** is 60 minutes before re-login acceptable for officers? (`ACCESS_TOKEN_MINUTES` in settings.)
 - [ ] **Security to-do before going live (not a Ministry question):** rate-limit `/auth/login` against password guessing, and serve the API only over HTTPS. Tokens sent over plain HTTP can be stolen.
+- [ ] **Security to-do before going live:** the app connects as the database owner (`POSTGRES_USER`), who can disable triggers. Create a separate app database user with no rights to `ALTER` tables or to `UPDATE`/`DELETE` on `core.audit_log`.
+- [ ] **Audit retention:** how long must audit records be kept under Gambian public records rules?
 
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 3a
+1. Why doesn't `record_event()` call `session.commit()`?
+2. Someone with psql access runs `UPDATE core.audit_log SET actor_user_id = 3 WHERE id = 10`. What happens? Is there still a way around it?
+3. Why is `entity_id` a text column and not a number?
+
+#### Show answers
+1. So the change and its audit row are committed together, in one transaction. If `record_event()` committed on its own, a crash between the two commits could leave an audit row for a change that never happened, or a change with no audit row.
+2. The trigger `audit_log_no_update_delete` raises an error and the update is cancelled. The way around it is that the table owner or a superuser can disable the trigger. That's why the go-live to-do is to connect the app as a less-privileged database user.
+3. Different modules may use different kinds of keys (numbers, reference codes like `ETLS-2026-0001`). Text can hold any of them.
 
 ### Step 2c
 1. An officer is dismissed at 10:00 and an admin sets `is_active = false`. Their token was issued at 9:30 and expires at 10:30. Can they still use the API at 10:05? Why?
