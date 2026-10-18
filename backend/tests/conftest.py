@@ -9,9 +9,12 @@ mark a test module with `pytestmark = pytest.mark.anyio`.
 """
 
 import asyncio
+from pathlib import Path
 
 import asyncpg
 import pytest
+from alembic import command
+from alembic.config import Config
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
@@ -20,6 +23,8 @@ from sqlalchemy.pool import NullPool
 from app.core.config import settings
 from app.db.session import get_session
 from app.main import app
+
+BACKEND_DIR = Path(__file__).resolve().parent.parent
 
 _dev_url = make_url(settings.database_url)
 TEST_DATABASE_URL = _dev_url.set(database=f"{_dev_url.database}_test")
@@ -34,8 +39,8 @@ def anyio_backend():
     return "asyncio"
 
 
-async def _create_test_database() -> None:
-    # CREATE DATABASE can't run inside a transaction, so use a plain asyncpg
+async def _recreate_test_database() -> None:
+    # CREATE/DROP DATABASE can't run inside a transaction, so use a plain asyncpg
     # connection to the built-in "postgres" database.
     conn = await asyncpg.connect(
         user=TEST_DATABASE_URL.username,
@@ -45,20 +50,36 @@ async def _create_test_database() -> None:
         database="postgres",
     )
     try:
-        exists = await conn.fetchval(
-            "SELECT 1 FROM pg_database WHERE datname = $1", TEST_DATABASE_URL.database
-        )
-        if not exists:
-            # The name comes from our own config, not user input, so building the
-            # SQL string here is safe. CREATE DATABASE doesn't accept $1 parameters.
-            await conn.execute(f'CREATE DATABASE "{TEST_DATABASE_URL.database}"')
+        # The name comes from our own config, not user input, so building the SQL
+        # string here is safe. These statements don't accept $1 parameters.
+        name = TEST_DATABASE_URL.database
+        await conn.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+        await conn.execute(f'CREATE DATABASE "{name}"')
     finally:
         await conn.close()
 
 
+def _alembic_config() -> Config:
+    """Alembic config pointed at the test database instead of the dev one."""
+    cfg = Config(str(BACKEND_DIR / "alembic.ini"))
+    cfg.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
+    url = TEST_DATABASE_URL.render_as_string(hide_password=False)
+    # Alembic's config file format treats % specially, so double it.
+    cfg.set_main_option("sqlalchemy.url", url.replace("%", "%%"))
+    return cfg
+
+
+@pytest.fixture(scope="session")
+def alembic_cfg() -> Config:
+    return _alembic_config()
+
+
 @pytest.fixture(scope="session", autouse=True)
-def test_database():
-    asyncio.run(_create_test_database())
+def test_database(alembic_cfg):
+    # Rebuilt from scratch every run, so the test database always matches the
+    # migrations exactly, even after you edit one during development.
+    asyncio.run(_recreate_test_database())
+    command.upgrade(alembic_cfg, "head")
 
 
 @pytest.fixture
