@@ -16,6 +16,25 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 3b — Workflow definitions as data (2026-10-18)
+**Built:** three tables that *describe* a workflow. `workflows` holds the process and the role that may start one. `workflow_statuses` holds its steps, with one marked initial and some marked final. `workflow_transitions` holds the allowed moves, each with the role that may make it. The database refuses a second initial status and refuses a move that points into another workflow's status. Migration `0005` seeds a placeholder ETLS workflow `[CONFIRM]`. Tests check that every workflow has exactly one start, no dead ends, no moves out of final statuses, and no unreachable statuses.
+**Files:** backend/alembic/versions/0004_workflow_definitions.py, backend/alembic/versions/0005_seed_etls_workflow.py, backend/app/core/workflow/models.py, backend/tests/core/test_workflow_definitions.py
+**Try it:**
+- `docker compose exec api alembic upgrade head`
+- See the ETLS moves as a table:
+  ```
+  docker compose exec db psql -U motie -d motie -c "SELECT f.code AS from_status, t.code AS to_status, r.code AS role, x.name FROM core.workflow_transitions x JOIN core.workflow_statuses f ON f.id = x.from_status_id JOIN core.workflow_statuses t ON t.id = x.to_status_id JOIN core.roles r ON r.id = x.required_role_id ORDER BY x.id"
+  ```
+- `docker compose exec api pytest tests/core/test_workflow_definitions.py -v`
+**The placeholder ETLS workflow:**
+```
+submitted --(records_officer: Register and forward)--> with_minister
+with_minister --(minister, or permanent_secretary)--> with_directorate
+with_directorate --(director: Assign to an officer)--> with_officer
+with_officer --(officer)--> approved | rejected | back to with_directorate
+```
+**New concepts:** State machine, Composite foreign keys, Partial unique index, Data migrations
+
 ### Step 3a — Append-only audit log (2026-10-18)
 **Built:** `core.audit_log`, one row per event: who, what action, which record, when, and details as JSON. Postgres triggers reject every `UPDATE`, `DELETE` and `TRUNCATE` on it, so history can't be rewritten even with raw SQL. `record_event()` adds a row to the *current* transaction without committing, so the change and its audit row are saved together. `history()` lists a record's events, oldest first.
 **Files:** backend/alembic/versions/0003_audit_log.py, backend/app/core/audit/models.py, backend/app/core/audit/service.py, backend/app/models.py, backend/tests/core/test_audit.py
@@ -144,6 +163,26 @@ One short explanation per concept, where it lives in this codebase, and one free
 **Here:** backend/app/core/audit/service.py `record_event()` (adds, never commits). Step 3c's `change_status()` uses it.
 **Learn more:** [PostgreSQL tutorial: Transactions](https://www.postgresql.org/docs/16/tutorial-transactions.html)
 
+### State machine
+**What:** a model with a fixed set of *states* (our statuses) and a fixed set of allowed *transitions* between them. Anything not on the list is impossible. A file can't jump from "Submitted" to "Approved" just because someone sent that request. Storing the states and transitions in tables ("workflows are data") means a new Ministry process is new rows, not new code.
+**Here:** the tables are in backend/alembic/versions/0004_workflow_definitions.py and the classes in backend/app/core/workflow/models.py. Step 3c's `change_status()` enforces them.
+**Learn more:** [Wikipedia: Finite-state machine](https://en.wikipedia.org/wiki/Finite-state_machine). Read the turnstile example.
+
+### Composite foreign keys
+**What:** a foreign key over *two* columns together. `workflow_transitions(workflow_id, to_status_id)` must match a row in `workflow_statuses(workflow_id, id)`. A plain key on `to_status_id` alone would accept *any* status, even one from a different workflow. The pair forces both to agree.
+**Here:** `workflow_transitions_from_fkey` and `workflow_transitions_to_fkey` in backend/alembic/versions/0004_workflow_definitions.py. They need the matching `UNIQUE (workflow_id, id)` on `workflow_statuses`.
+**Learn more:** [PostgreSQL docs: Foreign keys](https://www.postgresql.org/docs/16/ddl-constraints.html#DDL-CONSTRAINTS-FK)
+
+### Partial unique index
+**What:** a unique rule that applies only to rows matching a condition. `UNIQUE (workflow_id) WHERE is_initial` means a workflow can have many statuses, but only one of them with `is_initial = true`.
+**Here:** `workflow_statuses_one_initial` in backend/alembic/versions/0004_workflow_definitions.py.
+**Learn more:** [PostgreSQL docs: Partial indexes](https://www.postgresql.org/docs/16/indexes-partial.html)
+
+### Data migrations
+**What:** a migration that inserts or changes *rows* rather than table structure. We use one to load the ETLS workflow, so every database gets exactly the same definition. Rows are looked up by `code`, never by `id`, because ids can differ between databases.
+**Here:** backend/alembic/versions/0005_seed_etls_workflow.py. Also the role list at the end of 0002.
+**Learn more:** [Alembic cookbook: data migrations](https://alembic.sqlalchemy.org/en/latest/cookbook.html#data-migrations-general-techniques)
+
 ## 3. Decisions
 
 | Date | Decision | Alternatives considered | Why |
@@ -177,6 +216,11 @@ One short explanation per concept, where it lives in this codebase, and one free
 | 2026-10-18 | Append-only enforced by a database trigger | only "be careful in Python"; `REVOKE UPDATE, DELETE` permissions | A trigger protects against every client, and works even while the app connects as the table owner. Revoking permissions is added before go-live (see Open questions). |
 | 2026-10-18 | One generic audit table (`entity_type` + `entity_id` + JSON `details`) | a separate history table per record type | Every module can log to it, and "show everything user X did" is one query. |
 | 2026-10-18 | `record_event()` never commits | commit inside it | So a change and its audit row are always saved in the same transaction. |
+| 2026-10-18 | Transitions name a required *role* for now | name a *position* (e.g. "Director of Trade") | CLAUDE.md says approvals attach to positions, with delegation for absences. Positions need their own tables. Until then, roles keep the engine working, and switching the column later is one migration. |
+| 2026-10-18 | The PS gets the Minister's move as a second transition row | delegation | Placeholder for "PS when the Minister is away". With real delegation, the PS row goes and the Minister delegates when absent. |
+| 2026-10-18 | One role may start a workflow (`workflows.start_role_id`) | a link table allowing several roles | Enough for ETLS. Becomes a table if Records also needs to open cases for walk-in applicants (see Open questions). |
+| 2026-10-18 | The ETLS definition is seeded in the shared migration chain | a separate `etls` module migration | There's only one Alembic chain so far. When the `etls` schema arrives, its data can move with it. |
+| 2026-10-18 | Database constraints guard the workflow's structure; tests guard its logic | everything in Python | Constraints (one initial status, statuses from the same workflow) protect against any client. Rules like "no dead ends" need a whole-graph check, which is easier as a test. |
 
 ## 4. Open questions
 
@@ -188,10 +232,23 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 - [ ] **Security to-do before going live (not a Ministry question):** rate-limit `/auth/login` against password guessing, and serve the API only over HTTPS. Tokens sent over plain HTTP can be stolen.
 - [ ] **Security to-do before going live:** the app connects as the database owner (`POSTGRES_USER`), who can disable triggers. Create a separate app database user with no rights to `ALTER` tables or to `UPDATE`/`DELETE` on `core.audit_log`.
 - [ ] **Audit retention:** how long must audit records be kept under Gambian public records rules?
+- [ ] **ETLS workflow steps:** is Submitted → Minister → Directorate → Officer → Approved/Rejected the real path? Are there steps such as "returned to applicant for more documents", a fee payment, or an inspection? See backend/alembic/versions/0005_seed_etls_workflow.py.
+- [ ] **Who signs the ETLS approval:** the subject officer, the Director, or the Minister/PS?
+- [ ] **Who may open an ETLS case:** only the applicant online, or can Records register walk-in applications too?
 
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 3b
+1. The Ministry says Directors may now reject a file directly from "With the Directorate". What do you change: Python code, or something else?
+2. Why does `workflow_transitions` reference `(workflow_id, to_status_id)` together instead of just `to_status_id`?
+3. In the seed migration, what happens if someone misspells `'with_officer'` as `'with_oficer'` in a transition row, and what catches it?
+
+#### Show answers
+1. Something else: a new migration that inserts one row into `core.workflow_transitions` (`with_directorate` → `rejected`, role `director`). No Python changes, because workflows are data.
+2. So a transition can only point to a status in its *own* workflow. With `to_status_id` alone, a move could lead into another process's status, and a case would end up stuck in a workflow it doesn't belong to.
+3. The `JOIN` on the status code finds no match, so that row is silently left out. `test_etls_workflow_is_seeded` expects exactly 7 transitions and fails. `test_every_workflow_is_well_formed` would probably also report a dead end.
 
 ### Step 3a
 1. Why doesn't `record_event()` call `session.commit()`?

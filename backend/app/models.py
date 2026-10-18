@@ -6,3 +6,4 @@ Alembic imports this file so it can see all tables.
 
 from app.core.audit import models as audit_models  # noqa: F401
 from app.core.identity import models as identity_models  # noqa: F401
+from app.core.workflow import models as workflow_models  # noqa: F401
