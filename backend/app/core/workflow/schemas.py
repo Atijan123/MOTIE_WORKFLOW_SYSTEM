@@ -65,3 +65,22 @@ class DelegationOut(BaseModel):
     created_by: int
     created_at: datetime
     revoked_at: datetime | None
+
+
+class RecordAbsenceRequest(BaseModel):
+    # Who is away; leave empty for yourself. Someone else needs the absence_recorder role.
+    user_id: int | None = None
+    starts_on: date  # both days included
+    ends_on: date
+    reason: str | None = Field(default=None, max_length=500)
+
+
+class AbsenceOut(BaseModel):
+    id: int
+    user_id: int
+    starts_on: date
+    ends_on: date
+    reason: str | None
+    recorded_by: int
+    created_at: datetime
+    cancelled_at: datetime | None

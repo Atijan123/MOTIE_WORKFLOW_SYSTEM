@@ -24,7 +24,9 @@ _ERROR_STATUS = {
     service.NotPermitted: status.HTTP_403_FORBIDDEN,
     service.TransitionNotAllowed: status.HTTP_409_CONFLICT,  # valid request, wrong moment
     service.AlreadyRevoked: status.HTTP_409_CONFLICT,
+    service.AlreadyCancelled: status.HTTP_409_CONFLICT,
     service.InvalidDelegation: status.HTTP_422_UNPROCESSABLE_ENTITY,  # breaks a rule, don't retry
+    service.InvalidAbsence: status.HTTP_422_UNPROCESSABLE_ENTITY,
 }
 
 

@@ -16,6 +16,31 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 5c — Absence records (2026-10-19)
+**Built:** `core.absences`: a person who holds a post is away from one date to another, both days included. Who may record one:
+- the person themselves;
+- someone with the new `absence_recorder` role, on their behalf. That role is the `[CONFIRM]` placeholder for "an authorised officer".
+
+The audit row's actor is whoever recorded it. Its details hold `absent_user_id`, `recorded_by`, `on_behalf`, and the posts the person held at the time. Other rules:
+- No back-dating.
+- Only post holders can be marked absent.
+- An absence is ended early by *cancelling* it (the absent person or a recorder may). The app can't change its dates (a column-level grant, as for delegations).
+
+Endpoints:
+- `POST /absences` records one; leave out `user_id` for yourself.
+- `GET /absences` lists your own, or everyone's if you're a recorder.
+- `POST /absences/{id}/cancel` ends one.
+
+Absences don't change who may act yet; that's step 5d.
+
+**Files:** backend/alembic/versions/0014_absences.py, backend/app/core/workflow/models.py (`Absence`), backend/app/core/workflow/absence.py, backend/app/core/workflow/absence_router.py, backend/app/core/workflow/errors.py (`InvalidAbsence`, `AlreadyCancelled`), backend/app/core/workflow/schemas.py, backend/app/core/workflow/router.py, backend/app/main.py, backend/tests/core/test_absences.py, backend/tests/core/test_db_privileges.py
+**Try it:**
+- `docker compose run --rm tools alembic upgrade head`
+- Create a recorder: `docker compose exec api python -m app.core.identity.cli create-user --email ps.secretary@motie.gov.gm --name "Private Secretary" --role officer --role absence_recorder`
+- Log in as the recorder and `POST /absences` with `{"user_id": <the Minister's user id>, "starts_on": "<today>", "ends_on": "<today + 4 days>", "reason": "ECOWAS summit"}`. Then look at the audit row: `docker compose exec db psql -U motie -d motie -c "SELECT actor_user_id, action, details FROM core.audit_log WHERE entity_type = 'absence'"`.
+- `docker compose run --rm tools pytest tests/core/test_absences.py -v`
+**New concepts:** none. The pattern (dated record, cancel instead of delete, column-level grant) is the one from Delegation (acting on behalf of) and Column-level privileges.
+
 ### Step 5b — Succession orders (2026-10-19)
 **Built:** `core.succession_orders`, the Ministry's standing rule for who is next in line when a post's holder is away. Each row says "when *post* is absent, *successor* is next, at *rank*", for every workflow or for one. Migration `0013` seeds:
 
@@ -535,6 +560,11 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-19 | A workflow-specific line replaces the post's general line for that workflow | add the two together | "For ETLS the Director is covered by DPS Admin & Finance" is a complete answer. Adding lists together would make the order hard to predict. |
 | 2026-10-19 | The PS's line (PS → DPS) is seeded too | seed only the Minister's line | It follows from the confirmed general chain. Without it, files would stop at "With the PS" whenever the PS is away. |
 | 2026-10-19 | Succession rules are loaded by migrations; the app only reads them | an admin screen | Same rule as workflows and the org chart: rare changes, reviewed like code. |
+| 2026-10-19 | An absence belongs to a person, not to a post | record "the Minister's post is unattended" | People go on leave, not posts. A person with two posts is away from both, and the one record shows it. |
+| 2026-10-19 | "Authorised officer" is anyone with an `absence_recorder` role | the Minister's office staff only; any staff member; admins | Marking someone absent can hand their step to someone else, so it must be a deliberate, named right. A role is easy to give the right people once the Ministry says who. |
+| 2026-10-19 | The audit actor is the person who recorded the absence, with `recorded_by` and `absent_user_id` in the details | the absent person as actor | The log must show who actually did it. If the PS could mark the Minister absent unnoticed, they could take the Minister's step. |
+| 2026-10-19 | No back-dating, no maximum length | a maximum like delegations' 90 days | Back-dating could make an earlier action look covered. Absences such as sick or maternity leave can be long, and they are only facts, not a handing-over of power. |
+| 2026-10-19 | Only people who hold a post can be marked absent | anyone | Absence only matters for who may act for a post. Refusing others catches mistakes such as picking the wrong user. |
 
 ## 4. Open questions
 
@@ -553,6 +583,7 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 - [ ] **The PS acting for the Minister:** confirm the PS may make *every* Minister's move during an absence (that's what an unscoped delegation allows), or only some, e.g. ETLS only (`"workflow": "etls_application"`).
 - [ ] **Which DPS covers the Minister's step when both the Minister and the PS are away?** Placeholder: DPS Administration and Finance, the only DPS post we know of. See backend/alembic/versions/0013_succession_orders.py.
 - [ ] **The PS's own line:** we assumed the general chain means DPS Admin & Finance also covers the PS. Confirm.
+- [ ] **Who may record an absence on someone's behalf?** Placeholder: anyone with the `absence_recorder` role (e.g. the Minister's private secretary, HR). Should it instead be tied to posts, e.g. "the Minister's office may record the Minister's absences"? See backend/app/core/workflow/absence.py.
 - [ ] **Audit retention:** how long must audit records be kept under Gambian public records rules?
 - [ ] **ETLS after the Director signs:** what does the officer do with the file (issue the certificate, notify the applicant)? Who may reject an application, and at which step? Are there steps such as "returned to applicant for more documents", a fee payment or an inspection? See the officer's moves in backend/alembic/versions/0012_confirmed_etls_route.py.
 - [ ] **Who may open an ETLS case:** only the applicant online, or can Records register walk-in applications too?
@@ -563,6 +594,16 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 5c
+1. The PS sends `POST /absences` with the Minister's `user_id`. What happens, and why does it matter?
+2. The Minister's private secretary (role `absence_recorder`) marks the Minister absent. Who is `actor_user_id` in the audit row, and where does the Minister appear?
+3. The Minister comes back two days early. What should happen to the absence, and why can't the app just change `ends_on`?
+
+#### Show answers
+1. **403** "You can only record your own absence." The PS has no `absence_recorder` role. It matters because marking the Minister absent would let the PS take the Minister's step through succession (step 5d).
+2. `actor_user_id` is the private secretary: the log records who actually did it. The Minister appears as `absent_user_id` in `details`, with `on_behalf: true` and `recorded_by` set to the secretary's id.
+3. Cancel it: `POST /absences/{id}/cancel`, by the Minister or a recorder. That sets `cancelled_at` and writes an audit row. The app may only update `cancelled_at` and `cancelled_by` (migration 0014), so dates stay as they were when the absence was used to justify a move.
 
 ### Step 5b
 1. The Ministry adds a rule: for ETLS only, the Minister is covered by the DPS straight away. Which rows does `succession_order()` return for the Minister on an ETLS case, and on a case of another workflow?

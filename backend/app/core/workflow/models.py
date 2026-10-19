@@ -223,3 +223,32 @@ class SuccessionStep(Base):
     workflow_id: Mapped[int | None] = mapped_column(SmallInteger, ForeignKey("core.workflows.id"))
     rank: Mapped[int] = mapped_column(SmallInteger)
     successor_position_id: Mapped[int] = mapped_column(SmallInteger, ForeignKey("core.positions.id"))
+
+
+class Absence(Base):
+    """A person away from work for a date range. Created by alembic/versions/0014_absences.py.
+
+    Record and cancel only through workflow/absence.py, which checks who may do
+    it and writes the audit rows.
+    """
+
+    __tablename__ = "absences"
+    __table_args__ = (
+        CheckConstraint("starts_on <= ends_on", name="absences_dates_in_order"),
+        CheckConstraint(
+            "(cancelled_at IS NULL) = (cancelled_by IS NULL)", name="absences_cancelled_complete"
+        ),
+        Index("absences_user_idx", "user_id", "ends_on"),
+        {"schema": "core"},
+    )
+    __mapper_args__ = {"eager_defaults": True}
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("core.users.id"))
+    starts_on: Mapped[date] = mapped_column(Date)
+    ends_on: Mapped[date] = mapped_column(Date)
+    reason: Mapped[str | None] = mapped_column(Text)
+    recorded_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("core.users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancelled_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("core.users.id"))

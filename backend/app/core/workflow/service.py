@@ -13,7 +13,9 @@ from app.core.audit.service import record_event
 from app.core.identity.models import User
 from app.core.workflow.delegation import active_delegations_to
 from app.core.workflow.errors import (  # noqa: F401  (re-exported: callers use service.NotFound etc.)
+    AlreadyCancelled,
     AlreadyRevoked,
+    InvalidAbsence,
     InvalidDelegation,
     NotFound,
     NotPermitted,

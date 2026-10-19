@@ -27,3 +27,11 @@ class InvalidDelegation(WorkflowError):
 
 class AlreadyRevoked(WorkflowError):
     pass
+
+
+class InvalidAbsence(WorkflowError):
+    """The absence breaks a rule (dates, or the person holds no post)."""
+
+
+class AlreadyCancelled(WorkflowError):
+    pass

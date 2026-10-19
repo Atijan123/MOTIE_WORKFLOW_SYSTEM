@@ -64,6 +64,9 @@ async def test_app_user_cannot_skip_triggers_with_replication_mode(db_session):
         # The app may revoke a delegation, but never move its dates or posts.
         "UPDATE core.delegations SET ends_on = ends_on + 30",
         "DELETE FROM core.delegations",
+        "UPDATE core.absences SET ends_on = ends_on + 30",
+        "DELETE FROM core.absences",
+        "INSERT INTO core.succession_orders (position_id, rank, successor_position_id) VALUES (1, 9, 2)",
     ],
     ids=[
         "create-table",
@@ -74,6 +77,9 @@ async def test_app_user_cannot_skip_triggers_with_replication_mode(db_session):
         "edit-org-chart",
         "stretch-delegation",
         "delete-delegation",
+        "stretch-absence",
+        "delete-absence",
+        "add-succession-rule",
     ],
 )
 async def test_app_user_cannot_do_what_it_was_never_granted(db_session, statement):
