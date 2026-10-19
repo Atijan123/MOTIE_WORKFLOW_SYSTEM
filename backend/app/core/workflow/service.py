@@ -20,9 +20,12 @@ from app.core.workflow.errors import (  # noqa: F401  (re-exported: callers use 
     CaseBlocked,
     InvalidAbsence,
     InvalidDelegation,
+    InvalidDocument,
     NotFound,
     NotPermitted,
     TransitionNotAllowed,
+    UnsupportedFileType,
+    UploadTooLarge,
     WorkflowError,
 )
 from app.core.workflow.models import Case, Delegation, Workflow, WorkflowStatus, WorkflowTransition

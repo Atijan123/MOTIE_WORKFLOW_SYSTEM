@@ -16,6 +16,37 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 6c — Documents and data-driven requirements (2026-10-19)
+**Built:** a shared core service, backend/app/core/documents/, with three tables (migration `0017`):
+- `document_types`: the kinds of document.
+- `document_requirements`: which documents a workflow needs, each with an optional **condition**.
+- `case_documents`: one row per uploaded file. The bytes are on disk, in the new `documents` volume.
+
+**The cement rule is a row, not code:** `{"field": "product", "op": "contains", "value": "cement"}`. The core tests it against *facts* the module supplies, because the core can't read ETLS tables:
+- The ETLS module registers `facility_letter_facts()` (product, unit, exporter country) with `facts.register(...)`.
+- Only `equals` and `contains` exist (text compared ignoring case). A `CHECK` constraint refuses any other shape, and nothing is ever `eval()`-ed.
+- A rule naming a fact the module doesn't supply fails closed: the document counts as required.
+
+**Facility letter documents:** business registration, annual returns certificate, certificate of origin, invoice and export declaration are always required. A receipt is required when the product contains "cement" `[CONFIRM]` which receipt.
+
+**Uploads, safely:**
+- `POST /cases/{id}/documents/{type}?filename=...` takes the file as the raw request body, so no new library (your choice).
+- It streams to disk while counting and hashing (SHA-256). More than 10 MB (`MAX_UPLOAD_BYTES`) gives 413, and the partial file is deleted.
+- The file type is decided by the file's first bytes (PDF, PNG, JPEG only, otherwise 415), never by the name or the `Content-Type` the browser claims.
+- On disk the file gets a random name, so the user's filename can't point anywhere (`../../etc/passwd` is stored for display as `passwd`).
+- Only the case's applicant and staff can upload or download (others get 404). Nothing can be added to a closed case.
+- Downloads are sent as `attachment` with `nosniff`.
+- `GET /cases/{id}/documents` is the checklist: what applies, what's missing, and every upload (re-uploads add a newer version; old ones are kept).
+
+**Files:** backend/alembic/versions/0017_documents.py, backend/app/core/documents/ (`models.py`, `conditions.py`, `facts.py`, `storage.py`, `service.py`, `router.py`), backend/app/core/config.py (`DOCUMENT_STORAGE_DIR`, `MAX_UPLOAD_BYTES`), backend/app/modules/etls/service.py (`facility_letter_facts()`), docker-compose.yml (`documents` volume), backend/tests/modules/etls/test_documents.py, backend/tests/conftest.py (`document_storage`: each test gets a temporary folder), backend/tests/support.py (`upload()`, sample `PDF`/`PNG`/`JPEG` bytes)
+**Try it:**
+- `docker compose up -d` (adds the volume to the API), then `docker compose run --rm tools alembic upgrade head`.
+- Submit a facility letter with `"product": "Portland cement"`, then `GET /cases/{id}/documents`: `cement_receipt` has `applies: true`.
+- Upload with curl: `curl -X POST "localhost:8000/cases/1/documents/invoice?filename=invoice.pdf" -H "Authorization: Bearer <token>" --data-binary @invoice.pdf`. Then try a `.txt` file renamed to `.pdf`: 415.
+- `docker compose run --rm tools pytest tests/modules/etls/test_documents.py -v`
+- **Note:** while testing this step I made a real user (`smoke-applicant@test.gm`), case 1 and one file in your *dev* database. They can't be deleted cleanly because the case has audit rows, so they'll stay in dev.
+**New concepts:** Rules as data (a small condition language), Safe file uploads
+
 ### Step 6b — Case flags and the duplicate certificate check (2026-10-19)
 **Built:**
 - **Case flags (core):** `core.case_flags`. A flag is addressed to a post. While a *blocking* flag is open, `change_status()` refuses every move with **409** "This case is on hold until these are resolved: ...". A holder of the flag's post resolves it with a written reason. Raising and resolving are both written to the case's audit history. Staff see `on_hold` on `GET /cases/{id}` (it's `null` for applicants), and `GET /cases/{id}/flags` lists the flags.
@@ -560,6 +591,21 @@ One short explanation per concept, where it lives in this codebase, and one free
 **Here:** `_earlier_uses()` in backend/app/modules/etls/service.py. `test_two_submissions_at_the_same_moment_cannot_both_slip_through` holds each transaction open after the check. Without the lock, both submissions go through unflagged; we checked by removing it.
 **Learn more:** [PostgreSQL docs: Advisory locks](https://www.postgresql.org/docs/16/explicit-locking.html#ADVISORY-LOCKS)
 
+### Rules as data (a small condition language)
+**What:** instead of `if product == "cement": require receipt` in Python, the rule is a row: which document, and a condition. A new rule is a migration, not a code change, and anyone can read the rules from the table. The danger is letting data run arbitrary code, so the "language" is tiny on purpose: one field, one of two operators, one value. The database refuses anything else. The core gets the facts to test from the module through a registered function, so it never needs to know what a facility letter is (this is called *dependency inversion*: the core defines the hook, the module plugs into it).
+**Here:** backend/app/core/documents/conditions.py `holds()`, backend/app/core/documents/facts.py `register()`/`facts_for()`, the `document_requirements_condition_shape` check in backend/alembic/versions/0017_documents.py, and `facility_letter_facts()` in backend/app/modules/etls/service.py.
+**Learn more:** [Martin Fowler: Rules Engine](https://martinfowler.com/bliki/RulesEngine.html). It's also a warning about letting these grow too big.
+
+### Safe file uploads
+**What:** an upload is the easiest way to get something nasty onto a server. The rules we follow:
+- Limit the size while reading, not after.
+- Decide the type from the file's own first bytes ("magic numbers"), never from its name or the browser's claim.
+- Never use the user's filename in a path: store under a random name, and keep the cleaned-up name for display only.
+- Keep a checksum, to prove later that the file hasn't changed.
+- Serve files back as downloads (`attachment`, `nosniff`), so a browser never runs them as part of our site.
+**Here:** backend/app/core/documents/storage.py `save()` and `path_for()`, `clean_filename()` in backend/app/core/documents/service.py, `download_document()` in backend/app/core/documents/router.py.
+**Learn more:** [OWASP File Upload Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/File_Upload_Cheat_Sheet.html)
+
 ## 3. Decisions
 
 ### Confirmed by the Ministry
@@ -689,6 +735,14 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-19 | Numbers compared normalised (upper case, spaces removed) | exact text | "SN-CO 42" and "sn-co42" are the same paper certificate; exact matching would miss the easiest way round the check. |
 | 2026-10-19 | Advisory lock per number for the duplicate check | a separate registry table with a unique key; `SERIALIZABLE` transactions | No second copy of the numbers to keep in step, and no retry logic. The lock lasts only while one submission is saved. |
 | 2026-10-19 | The downgrade test uses its own empty database | clean up every race test's committed rows | Downgrades that refuse to delete statuses still in use are correct behaviour. The test should prove the migrations reverse, not depend on what other tests left behind. |
+| 2026-10-19 | Uploads are the raw request body, one file per request | `python-multipart` form uploads | Chosen by you. No new library; a Next.js `fetch()` sends a file body directly. |
+| 2026-10-19 | Documents are a core service; requirements, conditions and facts are generic | ETLS-only document tables | Every Ministry process has required documents. The module only supplies facts. |
+| 2026-10-19 | Conditions are a tiny JSON language (`equals`, `contains`) checked by a database constraint | Python expressions in the database; one hard-coded `if` for cement | Data-driven, as you asked, without letting data run code. Add operators only when a real rule needs them. |
+| 2026-10-19 | The cement rule matches "cement" anywhere in the product text | an exact product name | The product is free text for now. It's a placeholder: it would also match "cement mixer". A product list would make it exact. |
+| 2026-10-19 | Files on a local Docker volume (`/data/documents`), random names, SHA-256 kept | store files in Postgres; object storage (S3-like) | Simple on one Ministry server, and it keeps the database small. `storage.py` is the only code touching the disk, so moving to object storage later changes one file. |
+| 2026-10-19 | Accept only PDF, PNG and JPEG, detected from the first bytes; 10 MB limit | accept anything; trust `Content-Type` | Scans of official papers come as these. Anything else (Office files, scripts) is a risk we don't need yet. |
+| 2026-10-19 | Re-uploading adds a newer version; nothing is deleted | replace the old file | Same rule as the audit log: what someone submitted stays on record. |
+| 2026-10-19 | The applicant and staff may upload, until the case is closed | applicant only; only while "Submitted" | Records may need to add a scan of an original. Tighten when the Ministry says. |
 
 ## 4. Open questions
 
@@ -716,6 +770,10 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 - [ ] **The ETLS desk post:** its real title and department (placeholder: "ETLS Desk Officer", Directorate of Industry and Investment).
 - [ ] **Facility letter form lists:** are there fixed lists for exporter country (ECOWAS members), unit and product? They would make checks such as the cement rule exact.
 - [ ] **Duplicate certificates:** does a number from a *rejected* case count as used? (Right now every earlier use counts.) May anyone besides the ETLS desk clear the flag?
+- [ ] **The cement receipt:** which receipt is it (e.g. a payment receipt for a cement levy)? And should cement be recognised from a product list rather than the word "cement" in free text? See backend/alembic/versions/0017_documents.py.
+- [ ] **Document type names:** are "Business registration certificate", "Annual returns certificate", "Certificate of origin", "Invoice" (commercial invoice?) and "Export declaration" the official names?
+- [ ] **Who may upload, and until when:** right now the applicant and any staff member, until the case is closed.
+- [ ] **Security to-do before going live (not a Ministry question):** scan uploads for viruses (e.g. ClamAV), back up the `documents` volume together with the database, and add a clean-up job for files left behind if the server crashes mid-upload.
 - [ ] **Who may open an ETLS case:** only the applicant online, or can Records register walk-in applications too?
 - [ ] **Who may see a case:** right now, any staff member sees every case. Should staff see only cases in their directorate, or only cases assigned to them? See `can_view()` in backend/app/core/workflow/service.py.
 - [ ] **What applicants see:** only the current status, or also the steps taken (without internal comments)? See `case_history()` in backend/app/core/workflow/router.py.
@@ -724,6 +782,16 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 6c
+1. The Ministry decides that rice imports need a phytosanitary certificate. What do you change?
+2. Someone uploads `invoice.pdf` that is really a Windows program. What happens, and which line decides?
+3. A requirement row says `{"field": "origin", "op": "equals", "value": "Mali"}`, but the facility letter module supplies no `origin` fact. Is the document required? Why that choice?
+
+#### Show answers
+1. A migration that adds a document type (`phytosanitary_certificate`) and a requirement row for `etls_facility_letter` with `{"field": "product", "op": "contains", "value": "rice"}`. No Python changes.
+2. **415**, and the partial file is deleted. `storage.save()` compares the file's first bytes with the PDF, PNG and JPEG signatures. A Windows program starts with `MZ`, so `content_type` is `None` and it raises `UnsupportedFileType`. The name and the browser's `Content-Type` are never trusted.
+3. Yes. `holds()` treats an unknown fact as "applies" and logs a warning. A typo in a rule then asks for one document too many, which someone will notice and fix. The other choice would quietly drop a required document.
 
 ### Step 6b
 1. A facility letter is submitted with certificate "gm-co 15", and an earlier case used "GM-CO15". What does the importer see, and what does the desk see?

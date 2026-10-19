@@ -43,3 +43,15 @@ class CaseBlocked(WorkflowError):
 
 class AlreadyResolved(WorkflowError):
     pass
+
+
+class InvalidDocument(WorkflowError):
+    """The document isn't one this case takes, or is empty."""
+
+
+class UploadTooLarge(WorkflowError):
+    pass
+
+
+class UnsupportedFileType(WorkflowError):
+    pass

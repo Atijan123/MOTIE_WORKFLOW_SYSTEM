@@ -44,3 +44,21 @@ def facility_letter_form(**changes) -> dict:
     }
     form.update(changes)
     return form
+
+
+# The smallest files our upload check accepts: it looks at the first bytes only.
+PDF = b"%PDF-1.7\n% test file\n"
+PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
+JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 16
+
+
+async def upload(act, user, case_id, type_code, content=PDF, filename="scan.pdf"):
+    """Upload `content` as the raw request body, as the frontend's fetch() will."""
+    return await act(
+        user,
+        "post",
+        f"/cases/{case_id}/documents/{type_code}",
+        content=content,
+        params={"filename": filename},
+        headers_extra={"Content-Type": "application/octet-stream"},
+    )

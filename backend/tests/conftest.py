@@ -97,6 +97,13 @@ def test_database():
     command.upgrade(alembic_config(TEST_DATABASE_URL.database), "head")
 
 
+@pytest.fixture(autouse=True)
+def document_storage(tmp_path, monkeypatch):
+    """Every test stores uploads in its own temporary folder, never the real volume."""
+    monkeypatch.setattr(settings, "document_storage_dir", str(tmp_path / "documents"))
+    return tmp_path / "documents"
+
+
 @pytest.fixture
 def empty_database_config() -> Config:
     """Alembic config for a fresh, empty database of its own (for the downgrade test)."""
@@ -213,7 +220,8 @@ async def people(make_user):
 def act(client, auth_headers):
     """Shortcut: `await act(user, "post", "/cases/1/status", json=...)`."""
 
-    async def _act(user, method, url, **kwargs):
-        return await getattr(client, method)(url, headers=auth_headers(user), **kwargs)
+    async def _act(user, method, url, headers_extra=None, **kwargs):
+        headers = {**auth_headers(user), **(headers_extra or {})}
+        return await getattr(client, method)(url, headers=headers, **kwargs)
 
     return _act

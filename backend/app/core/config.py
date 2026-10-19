@@ -16,5 +16,11 @@ class Settings(BaseSettings):
     jwt_secret: str = Field(min_length=32)
     access_token_minutes: int = 60
 
+    # Uploaded documents are stored here, one file per upload, under a random
+    # name. In Compose it's the "documents" volume; back it up with the database.
+    document_storage_dir: str = "/data/documents"
+    # Bigger uploads are refused (413) while they stream in, before they fill the disk.
+    max_upload_bytes: int = 10 * 1024 * 1024
+
 
 settings = Settings()

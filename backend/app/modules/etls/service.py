@@ -3,6 +3,7 @@
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.documents import facts
 from app.core.identity.models import User
 from app.core.workflow import flags
 from app.core.workflow import service as workflow
@@ -109,3 +110,19 @@ async def get_facility_letter(session: AsyncSession, case_id: int, user: User) -
     if letter is None:
         raise workflow.NotFound("Facility letter not found.")
     return letter
+
+
+async def facility_letter_facts(session: AsyncSession, case_id: int) -> dict:
+    """What document conditions may test on a facility letter case (see core documents/facts.py)."""
+    letter = await session.get(FacilityLetter, case_id)
+    if letter is None:
+        return {}
+    return {
+        "product": letter.product,
+        "unit": letter.unit,
+        "exporter_country": letter.exporter_country,
+    }
+
+
+# Registered when the module is imported (main.py imports its router).
+facts.register(FACILITY_LETTER, facility_letter_facts)

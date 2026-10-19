@@ -38,6 +38,8 @@ services:
     volumes:
       # Dev only: mount the source so edits reload without rebuilding the image.
       - ./backend:/app
+      # Uploaded documents (DOCUMENT_STORAGE_DIR). Back this up with the database.
+      - documents:/data/documents
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
@@ -70,3 +72,4 @@ services:
 
 volumes:
   pgdata:
+  documents:
