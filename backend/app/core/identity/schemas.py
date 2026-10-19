@@ -20,3 +20,4 @@ class UserOut(BaseModel):
     email: str
     full_name: str
     roles: list[str]
+    positions: list[str]  # position codes, e.g. ["director_of_trade"]

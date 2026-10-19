@@ -34,7 +34,7 @@ from sqlalchemy.pool import NullPool
 
 from app.core.config import settings
 from app.core.identity.security import create_access_token
-from app.core.identity.service import create_user
+from app.core.identity.service import assign_position, create_user
 from app.db.session import get_session
 from app.main import app
 from tests.support import TEST_PASSWORD
@@ -153,18 +153,24 @@ async def owner_session():
 
 @pytest.fixture
 def make_user(db_session):
-    """Create users in the test database: `officer = await make_user("officer")`."""
+    """Create users in the test database: `officer = await make_user("officer")`.
+
+    `positions=["trade_officer"]` also makes them a holder of those posts.
+    """
     numbers = itertools.count(1)
 
-    async def _make(*role_codes: str, email: str | None = None):
+    async def _make(*role_codes: str, email: str | None = None, positions: tuple[str, ...] = ()):
         n = next(numbers)
-        return await create_user(
+        user = await create_user(
             db_session,
             email=email or f"user{n}@test.gm",
             full_name=f"Test User {n}",
             password=TEST_PASSWORD,
             role_codes=list(role_codes),
         )
+        for code in positions:
+            await assign_position(db_session, user=user, position_code=code, actor=None)
+        return user
 
     return _make
 

@@ -12,7 +12,9 @@ pytestmark = pytest.mark.anyio
 
 
 async def test_login_returns_a_token_that_works_on_me(client, make_user):
-    user = await make_user("director", "officer", email="dir@test.gm")
+    user = await make_user(
+        "director", "officer", email="dir@test.gm", positions=["director_of_trade"]
+    )
 
     login = await client.post("/auth/login", json={"email": "DIR@test.gm", "password": TEST_PASSWORD})
     assert login.status_code == 200
@@ -25,6 +27,7 @@ async def test_login_returns_a_token_that_works_on_me(client, make_user):
         "email": "dir@test.gm",
         "full_name": user.full_name,
         "roles": ["director", "officer"],
+        "positions": ["director_of_trade"],
     }
 
 

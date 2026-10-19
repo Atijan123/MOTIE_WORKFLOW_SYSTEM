@@ -30,5 +30,9 @@ async def login(body: LoginRequest, session: AsyncSession = Depends(get_session)
 @router.get("/me", response_model=UserOut)
 async def me(user: User = Depends(get_current_user)):
     return UserOut(
-        id=user.id, email=user.email, full_name=user.full_name, roles=sorted(user.role_codes)
+        id=user.id,
+        email=user.email,
+        full_name=user.full_name,
+        roles=sorted(user.role_codes),
+        positions=sorted(user.position_codes),
     )

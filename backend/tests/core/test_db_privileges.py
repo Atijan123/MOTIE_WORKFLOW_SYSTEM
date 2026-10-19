@@ -60,8 +60,9 @@ async def test_app_user_cannot_skip_triggers_with_replication_mode(db_session):
         "DELETE FROM core.cases",
         "UPDATE core.workflow_transitions SET name = 'x'",
         "INSERT INTO core.roles (code, name) VALUES ('king', 'King')",
+        "UPDATE core.positions SET reports_to_id = NULL",
     ],
-    ids=["create-table", "delete-users", "delete-cases", "edit-workflow", "add-role"],
+    ids=["create-table", "delete-users", "delete-cases", "edit-workflow", "add-role", "edit-org-chart"],
 )
 async def test_app_user_cannot_do_what_it_was_never_granted(db_session, statement):
     with pytest.raises(DBAPIError, match="permission denied"):

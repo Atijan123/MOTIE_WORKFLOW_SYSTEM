@@ -2,11 +2,15 @@
 
 from functools import cache
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.identity.models import Role, User
+from app.core.audit.service import record_event
+from app.core.identity.models import Position, Role, User, position_holders
 from app.core.identity.security import hash_password, verify_password
+
+AUDIT_ENTITY = "user"
 
 # NIST SP 800-63B recommends length over complexity rules. 12 is a common floor
 # for staff accounts.
@@ -22,6 +26,10 @@ class UnknownRole(Exception):
 
 
 class WeakPassword(Exception):
+    pass
+
+
+class UnknownPosition(Exception):
     pass
 
 
@@ -83,3 +91,68 @@ async def authenticate(session: AsyncSession, email: str, password: str) -> User
     if not verify_password(password, user.password_hash) or not user.is_active:
         return None
     return user
+
+
+async def get_position(session: AsyncSession, code: str) -> Position:
+    position = await session.scalar(select(Position).where(Position.code == code))
+    if position is None:
+        raise UnknownPosition(f"Unknown position: {code}")
+    return position
+
+
+async def assign_position(
+    session: AsyncSession, *, user: User, position_code: str, actor: User | None
+) -> bool:
+    """Make `user` a holder of the position. Returns False if they already held it.
+
+    `actor` is who made the change (None when done from the CLI). Assigning a
+    post gives someone approval rights, so every change is audited.
+    """
+    position = await get_position(session, position_code)
+    # ON CONFLICT DO NOTHING + RETURNING: if the row already exists (even one
+    # added a moment ago by someone else), nothing is inserted and nothing comes
+    # back, so we don't write an audit row for a change that didn't happen.
+    added = await session.scalar(
+        insert(position_holders)
+        .values(position_id=position.id, user_id=user.id)
+        .on_conflict_do_nothing()
+        .returning(position_holders.c.position_id)
+    )
+    if added is None:
+        return False
+    record_event(
+        session,
+        actor=actor,
+        action="position.assigned",
+        entity_type=AUDIT_ENTITY,
+        entity_id=user.id,
+        details={"position": position.code},
+    )
+    await session.commit()
+    await session.refresh(user, ["positions"])
+    return True
+
+
+async def remove_position(
+    session: AsyncSession, *, user: User, position_code: str, actor: User | None
+) -> bool:
+    """Take the post away from `user`. Returns False if they didn't hold it."""
+    position = await get_position(session, position_code)
+    removed = await session.scalar(
+        delete(position_holders)
+        .where(position_holders.c.position_id == position.id, position_holders.c.user_id == user.id)
+        .returning(position_holders.c.position_id)
+    )
+    if removed is None:
+        return False
+    record_event(
+        session,
+        actor=actor,
+        action="position.removed",
+        entity_type=AUDIT_ENTITY,
+        entity_id=user.id,
+        details={"position": position.code},
+    )
+    await session.commit()
+    await session.refresh(user, ["positions"])
+    return True

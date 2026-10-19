@@ -16,6 +16,31 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 4b — Departments, positions and who holds them (2026-10-19)
+**Built:** three tables in `core`:
+- `departments`: the Ministry's units.
+- `positions`: posts such as "Director of Trade". Each belongs to a department and has a `reports_to_id` pointing at the post above it.
+- `position_holders`: which user holds which post.
+
+A user can hold several posts (an officer acting as Director), and a post can have several holders (several Trade Officers). Migration `0008` seeds a placeholder org chart `[CONFIRM]`. `assign_position()` and `remove_position()` change holders and write an audit row (`position.assigned` / `position.removed`) for each real change. `/auth/me` now lists your positions. Nothing uses positions for approvals yet; that's step 4c.
+
+**The placeholder org chart:**
+```
+Minister (Office of the Minister)
+└── Permanent Secretary (Office of the PS)
+    ├── Records Officer (Registry)
+    └── Director of Trade (Directorate of Trade)
+        └── Trade Officer (Directorate of Trade)
+```
+**Files:** backend/alembic/versions/0008_positions.py, backend/app/core/identity/models.py (`Department`, `Position`, `position_holders`, `User.positions`), backend/app/core/identity/service.py (`assign_position`, `remove_position`), backend/app/core/identity/cli.py, backend/app/core/identity/schemas.py, backend/app/core/identity/router.py, backend/tests/conftest.py (`make_user(..., positions=[...])`), backend/tests/core/test_positions.py, backend/tests/core/test_auth.py
+**Try it:**
+- `docker compose run --rm tools alembic upgrade head`
+- Give a user a post: `docker compose exec api python -m app.core.identity.cli assign-position --email you@motie.gov.gm --position director_of_trade`. Run it twice: the second time it says "Nothing to do". Take it away with `remove-position`.
+- Log in and call `GET /auth/me`: `positions` lists your posts.
+- See who holds what: `docker compose exec db psql -U motie -d motie -c "SELECT p.title, u.email, h.assigned_at FROM core.position_holders h JOIN core.positions p ON p.id = h.position_id JOIN core.users u ON u.id = h.user_id"`
+- `docker compose run --rm tools pytest tests/core/test_positions.py -v`
+**New concepts:** Positions vs roles, Self-referencing foreign key, `ON CONFLICT DO NOTHING ... RETURNING`
+
 ### Step 4a — Separate database users (2026-10-19)
 **Built:** the API no longer logs in to Postgres as the superuser. There are now three database users, each with one job:
 - `motie` (`POSTGRES_USER`, the superuser): only used by db/init/10-db-users.sh and to create the test database.
@@ -258,6 +283,21 @@ One short explanation per concept, where it lives in this codebase, and one free
 **Here:** the `tools` service in docker-compose.yml.
 **Learn more:** [Docker docs: docker compose run](https://docs.docker.com/reference/cli/docker/compose/run/), [Using profiles with Compose](https://docs.docker.com/compose/how-tos/profiles/)
 
+### Positions vs roles
+**What:** a *role* says what kind of user someone is: an applicant, Ministry staff, a system admin. A *position* is a post in the organisation chart, like "Director of Trade", that a person holds for a while and then hands over. Approvals belong to posts. When a new Director arrives, they take over the post, and every workflow that names the post works for them at once, without editing any workflow.
+**Here:** `Role` and `Position` in backend/app/core/identity/models.py. `User.role_codes` and `User.position_codes` give each one as a set of codes.
+**Learn more:** [Wikipedia: Role-based access control](https://en.wikipedia.org/wiki/Role-based_access_control). Our positions are close to what it calls roles; we keep "role" for the kind of user.
+
+### Self-referencing foreign key
+**What:** a column that points at another row of the *same* table. `positions.reports_to_id` holds the id of the post above, so the whole org chart (a tree) fits in one table. The top post has no boss, so its `reports_to_id` is empty. The danger is a loop (A reports to B, B reports to A), which would make "walk up the chain" run forever.
+**Here:** `positions.reports_to_id` in backend/alembic/versions/0008_positions.py. The `positions_not_own_boss` check stops the shortest loop. `test_every_chain_of_command_ends_at_one_top_post` walks up from every post to catch longer ones.
+**Learn more:** [PostgreSQL docs: recursive queries (WITH RECURSIVE)](https://www.postgresql.org/docs/16/queries-with.html#QUERIES-WITH-RECURSIVE), the usual way to walk such a tree in SQL.
+
+### `ON CONFLICT DO NOTHING ... RETURNING`
+**What:** "insert this row, unless one with the same key already exists; then tell me what you inserted". If nothing was inserted, nothing comes back. Checking first ("does the row exist?") and inserting second has a gap: two admins clicking at the same moment both see "no", and the second insert crashes. Doing it in one statement has no gap.
+**Here:** `assign_position()` in backend/app/core/identity/service.py. It writes an audit row only when the insert returned something, so the log never records a change that didn't happen. `remove_position()` does the same with `DELETE ... RETURNING`.
+**Learn more:** [PostgreSQL docs: INSERT ... ON CONFLICT](https://www.postgresql.org/docs/16/sql-insert.html#SQL-ON-CONFLICT)
+
 ## 3. Decisions
 
 | Date | Decision | Alternatives considered | Why |
@@ -310,6 +350,14 @@ One short explanation per concept, where it lives in this codebase, and one free
 | 2026-10-19 | Migrations and tests run in a one-off `tools` container; the `api` container only has `motie_app`'s password | give the API container the owner's URL too, so `docker compose exec api alembic` keeps working | A dev Compose file tends to get copied to production. Keeping the owner's password out of the server that runs all day costs a few seconds per command. |
 | 2026-10-19 | Tests run the code as `motie_app` | run tests as the owner | A missing grant then fails a test, not the Ministry server. The few tests that write workflow rows use `owner_session`. |
 | 2026-10-19 | A database from before step 4a is handed over to `motie_owner` by the same script | wipe the volume and start again | No data is lost, and a Ministry server set up the old way would need the same handover. |
+| 2026-10-19 | Roles stay, next to positions | turn roles into positions | Roles answer "what kind of user?" (applicant, staff, admin); positions answer "which post?". An applicant holds no post. |
+| 2026-10-19 | A post can have several holders; a user can hold several posts | exactly one holder per post | There are several Trade Officers, and an officer may act as Director while keeping their own post. Whether top posts must have a single holder is an open question. |
+| 2026-10-19 | When someone leaves a post, their holder row is deleted; the history is in the audit log | keep rows with start and end dates | One source of history, the same choice as for cases (step 3c). |
+| 2026-10-19 | The org chart is loaded by migrations; the app may only read it (and change who holds posts) | an admin screen to edit the chart | Same rule as workflows. Changes to the chart are rare, and they then go through review like code. |
+| 2026-10-19 | Positions live in the identity module, next to `User` | a separate `org` module | `User.positions` needs the `Position` class; two modules importing each other would be a circular import. Split it out if it grows. |
+| 2026-10-19 | `Position` has no `department` or `reports_to` relationship objects, only the id columns | `lazy="selectin"` relationships | Positions are loaded with every user, on every request. Eager relationships would add a query per level of the chain each time. |
+| 2026-10-19 | Reports-to loops are caught by a test, not a database trigger | a trigger running a recursive query on every change | Only migrations write the chart, and the tests check every migration. Add the trigger if an admin screen ever edits the chart. |
+| 2026-10-19 | Posts are assigned with the CLI for now; the audit row has no actor | an admin API endpoint | Only someone with server access can assign posts, which suits a power this strong. An admin screen can come later. |
 
 ## 4. Open questions
 
@@ -319,6 +367,9 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 - [ ] **Staff password policy:** does the Government of The Gambia have an ICT policy we must follow (length, expiry, two-factor)?
 - [ ] **Session length:** is 60 minutes before re-login acceptable for officers? (`ACCESS_TOKEN_MINUTES` in settings.)
 - [ ] **Security to-do before going live (not a Ministry question):** rate-limit `/auth/login` against password guessing, and serve the API only over HTTPS. Tokens sent over plain HTTP can be stolen.
+- [ ] **Org chart:** what are the real departments and posts, and who reports to whom? Does the Registry report to the PS? See backend/alembic/versions/0008_positions.py.
+- [ ] **Single-holder posts:** should the database refuse a second Minister, PS or Director at the same time? Right now any post can have several holders.
+- [ ] **Who may assign posts:** right now only someone with server access, through the CLI. Should an HR or admin officer do it from a screen?
 - [ ] **Audit retention:** how long must audit records be kept under Gambian public records rules?
 - [ ] **ETLS workflow steps:** is Submitted → Minister → Directorate → Officer → Approved/Rejected the real path? Are there steps such as "returned to applicant for more documents", a fee payment, or an inspection? See backend/alembic/versions/0005_seed_etls_workflow.py.
 - [ ] **Who signs the ETLS approval:** the subject officer, the Director, or the Minister/PS?
@@ -330,6 +381,16 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 4b
+1. A new Director of Trade replaces the old one. What changes in the database, and what stays the same?
+2. Why does `assign_position()` use `ON CONFLICT DO NOTHING ... RETURNING` instead of first checking whether the user already holds the post?
+3. Why does `Position` have a `reports_to_id` column but no `reports_to` relationship?
+
+#### Show answers
+1. One row in `core.position_holders` is deleted (old Director) and one is inserted (new Director), and each change adds an audit row. The positions table and, from step 4c, the workflow transitions stay the same, because they name the *post*, not the person.
+2. Check-then-insert has a gap: two admins at the same moment both see "not held", and the second insert fails on the primary key. A single statement has no gap. And since nothing comes back when the row already existed, no audit row is written for a change that didn't happen.
+3. Positions are loaded with every user on every request (`User.positions` is `selectin`). A self-referencing relationship would also load each boss, then each boss's boss, adding queries to every request. The id is enough; code that needs the chain can look it up.
 
 ### Step 4a
 1. Someone takes full control of the API process and runs `ALTER TABLE core.audit_log DISABLE TRIGGER ALL`. What happens, and why? What about `DELETE FROM core.audit_log`?
