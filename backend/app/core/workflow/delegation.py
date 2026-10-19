@@ -184,3 +184,24 @@ async def active_delegations_to(
     for delegation in result:
         delegations.setdefault(delegation.from_position_id, delegation)
     return delegations
+
+
+async def is_delegated_away(session: AsyncSession, position_id: int, workflow_id: int) -> bool:
+    """Has this post delegated itself, today, for this workflow, to anyone?
+
+    Used to give personal delegations priority over succession: if the Minister
+    chose who acts while they're away, the standing order doesn't apply.
+    """
+    on = today()
+    found = await session.scalar(
+        select(Delegation.id)
+        .where(
+            Delegation.from_position_id == position_id,
+            Delegation.revoked_at.is_(None),
+            Delegation.starts_on <= on,
+            Delegation.ends_on >= on,
+            or_(Delegation.workflow_id.is_(None), Delegation.workflow_id == workflow_id),
+        )
+        .limit(1)
+    )
+    return found is not None

@@ -16,6 +16,39 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 5d — Acting for an absent post (2026-10-19)
+**Built:** the engine now uses absences and the succession order. For each move, `_permitted()` in backend/app/core/workflow/service.py tries three bases, in this order:
+1. **Own:** you hold the post the move needs. This works even while you're marked absent (you might be working remotely).
+2. **Delegation:** the post has delegated to one of yours (step 4d).
+3. **Succession:** every holder of the needed post is absent today, *and* the post hasn't delegated to anyone (a personal delegation takes priority). `acting_successor()` in backend/app/core/workflow/succession.py walks the post's succession order and picks the **first post with a holder at work**. Only that post may act; posts further down may not.
+
+The audit row now records:
+- `as_position`: the post you acted from;
+- `on_behalf_of`: whose step it was, or `null` if it was your own. This is the "acting for" field;
+- `basis`: `own`, `delegation` or `succession`;
+- `delegation_id`;
+- `absence_ids`: the absences that justified a succession, including those of successors who were skipped because they were away too.
+
+`GET /cases/{id}` shows succession moves with `on_behalf_of` set, like delegated ones.
+
+**What this gives, with the confirmed rules:**
+| Situation | Who may do the Minister's step | Who may sign and assign (Director's step) |
+| --- | --- | --- |
+| Nobody away | Minister | Director of Industry and Investment |
+| Minister away | PS | Director |
+| Minister and PS away | DPS Admin & Finance `[CONFIRM]` | Director |
+| Director away | Minister | DPS Admin & Finance |
+| Minister away, but delegated to someone | that delegate only | Director |
+
+**Files:** backend/app/core/workflow/service.py (`PermittedMove.basis`, `.on_behalf_of`, `_permitted()`, `change_status()`), backend/app/core/workflow/succession.py (`Succession`, `acting_successor()`), backend/app/core/workflow/delegation.py (`is_delegated_away()`), backend/app/core/workflow/router.py, backend/app/core/workflow/schemas.py, backend/tests/core/test_acting_for.py
+**Try it:**
+1. Set up the ETLS users with their posts (steps 3c and 4b), including someone holding `dps_admin_finance`. Walk a case to "With the Minister".
+2. Log in as the Minister and `POST /absences` with today's dates.
+3. As the PS: `GET /cases/1` offers "Minute to the Permanent Secretary" with `"on_behalf_of": "minister"`. Make the move.
+4. `GET /cases/1/history`: the last row has `"basis": "succession"` and the Minister's absence id.
+- `docker compose run --rm tools pytest tests/core/test_acting_for.py -v`. Each Ministry scenario is one test, named after it.
+**New concepts:** Succession (acting for an absent post)
+
 ### Step 5c — Absence records (2026-10-19)
 **Built:** `core.absences`: a person who holds a post is away from one date to another, both days included. Who may record one:
 - the person themselves;
@@ -463,6 +496,11 @@ One short explanation per concept, where it lives in this codebase, and one free
 **Here:** `succession_orders_rank_key` and `succession_orders_successor_key` in backend/alembic/versions/0013_succession_orders.py. The `same-rank` case in backend/tests/core/test_succession.py only passes because of it.
 **Learn more:** [PostgreSQL docs: Unique constraints](https://www.postgresql.org/docs/16/ddl-constraints.html#DDL-CONSTRAINTS-UNIQUE-CONSTRAINTS)
 
+### Succession (acting for an absent post)
+**What:** a standing rule for who takes over a post's work while its holder is away, so files don't stop moving. It differs from delegation in who decides. With delegation, the holder decides, each time. With succession, the Ministry decided once, in advance, and it applies by itself once an absence is recorded. To stay safe, it only applies when *every* holder is recorded as away; only the first person in line who is at work may act; and the audit row lists the absences that justified it.
+**Here:** the order is `core.succession_orders` (0013), absences are `core.absences` (0014), and `acting_successor()` in backend/app/core/workflow/succession.py combines them. `_permitted()` in backend/app/core/workflow/service.py decides between own post, delegation and succession.
+**Learn more:** [Wikipedia: Order of succession](https://en.wikipedia.org/wiki/Order_of_succession). The same idea, applied to heads of state.
+
 ## 3. Decisions
 
 ### Confirmed by the Ministry
@@ -473,6 +511,10 @@ These were open questions; the Ministry has answered them. The code follows them
 - **ETLS route (2026-10-19):** Records → Minister → PS → Director of Industry and Investment. The Director signs the file and assigns it to an officer. See backend/alembic/versions/0012_confirmed_etls_route.py.
 - **Who signs ETLS files (2026-10-19):** the Director of Industry and Investment.
 - **"Assign" means minuting the file to an officer (2026-10-19).** It doesn't pass on the Director's signing power, so delegations still can't be passed on (step 4d).
+- **Delegations aren't passed on (2026-10-19).** The step 4d rule stays.
+- **When the Minister is away, the PS acts; when the PS is away too, a DPS acts (2026-10-19).** This follows the general chain of command, through the succession order (steps 5b and 5d), not a standing transition. (Which DPS is still open.)
+- **When the Director of Industry and Investment is away, the DPS Administration and Finance may sign and assign ETLS files (2026-10-19).**
+- **A position holder, or an authorised officer on their behalf, records absences (2026-10-19).** The audit log shows who recorded it. (Who counts as "authorised" is still open.)
 
 ### Choices made while building
 
@@ -565,6 +607,13 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-19 | The audit actor is the person who recorded the absence, with `recorded_by` and `absent_user_id` in the details | the absent person as actor | The log must show who actually did it. If the PS could mark the Minister absent unnoticed, they could take the Minister's step. |
 | 2026-10-19 | No back-dating, no maximum length | a maximum like delegations' 90 days | Back-dating could make an earlier action look covered. Absences such as sick or maternity leave can be long, and they are only facts, not a handing-over of power. |
 | 2026-10-19 | Only people who hold a post can be marked absent | anyone | Absence only matters for who may act for a post. Refusing others catches mistakes such as picking the wrong user. |
+| 2026-10-19 | Order of precedence: own post, then delegation, then succession | succession before delegation | The Ministry said delegations take priority. Your own post comes first so the log shows the strongest basis. |
+| 2026-10-19 | A delegation from the needed post blocks succession entirely, even for its first in line | let both the delegate and the successor act | The holder chose who covers for them; the standing order is the fallback for when they didn't. Two people both able to act would blur responsibility. |
+| 2026-10-19 | A post counts as absent only when it has holders and *all* of them are recorded absent | absent if *any* holder is away; vacant counts as absent | One Trade Officer on leave shouldn't hand the others' work to someone else. Treating a vacancy as absence is an open question. |
+| 2026-10-19 | Only the first present post in the succession order may act | any present post in the line | That's what "the next present position" means, and it keeps one person responsible at a time. |
+| 2026-10-19 | The audit row keeps the key `on_behalf_of` for "acting for", and adds `basis` and `absence_ids` | a new `acting_for` key | Rows from step 4d already use `on_behalf_of`. One key for one meaning, however the right arose, keeps history queries simple. |
+| 2026-10-19 | `absence_ids` lists the skipped successors' absences too | only the needed post's absence | "Why did the DPS sign for the Minister?" needs both answers: the Minister was away, and so was the PS. |
+| 2026-10-19 | `available_actions` shows `on_behalf_of` for succession moves; no `basis` field there | add `basis` to the API | The button only needs "for whom". The response shape stays the same, so no existing test or client changes. |
 
 ## 4. Open questions
 
@@ -579,8 +628,10 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 - [ ] **Who may assign posts:** right now only someone with server access, through the CLI. Should an HR or admin officer do it from a screen?
 - [ ] **Who may record a delegation:** only the post holder, or also e.g. the Minister's private secretary or a system admin on their behalf? See `create_delegation()` in backend/app/core/workflow/delegation.py.
 - [ ] **Delegation limits:** is 90 days the right maximum (`MAX_DELEGATION_DAYS`)? Is back-dating ever needed, e.g. after an emergency?
-- [ ] **Delegation rules:** should a delegation be passed on (PS → Director when both are away)? Should the delegating post be blocked while it is delegated?
-- [ ] **The PS acting for the Minister:** confirm the PS may make *every* Minister's move during an absence (that's what an unscoped delegation allows), or only some, e.g. ETLS only (`"workflow": "etls_application"`).
+- [ ] **Delegation rules:** should the delegating post be blocked from acting while it is delegated? (Whether delegations can be passed on is confirmed: they can't.)
+- [ ] **Vacant posts:** if a post has no holder at all, should the succession order apply, as if it were absent? Right now it doesn't: nobody acts until someone is appointed or an absence is recorded. See `acting_successor()` in backend/app/core/workflow/succession.py.
+- [ ] **A delegate who is away:** if the Minister delegated to the DPS and the DPS is also away, nobody covers the Minister's step (the delegation blocks succession). Should succession apply then?
+- [ ] **An absent holder acting:** a Minister marked absent can still act in their own right (e.g. working remotely). Should being absent block that?
 - [ ] **Which DPS covers the Minister's step when both the Minister and the PS are away?** Placeholder: DPS Administration and Finance, the only DPS post we know of. See backend/alembic/versions/0013_succession_orders.py.
 - [ ] **The PS's own line:** we assumed the general chain means DPS Admin & Finance also covers the PS. Confirm.
 - [ ] **Who may record an absence on someone's behalf?** Placeholder: anyone with the `absence_recorder` role (e.g. the Minister's private secretary, HR). Should it instead be tied to posts, e.g. "the Minister's office may record the Minister's absences"? See backend/app/core/workflow/absence.py.
@@ -594,6 +645,16 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 5d
+1. The Minister is recorded absent and has *not* delegated. The DPS (who is at work) tries the Minister's step while the PS is also at work. What happens, and why?
+2. The Minister is absent and has delegated to the DPS for the week. Can the PS do the Minister's step? Which function decides?
+3. Both the Minister and the PS are away, and the DPS minutes a file to the PS desk. What does the audit row's `details` contain, and why are there two absence ids?
+
+#### Show answers
+1. **403.** `acting_successor()` walks the Minister's order (PS, then DPS) and stops at the first post with a holder at work: the PS. Only the PS may act, so the DPS gets "None of your positions can make this move."
+2. No. In `_permitted()`, `is_delegated_away()` sees the Minister's active delegation and skips succession for that step: the Minister's own choice takes priority. The DPS may act, with `"basis": "delegation"`.
+3. `"as_position": "dps_admin_finance"`, `"on_behalf_of": "minister"`, `"basis": "succession"`, `"delegation_id": null`, `"absence_ids": [<Minister's>, <PS's>]`, plus `from`, `to`, `transition` and `comment`. Two ids, because the DPS acted only because the Minister was away *and* the PS, first in line, was away too. Both facts justify the move.
 
 ### Step 5c
 1. The PS sends `POST /absences` with the Minister's `user_id`. What happens, and why does it matter?

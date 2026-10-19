@@ -52,7 +52,7 @@ async def _case_out(session: AsyncSession, case: Case, user: User) -> CaseOut:
             ActionOut(
                 to_status=m.transition.to_status.code,
                 name=m.transition.name,
-                on_behalf_of=m.delegation.from_position.code if m.delegation else None,
+                on_behalf_of=m.on_behalf_of,
             )
             for m in moves
         ],

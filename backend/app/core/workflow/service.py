@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit.service import record_event
 from app.core.identity.models import User
-from app.core.workflow.delegation import active_delegations_to
+from app.core.workflow.delegation import active_delegations_to, is_delegated_away
 from app.core.workflow.errors import (  # noqa: F401  (re-exported: callers use service.NotFound etc.)
     AlreadyCancelled,
     AlreadyRevoked,
@@ -23,16 +23,30 @@ from app.core.workflow.errors import (  # noqa: F401  (re-exported: callers use 
     WorkflowError,
 )
 from app.core.workflow.models import Case, Delegation, Workflow, WorkflowStatus, WorkflowTransition
+from app.core.workflow.succession import Succession, acting_successor
 
 AUDIT_ENTITY = "case"
 
 
 class PermittedMove(NamedTuple):
-    """A move this user may make, and how: through a post they hold
-    (delegation is None) or on behalf of another post (the delegation used)."""
+    """A move this user may make, and on what basis:
+    - their own post (delegation and succession both None);
+    - a delegation from the required post to one of theirs (`delegation`);
+    - the succession order, because the required post's holders are away (`succession`).
+    """
 
     transition: WorkflowTransition
-    delegation: Delegation | None
+    delegation: Delegation | None = None
+    succession: Succession | None = None
+
+    @property
+    def basis(self) -> str:
+        return "delegation" if self.delegation else "succession" if self.succession else "own"
+
+    @property
+    def on_behalf_of(self) -> str | None:
+        """The post whose step this is, when the user acts for it ("acting for")."""
+        return None if self.basis == "own" else self.transition.required_position.code
 
 
 def is_staff(user: User) -> bool:
@@ -96,19 +110,33 @@ async def start_case(session: AsyncSession, *, workflow_code: str, actor: User) 
 async def _permitted(
     session: AsyncSession, case: Case, user: User, transitions: list[WorkflowTransition]
 ) -> list[PermittedMove]:
-    """Which of these transitions the user may make: by their own posts first,
-    then by a delegation active today for this case's workflow."""
+    """Which of these transitions the user may make, best basis first: their own
+    posts, then a personal delegation, then the succession order."""
     held = {p.id for p in user.positions}
-    own = [PermittedMove(t, None) for t in transitions if t.required_position_id in held]
-    if len(own) == len(transitions):
-        return own  # nothing left that a delegation could add, so skip the query
+    own = [PermittedMove(t) for t in transitions if t.required_position_id in held]
+    rest = [t for t in transitions if t.required_position_id not in held]
+    if not rest:
+        return own  # nothing left that a delegation or succession could add
+
     acting_for = await active_delegations_to(session, user, case.workflow_id)
     delegated = [
-        PermittedMove(t, acting_for[t.required_position_id])
-        for t in transitions
-        if t.required_position_id not in held and t.required_position_id in acting_for
+        PermittedMove(t, delegation=acting_for[t.required_position_id])
+        for t in rest
+        if t.required_position_id in acting_for
     ]
-    return own + delegated
+
+    succeeded = []
+    for t in rest:
+        if t.required_position_id in acting_for:
+            continue
+        # A personal delegation takes priority: if the post chose who acts for it,
+        # the standing succession order doesn't apply, even to its first in line.
+        if await is_delegated_away(session, t.required_position_id, case.workflow_id):
+            continue
+        succession = await acting_successor(session, t.required_position_id, case.workflow_id)
+        if succession and succession.acting_position_id in held:
+            succeeded.append(PermittedMove(t, succession=succession))
+    return own + delegated + succeeded
 
 
 async def available_transitions(session: AsyncSession, case: Case, user: User) -> list[PermittedMove]:
@@ -159,7 +187,14 @@ async def change_status(
     permitted = await _permitted(session, case, actor, list(moves))
     if not permitted:
         raise NotPermitted("None of your positions can make this move.")
-    move, delegation = permitted[0]
+    chosen = permitted[0]
+    move, delegation, succession = chosen
+    if delegation:
+        acting_from = delegation.to_position.code
+    elif succession:
+        acting_from = next(p.code for p in actor.positions if p.id == succession.acting_position_id)
+    else:
+        acting_from = move.required_position.code
 
     case.current_status_id = move.to_status_id
     case.updated_at = func.now()
@@ -173,11 +208,14 @@ async def change_status(
             "from": from_status.code,
             "to": to_status_code,
             "transition": move.name,
-            # The post the actor acted from, and whose authority they used if it
-            # wasn't their own. Together: "PS, acting on behalf of the Minister".
-            "as_position": (delegation.to_position if delegation else move.required_position).code,
-            "on_behalf_of": delegation.from_position.code if delegation else None,
+            # The post the actor acted from, whose step it was if not their own
+            # ("acting for"), and why they could: "own", "delegation" or
+            # "succession". Together: "PS, acting for the Minister, who is absent".
+            "as_position": acting_from,
+            "on_behalf_of": chosen.on_behalf_of,
+            "basis": chosen.basis,
             "delegation_id": delegation.id if delegation else None,
+            "absence_ids": [a.id for a in succession.absences] if succession else [],
             "comment": comment,
         },
     )

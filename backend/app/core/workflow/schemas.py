@@ -22,8 +22,9 @@ class StatusOut(BaseModel):
 class ActionOut(BaseModel):
     to_status: str
     name: str
-    # Set when the user may only make this move because a post delegated to
-    # them, e.g. "minister". The frontend can label the button "(for the Minister)".
+    # Set when the user may only make this move for another post, through a
+    # delegation or because that post's holders are absent, e.g. "minister".
+    # The frontend can label the button "(for the Minister)".
     on_behalf_of: str | None
 
 
