@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit.service import record_event
-from app.core.identity.models import Role, User
+from app.core.identity.models import User
 from app.core.workflow.models import Case, Workflow, WorkflowStatus, WorkflowTransition
 
 AUDIT_ENTITY = "case"
@@ -94,14 +94,13 @@ async def available_transitions(
     """The moves this user may make on this case right now (the buttons to show)."""
     result = await session.scalars(
         select(WorkflowTransition)
-        .join(Role, Role.id == WorkflowTransition.required_role_id)
         .where(
             WorkflowTransition.from_status_id == case.current_status_id,
-            Role.code.in_(user.role_codes),
+            WorkflowTransition.required_position_id.in_([p.id for p in user.positions]),
         )
         .order_by(WorkflowTransition.id)
     )
-    # The same move can be allowed for two of the user's roles; list it once.
+    # The same move can be allowed for two of the user's posts; list it once.
     moves: dict[int, WorkflowTransition] = {}
     for move in result:
         moves.setdefault(move.to_status_id, move)
@@ -119,7 +118,7 @@ async def change_status(
     case = await get_case(session, case_id, actor, for_update=True)
     from_status = case.current_status
 
-    # Every row that allows this exact move, whatever the role.
+    # Every row that allows this exact move, whatever the position.
     moves = (
         await session.scalars(
             select(WorkflowTransition)
@@ -134,9 +133,10 @@ async def change_status(
         raise TransitionNotAllowed(
             f"A case can't move from '{from_status.code}' to '{to_status_code}'."
         )
-    move = next((m for m in moves if m.required_role.code in actor.role_codes), None)
+    held = {p.id for p in actor.positions}
+    move = next((m for m in moves if m.required_position_id in held), None)
     if move is None:
-        raise NotPermitted("Your role can't make this move.")
+        raise NotPermitted("None of your positions can make this move.")
 
     case.current_status_id = move.to_status_id
     case.updated_at = func.now()
@@ -150,7 +150,7 @@ async def change_status(
             "from": from_status.code,
             "to": to_status_code,
             "transition": move.name,
-            "as_role": move.required_role.code,
+            "as_position": move.required_position.code,
             "comment": comment,
         },
     )

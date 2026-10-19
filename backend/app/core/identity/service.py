@@ -68,6 +68,10 @@ async def create_user(
     )
     session.add(user)
     await session.commit()
+    # A new user holds no posts, but `positions` was never loaded (selectin only
+    # runs when a user is read from the database), and async code can't load it
+    # later on first touch. Load it now so callers get a complete user.
+    await session.refresh(user, ["positions"])
     return user
 
 

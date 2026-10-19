@@ -19,10 +19,11 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.identity.models import Role
+from app.core.identity.models import Position, Role
 from app.db.base import Base
 
-# Tables created by alembic/versions/0004_workflow_definitions.py.
+# Tables created by alembic/versions/0004_workflow_definitions.py (since 0009,
+# transitions name a position instead of a role).
 # The relationships are viewonly: workflow definitions are written by migrations,
 # never through these classes, so SQLAlchemy only needs to *read* them.
 
@@ -76,7 +77,10 @@ class WorkflowTransition(Base):
             name="workflow_transitions_to_fkey",
         ),
         UniqueConstraint(
-            "from_status_id", "to_status_id", "required_role_id", name="workflow_transitions_move_key"
+            "from_status_id",
+            "to_status_id",
+            "required_position_id",
+            name="workflow_transitions_move_key",
         ),
         CheckConstraint("from_status_id <> to_status_id", name="workflow_transitions_no_self_loop"),
         {"schema": "core"},
@@ -86,7 +90,8 @@ class WorkflowTransition(Base):
     workflow_id: Mapped[int] = mapped_column(SmallInteger)
     from_status_id: Mapped[int] = mapped_column(Integer)
     to_status_id: Mapped[int] = mapped_column(Integer)
-    required_role_id: Mapped[int] = mapped_column(SmallInteger, ForeignKey("core.roles.id"))
+    # The post whose holders may make this move (or anyone acting for that post).
+    required_position_id: Mapped[int] = mapped_column(SmallInteger, ForeignKey("core.positions.id"))
     name: Mapped[str] = mapped_column(Text)
 
     # Two links to the same table (from and to), so each says which column it uses.
@@ -102,7 +107,7 @@ class WorkflowTransition(Base):
         lazy="selectin",
         viewonly=True,
     )
-    required_role: Mapped[Role] = relationship(lazy="selectin", viewonly=True)
+    required_position: Mapped[Position] = relationship(lazy="selectin", viewonly=True)
 
 
 class Case(Base):

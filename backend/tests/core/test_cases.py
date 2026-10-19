@@ -2,23 +2,27 @@
 
 import pytest
 
+from app.core.identity.service import assign_position, remove_position
+
 pytestmark = pytest.mark.anyio
+
+# Each staff role in the ETLS chain, and the post its test user holds.
+POSITION_FOR = {
+    "records_officer": "records_officer",
+    "minister": "minister",
+    "permanent_secretary": "permanent_secretary",
+    "director": "director_of_trade",
+    "officer": "trade_officer",
+}
 
 
 @pytest.fixture
 async def people(make_user):
-    """One user per role in the ETLS chain."""
-    return {
-        role: await make_user(role)
-        for role in (
-            "applicant",
-            "records_officer",
-            "minister",
-            "permanent_secretary",
-            "director",
-            "officer",
-        )
-    }
+    """One user per role in the ETLS chain, each holding the matching post."""
+    users = {"applicant": await make_user("applicant")}
+    for role, position in POSITION_FOR.items():
+        users[role] = await make_user(role, positions=[position])
+    return users
 
 
 @pytest.fixture
@@ -100,6 +104,36 @@ async def test_permanent_secretary_can_act_for_the_minister(act, people):
 
     assert response.status_code == 200
     assert response.json()["status"]["code"] == "with_directorate"
+
+
+async def test_the_position_decides_not_the_role(act, people, make_user):
+    case = await _open_case(act, people["applicant"])
+    # Has the records_officer role but holds no post: not allowed.
+    no_post = await make_user("records_officer")
+    # Holds the Records Officer post (e.g. a clerk covering the Registry): allowed.
+    clerk = await make_user("officer", positions=["records_officer"])
+
+    assert (await _move(act, no_post, case["id"], "with_minister")).status_code == 403
+    response = await _move(act, clerk, case["id"], "with_minister")
+    assert response.status_code == 200
+
+    history = (await act(people["director"], "get", f"/cases/{case['id']}/history")).json()
+    assert history[-1]["details"]["as_position"] == "records_officer"
+
+
+async def test_a_new_post_holder_takes_over_at_once(act, people, make_user, db_session):
+    case = await _open_case(act, people["applicant"])
+    await _move(act, people["records_officer"], case["id"], "with_minister")
+    await _move(act, people["minister"], case["id"], "with_directorate")
+
+    old_director = people["director"]
+    new_director = await make_user("director")
+    await remove_position(db_session, user=old_director, position_code="director_of_trade", actor=None)
+    await assign_position(db_session, user=new_director, position_code="director_of_trade", actor=None)
+
+    # No workflow row changed: the move names the post, and the post changed hands.
+    assert (await _move(act, old_director, case["id"], "with_officer")).status_code == 403
+    assert (await _move(act, new_director, case["id"], "with_officer")).status_code == 200
 
 
 async def test_officer_can_return_a_case_to_the_directorate(act, people):

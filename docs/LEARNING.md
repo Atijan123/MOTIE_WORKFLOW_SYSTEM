@@ -16,6 +16,32 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 4c — Approvals belong to positions (2026-10-19)
+**Built:** each workflow transition now names the *position* that may make it (`required_position_id`), not a role. Migration `0009` converted the existing ETLS moves with a fixed role-to-post mapping `[CONFIRM]`, then dropped `required_role_id`. The engine (backend/app/core/workflow/service.py) now checks the posts you hold:
+- `available_transitions()` lists moves for any post you hold.
+- `change_status()` refuses with **403** "None of your positions can make this move" otherwise.
+- The audit row records `as_position` (older rows keep their `as_role`; the log is append-only).
+
+Roles still decide what *kind* of user you are: who may open an ETLS case (applicants) and who may see case history (staff). Holding the `director` role without the Director of Trade post no longer lets you assign files.
+
+**The ETLS moves now:**
+```
+submitted --(records_officer: Register and forward)--> with_minister
+with_minister --(minister, or permanent_secretary)--> with_directorate
+with_directorate --(director_of_trade: Assign to an officer)--> with_officer
+with_officer --(trade_officer)--> approved | rejected | back to with_directorate
+```
+**Files:** backend/alembic/versions/0009_transitions_require_positions.py, backend/app/core/workflow/models.py (`WorkflowTransition.required_position`), backend/app/core/workflow/service.py, backend/app/core/identity/service.py (`create_user` now loads `positions`), backend/tests/core/test_cases.py (`POSITION_FOR`, two new tests), backend/tests/core/test_case_race.py, backend/tests/core/test_workflow_definitions.py
+**Try it:**
+- `docker compose run --rm tools alembic upgrade head`
+- See which post makes each move:
+  ```
+  docker compose exec db psql -U motie -d motie -c "SELECT f.code AS from_status, t.code AS to_status, p.code AS position, x.name FROM core.workflow_transitions x JOIN core.workflow_statuses f ON f.id = x.from_status_id JOIN core.workflow_statuses t ON t.id = x.to_status_id JOIN core.positions p ON p.id = x.required_position_id ORDER BY x.id"
+  ```
+- Create staff users as in step 3c, then give each a post with `assign-position` (step 4b): `records_officer`, `minister`, `director_of_trade`, `trade_officer`. Without the post, the same user gets 403.
+- `docker compose run --rm tools pytest tests/core/test_cases.py -v`. Read `test_the_position_decides_not_the_role` and `test_a_new_post_holder_takes_over_at_once`.
+**New concepts:** Changing a column with existing data (expand, backfill, contract)
+
 ### Step 4b — Departments, positions and who holds them (2026-10-19)
 **Built:** three tables in `core`:
 - `departments`: the Ministry's units.
@@ -96,9 +122,9 @@ Applicants see only their own cases. Someone else's case returns the same 404 as
 **Files:** backend/alembic/versions/0004_workflow_definitions.py, backend/alembic/versions/0005_seed_etls_workflow.py, backend/app/core/workflow/models.py, backend/tests/core/test_workflow_definitions.py
 **Try it:**
 - `docker compose run --rm tools alembic upgrade head`
-- See the ETLS moves as a table:
+- See the ETLS moves as a table (this query is the step 4c version, with positions):
   ```
-  docker compose exec db psql -U motie -d motie -c "SELECT f.code AS from_status, t.code AS to_status, r.code AS role, x.name FROM core.workflow_transitions x JOIN core.workflow_statuses f ON f.id = x.from_status_id JOIN core.workflow_statuses t ON t.id = x.to_status_id JOIN core.roles r ON r.id = x.required_role_id ORDER BY x.id"
+  docker compose exec db psql -U motie -d motie -c "SELECT f.code AS from_status, t.code AS to_status, p.code AS position, x.name FROM core.workflow_transitions x JOIN core.workflow_statuses f ON f.id = x.from_status_id JOIN core.workflow_statuses t ON t.id = x.to_status_id JOIN core.positions p ON p.id = x.required_position_id ORDER BY x.id"
   ```
 - `docker compose run --rm tools pytest tests/core/test_workflow_definitions.py -v`
 **The placeholder ETLS workflow:**
@@ -298,6 +324,11 @@ One short explanation per concept, where it lives in this codebase, and one free
 **Here:** `assign_position()` in backend/app/core/identity/service.py. It writes an audit row only when the insert returned something, so the log never records a change that didn't happen. `remove_position()` does the same with `DELETE ... RETURNING`.
 **Learn more:** [PostgreSQL docs: INSERT ... ON CONFLICT](https://www.postgresql.org/docs/16/sql-insert.html#SQL-ON-CONFLICT)
 
+### Changing a column with existing data (expand, backfill, contract)
+**What:** you can't swap one column for another in one go when rows already use it. Do it in three moves inside one migration. *Expand*: add the new column, allowing empty values. *Backfill*: fill it from the old column for every existing row. *Contract*: make it `NOT NULL`, then drop the old column. The `NOT NULL` step is also a safety check: if any row couldn't be converted, the migration fails and rolls back instead of leaving a move with no approver.
+**Here:** backend/alembic/versions/0009_transitions_require_positions.py: `add_column` (expand), the `UPDATE ... FROM (VALUES ...)` (backfill), `alter_column(..., nullable=False)` and `drop_column` (contract). `downgrade()` does the same in reverse.
+**Learn more:** [Martin Fowler: Parallel Change (expand and contract)](https://martinfowler.com/bliki/ParallelChange.html)
+
 ## 3. Decisions
 
 | Date | Decision | Alternatives considered | Why |
@@ -331,7 +362,7 @@ One short explanation per concept, where it lives in this codebase, and one free
 | 2026-10-18 | Append-only enforced by a database trigger | only "be careful in Python"; `REVOKE UPDATE, DELETE` permissions | A trigger protects against every client, even the table owner. Since step 4a the app also has no `UPDATE`/`DELETE` rights on it, so there are two walls. |
 | 2026-10-18 | One generic audit table (`entity_type` + `entity_id` + JSON `details`) | a separate history table per record type | Every module can log to it, and "show everything user X did" is one query. |
 | 2026-10-18 | `record_event()` never commits | commit inside it | So a change and its audit row are always saved in the same transaction. |
-| 2026-10-18 | Transitions name a required *role* for now | name a *position* (e.g. "Director of Trade") | CLAUDE.md says approvals attach to positions, with delegation for absences. Positions need their own tables. Until then, roles keep the engine working, and switching the column later is one migration. |
+| 2026-10-18 | Transitions name a required *role* for now | name a *position* (e.g. "Director of Trade") | CLAUDE.md says approvals attach to positions, with delegation for absences. Positions need their own tables. Until then, roles keep the engine working, and switching the column later is one migration. **Done in step 4c (migration 0009).** |
 | 2026-10-18 | The PS gets the Minister's move as a second transition row | delegation | Placeholder for "PS when the Minister is away". With real delegation, the PS row goes and the Minister delegates when absent. |
 | 2026-10-18 | One role may start a workflow (`workflows.start_role_id`) | a link table allowing several roles | Enough for ETLS. Becomes a table if Records also needs to open cases for walk-in applicants (see Open questions). |
 | 2026-10-18 | The ETLS definition is seeded in the shared migration chain | a separate `etls` module migration | There's only one Alembic chain so far. When the `etls` schema arrives, its data can move with it. |
@@ -358,6 +389,10 @@ One short explanation per concept, where it lives in this codebase, and one free
 | 2026-10-19 | `Position` has no `department` or `reports_to` relationship objects, only the id columns | `lazy="selectin"` relationships | Positions are loaded with every user, on every request. Eager relationships would add a query per level of the chain each time. |
 | 2026-10-19 | Reports-to loops are caught by a test, not a database trigger | a trigger running a recursive query on every change | Only migrations write the chart, and the tests check every migration. Add the trigger if an admin screen ever edits the chart. |
 | 2026-10-19 | Posts are assigned with the CLI for now; the audit row has no actor | an admin API endpoint | Only someone with server access can assign posts, which suits a power this strong. An admin screen can come later. |
+| 2026-10-19 | Old transitions converted by a fixed role-to-post mapping in migration 0009 | re-seed the ETLS workflow from scratch | Keeps the transition ids (and so the audit trail's meaning) unchanged. A role missing from the mapping makes the migration fail rather than drop a move. |
+| 2026-10-19 | Who may *start* a workflow is still a role (`workflows.start_role_id`) | a position | Applicants hold no post. "Who may open a case" is about the kind of user, not a post. |
+| 2026-10-19 | Seeing cases and history still depends on roles (`is_staff()`) | positions | Visibility rules aren't decided yet (see Open questions). Moves were the part CLAUDE.md said must follow posts. |
+| 2026-10-19 | The audit key `as_role` became `as_position` | keep writing `as_role` | It says what was actually checked. Old rows keep `as_role`; the log is append-only, so code reading history must accept both. |
 
 ## 4. Open questions
 
@@ -381,6 +416,16 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 4c
+1. The Ministry decides that the PS, not the Minister, minutes ETLS files to the Directorate. What do you change?
+2. A user has the `director` role but holds no post. They try to move a case from `with_directorate` to `with_officer`. What do they get, and which line decides it?
+3. Why does migration 0009 add `required_position_id` as nullable first and only make it `NOT NULL` after the `UPDATE`?
+
+#### Show answers
+1. A new migration that updates (or deletes) the `with_minister` → `with_directorate` row for the `minister` post. No Python changes, and no change to who holds which post.
+2. **403** "None of your positions can make this move." In `change_status()`, `held` is empty, so `next(...)` finds no matching move and raises `NotPermitted`. Roles no longer grant moves.
+3. Existing rows have no value for the new column when it's added, so `NOT NULL` would fail straight away. The `UPDATE` fills it in from the old role. Then `NOT NULL` both locks the rule in and checks that every row was converted: if one wasn't, the migration fails and rolls back.
 
 ### Step 4b
 1. A new Director of Trade replaces the old one. What changes in the database, and what stays the same?
@@ -418,7 +463,7 @@ Questions per step. Try to answer before reading the answers.
 3. In the seed migration, what happens if someone misspells `'with_officer'` as `'with_oficer'` in a transition row, and what catches it?
 
 #### Show answers
-1. Something else: a new migration that inserts one row into `core.workflow_transitions` (`with_directorate` → `rejected`, role `director`). No Python changes, because workflows are data.
+1. Something else: a new migration that inserts one row into `core.workflow_transitions` (`with_directorate` → `rejected`, position `director_of_trade` since step 4c). No Python changes, because workflows are data.
 2. So a transition can only point to a status in its *own* workflow. With `to_status_id` alone, a move could lead into another process's status, and a case would end up stuck in a workflow it doesn't belong to.
 3. The `JOIN` on the status code finds no match, so that row is silently left out. `test_etls_workflow_is_seeded` expects exactly 7 transitions and fails. `test_every_workflow_is_well_formed` would probably also report a dead end.
 

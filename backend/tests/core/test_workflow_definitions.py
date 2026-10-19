@@ -105,8 +105,8 @@ async def test_database_refuses_a_move_into_another_workflows_status(owner_sessi
         await owner_session.execute(
             text(
                 "INSERT INTO core.workflow_transitions "
-                "(workflow_id, from_status_id, to_status_id, required_role_id, name) "
-                "SELECT :wf, :from_id, :to_id, id, 'cheat' FROM core.roles WHERE code = 'officer'"
+                "(workflow_id, from_status_id, to_status_id, required_position_id, name) "
+                "SELECT :wf, :from_id, :to_id, id, 'cheat' FROM core.positions WHERE code = 'trade_officer'"
             ),
             {"wf": wf, "from_id": own, "to_id": etls_approved},
         )

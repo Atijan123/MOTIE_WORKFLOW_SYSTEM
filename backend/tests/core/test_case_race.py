@@ -13,35 +13,39 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit.models import AuditEvent
 from app.core.identity.models import User
-from app.core.identity.service import create_user
+from app.core.identity.service import assign_position, create_user
 from app.core.workflow import service
 from tests.support import TEST_PASSWORD
 
 pytestmark = pytest.mark.anyio
 
 
-async def _user(session, role):
-    return await create_user(
+async def _user(session, role, position=None, email=None):
+    user = await create_user(
         session,
-        email=f"race-{role}@test.gm",
+        email=email or f"race-{role}@test.gm",
         full_name=role,
         password=TEST_PASSWORD,
         role_codes=[role],
     )
+    if position:
+        await assign_position(session, user=user, position_code=position, actor=None)
+    return user
 
 
 async def test_simultaneous_approve_and_reject_cannot_both_succeed(committing_engine):
     async with AsyncSession(committing_engine, expire_on_commit=False) as setup:
         applicant = await _user(setup, "applicant")
-        people = {r: await _user(setup, r) for r in ("records_officer", "minister", "director")}
-        officer_a = await create_user(
-            setup, email="race-officer-a@test.gm", full_name="A", password=TEST_PASSWORD,
-            role_codes=["officer"],
-        )
-        officer_b = await create_user(
-            setup, email="race-officer-b@test.gm", full_name="B", password=TEST_PASSWORD,
-            role_codes=["officer"],
-        )
+        people = {
+            role: await _user(setup, role, position)
+            for role, position in [
+                ("records_officer", "records_officer"),
+                ("minister", "minister"),
+                ("director", "director_of_trade"),
+            ]
+        }
+        officer_a = await _user(setup, "officer", "trade_officer", email="race-officer-a@test.gm")
+        officer_b = await _user(setup, "officer", "trade_officer", email="race-officer-b@test.gm")
         case = await service.start_case(setup, workflow_code="etls_application", actor=applicant)
         for role, to_status in [
             ("records_officer", "with_minister"),
