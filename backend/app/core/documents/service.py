@@ -9,7 +9,7 @@ import re
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit.service import record_event
@@ -17,11 +17,16 @@ from app.core.documents import facts, storage
 from app.core.documents.conditions import holds
 from app.core.documents.models import CaseDocument, DocumentRequirement
 from app.core.identity.models import User
+from app.core.workflow import checks
 from app.core.workflow import service as workflow
-from app.core.workflow.errors import InvalidDocument, NotFound
+from app.core.workflow.errors import InvalidDocument, NotFound, NotPermitted
 from app.core.workflow.models import Case
 
 _UNSAFE = re.compile(r"[^A-Za-z0-9._ -]")
+
+# Transition check names this service provides (see core/workflow/checks.py).
+DOCUMENTS_COMPLETE = "documents_complete"
+ORIGINALS_SEEN = "originals_seen"
 
 
 @dataclass
@@ -33,6 +38,14 @@ class RequirementStatus:
     @property
     def missing(self) -> bool:
         return self.applies and not self.documents
+
+    @property
+    def original_pending(self) -> bool:
+        """The paper original must be seen, and the newest upload hasn't been.
+        A re-upload after the original was seen must be checked again."""
+        if not (self.applies and self.requirement.original_required):
+            return False
+        return not self.documents or self.documents[0].original_seen_at is None
 
 
 def clean_filename(name: str | None, fallback: str) -> str:
@@ -142,3 +155,62 @@ async def get_document(
     if document is None or document.case_id != case.id:
         raise NotFound("Document not found.")
     return document
+
+
+async def mark_original_seen(
+    session: AsyncSession, *, case_id: int, document_id: int, actor: User
+) -> CaseDocument:
+    """Record that `actor` has seen the paper original of this upload, in person.
+
+    Allowed for whoever may make the move that requires it (Records on a
+    facility letter, or someone acting for Records), and only for documents
+    whose original is required. Marking twice changes nothing.
+    """
+    document = await get_document(session, case_id=case_id, document_id=document_id, user=actor)
+    case = await workflow.get_case(session, case_id, actor, for_update=True)
+    requirement = await session.scalar(
+        select(DocumentRequirement).where(
+            DocumentRequirement.workflow_id == case.workflow_id,
+            DocumentRequirement.document_type_id == document.document_type_id,
+        )
+    )
+    if requirement is None or not requirement.original_required:
+        raise InvalidDocument("This document's original doesn't need to be seen.")
+    if not await workflow.may_make_move_with_check(session, case, actor, ORIGINALS_SEEN):
+        raise NotPermitted("Only the officer receiving the originals can mark them as seen.")
+    if document.original_seen_at is not None:
+        return document
+
+    document.original_seen_at = func.now()
+    document.original_seen_by = actor.id
+    record_event(
+        session,
+        actor=actor,
+        action="case.original_seen",
+        entity_type=workflow.AUDIT_ENTITY,
+        entity_id=case.id,
+        details={
+            "document_id": document.id,
+            "type": document.document_type.code,
+            "sha256": document.sha256,  # which scan the original was compared with
+        },
+    )
+    await session.commit()
+    await session.refresh(document, ["original_seen_at"])
+    return document
+
+
+async def _check_documents_complete(session: AsyncSession, case: Case) -> list[str]:
+    return [f"{name} is missing" for name in await missing_documents(session, case)]
+
+
+async def _check_originals_seen(session: AsyncSession, case: Case) -> list[str]:
+    return [
+        f"the original {s.requirement.document_type.name.lower()} hasn't been marked as seen"
+        for s in await checklist(session, case)
+        if s.original_pending
+    ]
+
+
+checks.register(DOCUMENTS_COMPLETE, _check_documents_complete)
+checks.register(ORIGINALS_SEEN, _check_originals_seen)

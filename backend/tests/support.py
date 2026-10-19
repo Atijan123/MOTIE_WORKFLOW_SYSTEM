@@ -46,6 +46,15 @@ def facility_letter_form(**changes) -> dict:
     return form
 
 
+# Documents a facility letter always needs (a cement import also needs cement_receipt).
+FACILITY_LETTER_DOCUMENTS = [
+    "business_registration",
+    "annual_returns_certificate",
+    "certificate_of_origin",
+    "invoice",
+    "export_declaration",
+]
+
 # The smallest files our upload check accepts: it looks at the first bytes only.
 PDF = b"%PDF-1.7\n% test file\n"
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
@@ -62,3 +71,20 @@ async def upload(act, user, case_id, type_code, content=PDF, filename="scan.pdf"
         params={"filename": filename},
         headers_extra={"Content-Type": "application/octet-stream"},
     )
+
+
+async def ready_for_records(act, people, case_id) -> None:
+    """Upload every document the case needs (as the applicant), then have Records
+    mark the original certificate of origin as seen, so Records may confirm."""
+    checklist = (await act(people["applicant"], "get", f"/cases/{case_id}/documents")).json()
+    for item in checklist:
+        if item["applies"]:
+            response = await upload(act, people["applicant"], case_id, item["type"])
+            assert response.status_code == 201, response.text
+            if item["original_required"]:
+                seen = await act(
+                    people["records_officer"],
+                    "post",
+                    f"/cases/{case_id}/documents/{response.json()['id']}/original-seen",
+                )
+                assert seen.status_code == 200, seen.text

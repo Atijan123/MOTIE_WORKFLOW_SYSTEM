@@ -55,3 +55,7 @@ class UploadTooLarge(WorkflowError):
 
 class UnsupportedFileType(WorkflowError):
     pass
+
+
+class NotReady(WorkflowError):
+    """The move is allowed, but one of its checks (e.g. documents complete) fails."""

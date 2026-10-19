@@ -27,6 +27,8 @@ class DocumentOut(BaseModel):
     sha256: str
     uploaded_by: int
     uploaded_at: datetime
+    original_seen_at: datetime | None
+    original_seen_by: int | None
 
 
 class RequirementOut(BaseModel):
@@ -34,6 +36,8 @@ class RequirementOut(BaseModel):
     name: str
     applies: bool  # False when a condition (e.g. "product is cement") doesn't hold
     missing: bool
+    original_required: bool  # the paper original must be seen in person
+    original_pending: bool  # ...and the newest upload's original hasn't been seen yet
     documents: list[DocumentOut]  # newest first
 
 
@@ -47,6 +51,8 @@ def _document_out(d: CaseDocument) -> DocumentOut:
         sha256=d.sha256,
         uploaded_by=d.uploaded_by,
         uploaded_at=d.uploaded_at,
+        original_seen_at=d.original_seen_at,
+        original_seen_by=d.original_seen_by,
     )
 
 
@@ -64,6 +70,8 @@ async def document_checklist(
             name=s.requirement.document_type.name,
             applies=s.applies,
             missing=s.missing,
+            original_required=s.requirement.original_required,
+            original_pending=s.original_pending,
             documents=[_document_out(d) for d in s.documents],
         )
         for s in await service.checklist(session, case)
@@ -128,3 +136,17 @@ async def download_document(
         content_disposition_type="attachment",
         headers={"X-Content-Type-Options": "nosniff"},
     )
+
+
+@router.post("/{case_id}/documents/{document_id}/original-seen", response_model=DocumentOut)
+async def mark_original_seen(
+    case_id: int,
+    document_id: int,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Records confirms they have seen the paper original of this upload, in person."""
+    document = await service.mark_original_seen(
+        session, case_id=case_id, document_id=document_id, actor=user
+    )
+    return _document_out(document)

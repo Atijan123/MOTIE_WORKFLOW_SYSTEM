@@ -291,3 +291,18 @@ class CaseFlag(Base):
     resolution: Mapped[str | None] = mapped_column(Text)
 
     for_position: Mapped[Position] = relationship(lazy="selectin", viewonly=True)
+
+
+class TransitionCheck(Base):
+    """A named check that must pass before a move. Created by alembic/versions/0018_transition_checks.py.
+
+    The name is data; the function behind it is registered in workflow/checks.py.
+    """
+
+    __tablename__ = "transition_checks"
+    __table_args__ = {"schema": "core"}
+
+    transition_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("core.workflow_transitions.id"), primary_key=True
+    )
+    check_code: Mapped[str] = mapped_column(Text, primary_key=True)

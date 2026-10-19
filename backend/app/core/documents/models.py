@@ -5,6 +5,7 @@ from typing import Any
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -13,6 +14,7 @@ from sqlalchemy import (
     SmallInteger,
     Text,
     UniqueConstraint,
+    false,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -50,6 +52,8 @@ class DocumentRequirement(Base):
     workflow_id: Mapped[int] = mapped_column(SmallInteger, ForeignKey("core.workflows.id"))
     document_type_id: Mapped[int] = mapped_column(SmallInteger, ForeignKey("core.document_types.id"))
     condition: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    # The paper original must be seen in person, not just scanned (added in 0018).
+    original_required: Mapped[bool] = mapped_column(Boolean, server_default=false())
 
     document_type: Mapped[DocumentType] = relationship(lazy="selectin", viewonly=True)
 
@@ -60,6 +64,10 @@ class CaseDocument(Base):
     __tablename__ = "case_documents"
     __table_args__ = (
         CheckConstraint("size_bytes > 0", name="case_documents_not_empty"),
+        CheckConstraint(
+            "(original_seen_at IS NULL) = (original_seen_by IS NULL)",
+            name="case_documents_original_seen_complete",
+        ),
         Index("case_documents_case_idx", "case_id"),
         {"schema": "core"},
     )
@@ -75,5 +83,8 @@ class CaseDocument(Base):
     storage_key: Mapped[str] = mapped_column(Text, unique=True)
     uploaded_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("core.users.id"))
     uploaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Set when a staff member has seen the paper original of this upload (0018).
+    original_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    original_seen_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("core.users.id"))
 
     document_type: Mapped[DocumentType] = relationship(lazy="selectin", viewonly=True)

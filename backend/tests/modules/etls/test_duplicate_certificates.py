@@ -16,7 +16,7 @@ from app.core.identity.service import create_user
 from app.core.workflow.models import CaseFlag
 from app.modules.etls import service
 from app.modules.etls.schemas import FacilityLetterForm
-from tests.support import TEST_PASSWORD, facility_letter_form, move
+from tests.support import TEST_PASSWORD, facility_letter_form, move, ready_for_records
 
 pytestmark = pytest.mark.anyio
 
@@ -84,6 +84,7 @@ async def test_the_desk_resolves_the_flag_and_the_case_moves_on(act, people):
     assert response.json()["resolved_by"] == people["desk"].id
     assert (await act(people["desk"], "post", resolve, json={"resolution": "again"})).status_code == 409
 
+    await ready_for_records(act, people, case_id)
     assert (await move(act, people["records_officer"], case_id, "originals_received")).status_code == 200
     history = (await act(people["desk"], "get", f"/cases/{case_id}/history")).json()
     assert history[2]["action"] == "case.flag_resolved"

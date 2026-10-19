@@ -3,7 +3,7 @@
 import pytest
 from sqlalchemy import text
 
-from tests.support import facility_letter_form, move
+from tests.support import facility_letter_form, move, ready_for_records
 
 pytestmark = pytest.mark.anyio
 
@@ -62,6 +62,7 @@ async def test_applicant_submits_the_form_and_a_case_opens(act, people):
 
 async def test_the_case_walks_the_whole_route(act, people):
     case_id = (await _submit(act, people["applicant"])).json()["case_id"]
+    await ready_for_records(act, people, case_id)
     for who, to_status in ROUTE:
         response = await move(act, people[who], case_id, to_status)
         assert response.status_code == 200, f"{who}: {response.text}"

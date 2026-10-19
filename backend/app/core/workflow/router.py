@@ -29,6 +29,7 @@ _ERROR_STATUS = {
     service.AlreadyCancelled: status.HTTP_409_CONFLICT,
     service.AlreadyResolved: status.HTTP_409_CONFLICT,
     service.CaseBlocked: status.HTTP_409_CONFLICT,  # valid move, but the case is on hold
+    service.NotReady: status.HTTP_409_CONFLICT,  # valid move, but e.g. a document is missing
     service.InvalidDelegation: status.HTTP_422_UNPROCESSABLE_ENTITY,  # breaks a rule, don't retry
     service.InvalidAbsence: status.HTTP_422_UNPROCESSABLE_ENTITY,
     service.InvalidDocument: status.HTTP_422_UNPROCESSABLE_ENTITY,

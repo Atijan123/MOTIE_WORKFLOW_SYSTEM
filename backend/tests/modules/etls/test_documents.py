@@ -8,18 +8,18 @@ from sqlalchemy.exc import IntegrityError
 
 from app.core.config import settings
 from app.core.documents.conditions import holds
-from tests.support import JPEG, PDF, PNG, facility_letter_form, move, upload
+from tests.support import (
+    FACILITY_LETTER_DOCUMENTS,
+    JPEG,
+    PDF,
+    PNG,
+    facility_letter_form,
+    move,
+    ready_for_records,
+    upload,
+)
 
 pytestmark = pytest.mark.anyio
-
-ALWAYS = [
-    "business_registration",
-    "annual_returns_certificate",
-    "certificate_of_origin",
-    "invoice",
-    "export_declaration",
-]
-
 
 async def _case(act, people, product="Roofing sheets") -> int:
     response = await act(
@@ -37,7 +37,7 @@ async def _checklist(act, user, case_id) -> dict[str, dict]:
 
 async def test_five_documents_are_always_required(act, people):
     checklist = await _checklist(act, people["applicant"], await _case(act, people))
-    for code in ALWAYS:
+    for code in FACILITY_LETTER_DOCUMENTS:
         assert checklist[code]["applies"] and checklist[code]["missing"], code
     # Not cement: the receipt doesn't apply.
     assert checklist["cement_receipt"]["applies"] is False
@@ -135,8 +135,7 @@ async def test_others_can_neither_upload_nor_download(act, people, make_user):
 
 async def test_no_uploads_to_a_closed_case(act, people):
     case_id = await _case(act, people)
-    for name in ALWAYS:
-        await upload(act, people["applicant"], case_id, name)
+    await ready_for_records(act, people, case_id)
     for who, to_status in [("records_officer", "originals_received"), ("desk", "rejected")]:
         await move(act, people[who], case_id, to_status)
     assert (await act(people["applicant"], "get", f"/cases/{case_id}")).json()["status"]["code"] == "rejected"

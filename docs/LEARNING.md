@@ -16,6 +16,23 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 6d — Transition checks, and originals seen in person (2026-10-19)
+**Built:** a move can now require named **checks** before it's allowed (migration `0018`):
+- **Which** move needs which check is data: `core.transition_checks` (transition id + check name).
+- **What** a check does is a Python function, registered under its name in backend/app/core/workflow/checks.py. The documents service registers two:
+  - `documents_complete`: every document that applies is uploaded, including the cement receipt when it applies.
+  - `originals_seen`: every document whose paper original is required (`document_requirements.original_required`, set for the certificate of origin) has its *newest* upload marked as seen.
+- On a facility letter, Records' "Confirm originals received" carries both. If either fails, `change_status()` answers **409** "Not ready: ...", listing every problem.
+- `POST /cases/{id}/documents/{document_id}/original-seen` records that a person has seen the paper original. Who may do it is decided by the engine itself: whoever may make the move that needs the check (`may_make_move_with_check()`). That's the Records Officer, or anyone acting for Records by delegation or succession; no post is named in code. It is audited with the checksum of the scan it was compared with. A newer scan must be seen again.
+- A check name in the database with no function behind it **blocks** the move (fail closed), and a test makes sure every name has one.
+
+**Files:** backend/alembic/versions/0018_transition_checks.py, backend/app/core/workflow/checks.py, backend/app/core/workflow/models.py (`TransitionCheck`), backend/app/core/workflow/service.py (checks in `change_status()`, `may_make_move_with_check()`), backend/app/core/workflow/errors.py (`NotReady`), backend/app/core/documents/models.py, backend/app/core/documents/service.py (`mark_original_seen()`, `original_pending`, the two checks), backend/app/core/documents/router.py, backend/tests/modules/etls/test_originals.py, backend/tests/support.py (`ready_for_records()`, `FACILITY_LETTER_DOCUMENTS`)
+**Try it:**
+- `docker compose run --rm tools alembic upgrade head`
+- On a facility letter case, try Records' move with documents missing: the 409 lists them. Upload them, try again: "the original certificate of origin hasn't been marked as seen". As Records, `POST /cases/{id}/documents/{certificate document id}/original-seen`, then the move succeeds.
+- `docker compose run --rm tools pytest tests/modules/etls/test_originals.py -v`
+**New concepts:** A registry of named checks (plug-ins)
+
 ### Step 6c — Documents and data-driven requirements (2026-10-19)
 **Built:** a shared core service, backend/app/core/documents/, with three tables (migration `0017`):
 - `document_types`: the kinds of document.
@@ -606,6 +623,11 @@ One short explanation per concept, where it lives in this codebase, and one free
 **Here:** backend/app/core/documents/storage.py `save()` and `path_for()`, `clean_filename()` in backend/app/core/documents/service.py, `download_document()` in backend/app/core/documents/router.py.
 **Learn more:** [OWASP File Upload Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/File_Upload_Cheat_Sheet.html)
 
+### A registry of named checks (plug-ins)
+**What:** the engine shouldn't know about documents, payments or GRA, but some moves must wait for them. So the engine only knows *names*: "this move needs `documents_complete`". Each part of the system registers a function under a name it owns, and the engine calls whatever is registered. It's the same idea as `facts.register()` in step 6c. Two safety rules: a name with nothing registered blocks the move instead of being skipped, and a test compares the names in the database with the registered functions.
+**Here:** backend/app/core/workflow/checks.py `register()` and `problems()`, called from `change_status()`. Registrations at the bottom of backend/app/core/documents/service.py.
+**Learn more:** [Python Packaging Guide: creating and discovering plugins](https://packaging.python.org/en/latest/guides/creating-and-discovering-plugins/), the same idea at package scale.
+
 ## 3. Decisions
 
 ### Confirmed by the Ministry
@@ -743,6 +765,13 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-19 | Accept only PDF, PNG and JPEG, detected from the first bytes; 10 MB limit | accept anything; trust `Content-Type` | Scans of official papers come as these. Anything else (Office files, scripts) is a risk we don't need yet. |
 | 2026-10-19 | Re-uploading adds a newer version; nothing is deleted | replace the old file | Same rule as the audit log: what someone submitted stays on record. |
 | 2026-10-19 | The applicant and staff may upload, until the case is closed | applicant only; only while "Submitted" | Records may need to add a scan of an original. Tighten when the Ministry says. |
+| 2026-10-19 | Checks are named per transition in a table; their code is registered by name | hard-code "documents complete" in `change_status()`; a check per workflow | The engine stays generic, and a new rule like "fee paid before signing" is a function plus a row. |
+| 2026-10-19 | An unknown check name blocks the move | skip it with a warning | Skipping would quietly remove a safeguard. |
+| 2026-10-19 | All of a move's problems are reported at once | stop at the first | Records can tell the applicant everything that's missing in one go. |
+| 2026-10-19 | Checks run after the permission and on-hold checks | before | Someone who may not make the move gets 403 without learning the case's details. |
+| 2026-10-19 | "Original seen" may be marked by whoever may make the move that needs it | name the Records post in code; any staff member | No post in code, and delegation and succession apply automatically. |
+| 2026-10-19 | "Seen" belongs to one upload; a newer scan must be seen again | mark the document *type* as seen | The audit row records which scan (by checksum) was compared with the original. A later scan could differ. |
+| 2026-10-19 | Moves that aren't ready still appear in `available_actions` | hide them | The officer sees the button and gets a clear list of what's missing. Hiding it would leave them guessing. `GET /cases/{id}/documents` shows the checklist beforehand. |
 
 ## 4. Open questions
 
@@ -770,6 +799,7 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 - [ ] **The ETLS desk post:** its real title and department (placeholder: "ETLS Desk Officer", Directorate of Industry and Investment).
 - [ ] **Facility letter form lists:** are there fixed lists for exporter country (ECOWAS members), unit and product? They would make checks such as the cement rule exact.
 - [ ] **Duplicate certificates:** does a number from a *rejected* case count as used? (Right now every earlier use counts.) May anyone besides the ETLS desk clear the flag?
+- [ ] **Originals:** besides the certificate of origin, must any other paper original be seen in person (e.g. the invoice)? It's one column per document (`original_required`).
 - [ ] **The cement receipt:** which receipt is it (e.g. a payment receipt for a cement levy)? And should cement be recognised from a product list rather than the word "cement" in free text? See backend/alembic/versions/0017_documents.py.
 - [ ] **Document type names:** are "Business registration certificate", "Annual returns certificate", "Certificate of origin", "Invoice" (commercial invoice?) and "Export declaration" the official names?
 - [ ] **Who may upload, and until when:** right now the applicant and any staff member, until the case is closed.
@@ -782,6 +812,16 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 6d
+1. Records tries to confirm "originals received" with the invoice missing *and* the original certificate not yet seen. What do they get?
+2. The Ministry wants the PS's "Sign" move to require that a fee is paid. Which parts change?
+3. The Records Officer marks the original certificate as seen, then the applicant uploads a new scan of it. Can Records confirm? Why is that the right behaviour?
+
+#### Show answers
+1. **409** with both problems in one message: "Not ready: Invoice is missing; the original certificate of origin hasn't been marked as seen". `checks.problems()` runs every check on the move and collects all their problems.
+2. A function, e.g. `_check_fee_paid()`, registered with `checks.register("fee_paid", ...)` by whatever code knows about fees, and a migration adding a `core.transition_checks` row for the Sign move. `change_status()` doesn't change.
+3. No: `original_pending` looks at the *newest* upload, which hasn't been seen. The original was compared with the earlier scan (its checksum is in the audit row), and the new scan could show something different. Records must compare it again.
 
 ### Step 6c
 1. The Ministry decides that rice imports need a phytosanitary certificate. What do you change?

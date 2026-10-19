@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.audit.service import record_event
 from app.core.identity.models import User
 from app.core.workflow.delegation import active_delegations_to, is_delegated_away
+from app.core.workflow import checks
 from app.core.workflow.flags import open_flags
 from app.core.workflow.errors import (  # noqa: F401  (re-exported: callers use service.NotFound etc.)
     AlreadyCancelled,
@@ -23,12 +24,20 @@ from app.core.workflow.errors import (  # noqa: F401  (re-exported: callers use 
     InvalidDocument,
     NotFound,
     NotPermitted,
+    NotReady,
     TransitionNotAllowed,
     UnsupportedFileType,
     UploadTooLarge,
     WorkflowError,
 )
-from app.core.workflow.models import Case, Delegation, Workflow, WorkflowStatus, WorkflowTransition
+from app.core.workflow.models import (
+    Case,
+    Delegation,
+    TransitionCheck,
+    Workflow,
+    WorkflowStatus,
+    WorkflowTransition,
+)
 from app.core.workflow.succession import Succession, acting_successor
 
 AUDIT_ENTITY = "case"
@@ -180,6 +189,26 @@ async def available_transitions(session: AsyncSession, case: Case, user: User) -
     return sorted(moves.values(), key=lambda m: m.transition.id)
 
 
+async def may_make_move_with_check(
+    session: AsyncSession, case: Case, user: User, check_code: str
+) -> bool:
+    """Could this user make a move out of the case's current status that carries
+    this check? Lets work that prepares a move (e.g. marking an original as
+    seen) follow the same rules as the move itself: own post, delegation or
+    succession, with no post named in code."""
+    transitions = (
+        await session.scalars(
+            select(WorkflowTransition)
+            .join(TransitionCheck, TransitionCheck.transition_id == WorkflowTransition.id)
+            .where(
+                WorkflowTransition.from_status_id == case.current_status_id,
+                TransitionCheck.check_code == check_code,
+            )
+        )
+    ).all()
+    return bool(transitions) and bool(await _permitted(session, case, user, list(transitions)))
+
+
 async def change_status(
     session: AsyncSession,
     *,
@@ -220,6 +249,10 @@ async def change_status(
         )
     chosen = permitted[0]
     move, delegation, succession = chosen
+    # The move's own checks (e.g. documents complete), named in core.transition_checks.
+    issues = await checks.problems(session, case, move.id)
+    if issues:
+        raise NotReady("Not ready: " + "; ".join(issues))
     if delegation:
         acting_from = delegation.to_position.code
     elif succession:
