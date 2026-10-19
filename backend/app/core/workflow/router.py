@@ -5,13 +5,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.audit.service import history
 from app.core.identity.deps import get_current_user
 from app.core.identity.models import User
-from app.core.workflow import service
+from app.core.workflow import flags, service
 from app.core.workflow.models import Case
 from app.core.workflow.schemas import (
     ActionOut,
     AuditEventOut,
     CaseOut,
     ChangeStatusRequest,
+    FlagOut,
+    ResolveFlagRequest,
     StartCaseRequest,
     StatusOut,
 )
@@ -25,6 +27,8 @@ _ERROR_STATUS = {
     service.TransitionNotAllowed: status.HTTP_409_CONFLICT,  # valid request, wrong moment
     service.AlreadyRevoked: status.HTTP_409_CONFLICT,
     service.AlreadyCancelled: status.HTTP_409_CONFLICT,
+    service.AlreadyResolved: status.HTTP_409_CONFLICT,
+    service.CaseBlocked: status.HTTP_409_CONFLICT,  # valid move, but the case is on hold
     service.InvalidDelegation: status.HTTP_422_UNPROCESSABLE_ENTITY,  # breaks a rule, don't retry
     service.InvalidAbsence: status.HTTP_422_UNPROCESSABLE_ENTITY,
 }
@@ -56,6 +60,9 @@ async def _case_out(session: AsyncSession, case: Case, user: User) -> CaseOut:
             )
             for m in moves
         ],
+        on_hold=bool(await flags.open_flags(session, case.id, blocking_only=True))
+        if service.is_staff(user)
+        else None,
     )
 
 
@@ -113,3 +120,45 @@ async def case_history(
         )
         for e in events
     ]
+
+
+def _flag_out(f) -> FlagOut:
+    return FlagOut(
+        id=f.id,
+        code=f.code,
+        message=f.message,
+        details=f.details,
+        for_position=f.for_position.code,
+        blocking=f.blocking,
+        raised_at=f.raised_at,
+        resolved_at=f.resolved_at,
+        resolved_by=f.resolved_by,
+        resolution=f.resolution,
+    )
+
+
+@router.get("/{case_id}/flags", response_model=list[FlagOut])
+async def case_flags(
+    case_id: int,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    case = await service.get_case(session, case_id, user)
+    if not service.is_staff(user):
+        raise service.NotPermitted("Only Ministry staff can see a case's flags.")
+    return [_flag_out(f) for f in await flags.case_flags(session, case.id)]
+
+
+@router.post("/{case_id}/flags/{flag_id}/resolve", response_model=FlagOut)
+async def resolve_flag(
+    case_id: int,
+    flag_id: int,
+    body: ResolveFlagRequest,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    case = await service.get_case(session, case_id, user)
+    flag = await flags.resolve_flag(
+        session, case_id=case.id, flag_id=flag_id, actor=user, resolution=body.resolution
+    )
+    return _flag_out(flag)

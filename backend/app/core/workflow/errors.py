@@ -35,3 +35,11 @@ class InvalidAbsence(WorkflowError):
 
 class AlreadyCancelled(WorkflowError):
     pass
+
+
+class CaseBlocked(WorkflowError):
+    """The case has an open blocking flag; someone must resolve it first."""
+
+
+class AlreadyResolved(WorkflowError):
+    pass

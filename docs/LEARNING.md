@@ -16,6 +16,21 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 6b — Case flags and the duplicate certificate check (2026-10-19)
+**Built:**
+- **Case flags (core):** `core.case_flags`. A flag is addressed to a post. While a *blocking* flag is open, `change_status()` refuses every move with **409** "This case is on hold until these are resolved: ...". A holder of the flag's post resolves it with a written reason. Raising and resolving are both written to the case's audit history. Staff see `on_hold` on `GET /cases/{id}` (it's `null` for applicants), and `GET /cases/{id}/flags` lists the flags.
+- **Duplicate certificates (ETLS):** when a facility letter is submitted, each certificate of origin number (normalised: upper case, no spaces) is checked against every other case. A number used before doesn't refuse the submission. Instead, the case is flagged for the ETLS desk (`etls.duplicate_certificate_of_origin`), with the repeated numbers and the earlier case ids. Records can't confirm the originals until the desk resolves it.
+- **Two submissions at the same moment:** the check first takes a Postgres advisory lock on each number, so the second submission waits for the first to commit and then sees it. The test proves it: with the lock removed, it fails.
+
+The downgrade test now uses its own empty database (`empty_database_config`). Migration 0015's `downgrade()` rightly refuses to remove facility-letter statuses while cases still use them, and race tests leave committed cases behind.
+
+**Files:** backend/alembic/versions/0016_case_flags.py, backend/app/core/workflow/models.py (`CaseFlag`), backend/app/core/workflow/flags.py, backend/app/core/workflow/service.py (the on-hold check in `change_status()`), backend/app/core/workflow/router.py (`/flags` endpoints, `on_hold`), backend/app/core/workflow/schemas.py, backend/app/core/workflow/errors.py, backend/app/modules/etls/service.py (`_earlier_uses()`), backend/tests/modules/etls/test_duplicate_certificates.py, backend/tests/conftest.py, backend/tests/test_migrations.py
+**Try it:**
+- `docker compose run --rm tools alembic upgrade head`
+- Submit two facility letters with the same certificate number (try `"SN-CO-1"` and `"sn-co 1"`). On the second: `GET /cases/{id}/flags` as staff shows the flag. Records' `POST /cases/{id}/status` gives 409. As the ETLS desk, `POST /cases/{id}/flags/{flag_id}/resolve` with `{"resolution": "..."}`, and Records can move it.
+- `docker compose run --rm tools pytest tests/modules/etls/test_duplicate_certificates.py -v`
+**New concepts:** Advisory locks
+
 ### Step 6a — ETLS facility letter: the module, the workflow and the form (2026-10-19)
 **Built:** the first *module*: backend/app/modules/etls/, with its own Postgres schema `etls`. Migration `0015` adds:
 - workflow `etls_facility_letter`;
@@ -533,12 +548,17 @@ One short explanation per concept, where it lives in this codebase, and one free
 ### Modules on a shared core
 **What:** the core (users, posts, workflow engine, audit) knows nothing about ETLS. A module adds its own tables in its own schema and calls core functions; the core never imports the module or reads its tables. So the next Ministry process can be added without touching ETLS, and the core stays one tested piece.
 **Here:** backend/app/modules/etls/service.py `submit_facility_letter()` calls `workflow.open_case()` from the core, adds `etls.*` rows, and commits once. The tables are in the `etls` schema (backend/alembic/versions/0015_etls_facility_letter.py). `workflows.opened_by_module` tells the core "don't open these yourself".
-**Learn more:** [Martin Fowler: Modular monolith (Monolith First)](https://martinfowler.com/bliki/MonolithFirst.html)
+**Learn more:** [Martin Fowler: Monolith First](https://martinfowler.com/bliki/MonolithFirst.html), on starting with one well-divided app.
 
 ### `NUMERIC` vs floating point
 **What:** a float stores numbers in binary, so most decimals are only approximated: in Python, `0.1 + 0.2 == 0.30000000000000004`. `NUMERIC(14, 3)` stores decimal digits exactly (up to 14 digits, 3 after the point), and Python's `Decimal` keeps them exact. Use it for anything copied onto an official document or added up as money.
 **Here:** `quantity` in `etls.facility_letters`, `Decimal` with `max_digits=14, decimal_places=3` in backend/app/modules/etls/schemas.py. `test_applicant_submits_the_form_and_a_case_opens` checks `1200.5` comes back as exactly `1200.500`.
 **Learn more:** [Python docs: decimal](https://docs.python.org/3/library/decimal.html)
+
+### Advisory locks
+**What:** a lock on a *number you choose*, not on a table row. `pg_advisory_xact_lock(n)` waits until nobody else holds lock `n`, then holds it until your transaction ends. It's for "only one at a time" rules that no row can carry. Here, a certificate number that may not exist in any row yet: `FOR UPDATE` can't lock a row that isn't there. We turn the text "etls.coo:<number>" into a lock number with `hashtextextended()`. We lock several numbers in sorted order, so two transactions can never each hold one lock and wait for the other's (a deadlock).
+**Here:** `_earlier_uses()` in backend/app/modules/etls/service.py. `test_two_submissions_at_the_same_moment_cannot_both_slip_through` holds each transaction open after the check. Without the lock, both submissions go through unflagged; we checked by removing it.
+**Learn more:** [PostgreSQL docs: Advisory locks](https://www.postgresql.org/docs/16/explicit-locking.html#ADVISORY-LOCKS)
 
 ## 3. Decisions
 
@@ -661,6 +681,14 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-19 | No review step between the desk and the PS yet | a placeholder reviewer | We don't know who reviews; a guessed gate would block files. Adding one later is a status and two transitions in a migration. |
 | 2026-10-19 | The desk sends to GRA, closes and rejects (placeholders) | Records; the PS | The desk follows the file from verification on. All three are `[CONFIRM]`. GRA is sent to by hand until the GRA adapter exists. |
 | 2026-10-19 | Form fields are plain checked text (country, unit, product) | fixed lists (ECOWAS countries, units, product codes) | We don't have the lists yet. Lists would make the cement rule (step 6c) much more reliable. |
+| 2026-10-19 | A reused certificate number holds the case for the desk instead of refusing the submission | refuse it with an error; a `UNIQUE` constraint | You asked for "block and flag". It also lets the desk judge real cases (a split shipment) and keeps a record of the attempt, which a refused form wouldn't. |
+| 2026-10-19 | Flags are a core feature; the ETLS module only decides *when* to raise one | an ETLS-only "duplicate" column | Other modules will need "hold this for someone to look at" (missing payment, failed GRA check). Holding a case is the engine's job. |
+| 2026-10-19 | A blocking flag stops *every* move, even rejecting | let some moves through | Simple and safe. The desk records its reason when resolving ("confirmed duplicate, rejecting") and then rejects, so the log explains both. |
+| 2026-10-19 | The on-hold check runs after the permission check | before it | Someone who may not act at all gets 403, not a glimpse of why the case is held. |
+| 2026-10-19 | Only a holder of the flag's post may resolve it; no delegation or succession yet | let acting officers resolve too | Keeps the first version strict. Easy to extend with the same `_permitted()` rules if the Ministry wants it. |
+| 2026-10-19 | Numbers compared normalised (upper case, spaces removed) | exact text | "SN-CO 42" and "sn-co42" are the same paper certificate; exact matching would miss the easiest way round the check. |
+| 2026-10-19 | Advisory lock per number for the duplicate check | a separate registry table with a unique key; `SERIALIZABLE` transactions | No second copy of the numbers to keep in step, and no retry logic. The lock lasts only while one submission is saved. |
+| 2026-10-19 | The downgrade test uses its own empty database | clean up every race test's committed rows | Downgrades that refuse to delete statuses still in use are correct behaviour. The test should prove the migrations reverse, not depend on what other tests left behind. |
 
 ## 4. Open questions
 
@@ -687,6 +715,7 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 - [ ] **Facility letter route:** who reviews between the ETLS desk and the PS? Who sends the letter to GRA, who closes the file, and who may reject (and at which steps)? The placeholder is the ETLS desk for all three. See backend/alembic/versions/0015_etls_facility_letter.py.
 - [ ] **The ETLS desk post:** its real title and department (placeholder: "ETLS Desk Officer", Directorate of Industry and Investment).
 - [ ] **Facility letter form lists:** are there fixed lists for exporter country (ECOWAS members), unit and product? They would make checks such as the cement rule exact.
+- [ ] **Duplicate certificates:** does a number from a *rejected* case count as used? (Right now every earlier use counts.) May anyone besides the ETLS desk clear the flag?
 - [ ] **Who may open an ETLS case:** only the applicant online, or can Records register walk-in applications too?
 - [ ] **Who may see a case:** right now, any staff member sees every case. Should staff see only cases in their directorate, or only cases assigned to them? See `can_view()` in backend/app/core/workflow/service.py.
 - [ ] **What applicants see:** only the current status, or also the steps taken (without internal comments)? See `case_history()` in backend/app/core/workflow/router.py.
@@ -695,6 +724,16 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 6b
+1. A facility letter is submitted with certificate "gm-co 15", and an earlier case used "GM-CO15". What does the importer see, and what does the desk see?
+2. Why does `_earlier_uses()` need an advisory lock? Why not `SELECT ... FOR UPDATE`, as in `get_case()`?
+3. The case is flagged. A Trade Officer (not the ETLS desk) tries to resolve the flag, and then Records tries to confirm the originals. What do they get?
+
+#### Show answers
+1. The importer gets **201**: the submission is accepted and the case opens. On `GET /cases/{id}` they see no flag (`on_hold` is `null` for applicants). The desk sees `on_hold: true` and a flag `etls.duplicate_certificate_of_origin` listing `GM-CO15` and the earlier case id. Both numbers normalise to `GM-CO15`.
+2. Two submissions at the same moment would each check, find no earlier use (the other isn't committed yet), and both go through. `FOR UPDATE` locks rows that exist, and here the row that matters is the one the other transaction is *about to* insert. An advisory lock on the number itself makes the second submission wait until the first commits.
+3. The Trade Officer gets **403** "Only the ETLS Desk Officer can resolve this flag." Records gets **409**: the case is on hold until the flag is resolved.
 
 ### Step 6a
 1. An applicant sends `POST /cases` with `{"workflow": "etls_facility_letter"}`. What happens, and why is that the right answer?

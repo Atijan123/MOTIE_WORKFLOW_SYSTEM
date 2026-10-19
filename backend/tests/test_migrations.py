@@ -29,8 +29,11 @@ async def test_models_match_migrations(db_session):
     assert await conn.run_sync(diff) == []
 
 
-def test_migrations_downgrade_and_upgrade_cleanly(alembic_cfg):
+def test_migrations_downgrade_and_upgrade_cleanly(empty_database_config):
     # Proves every migration's downgrade() works, so a bad release can be rolled
-    # back. Ends at head so the other tests still see the full schema.
-    command.downgrade(alembic_cfg, "base")
-    command.upgrade(alembic_cfg, "head")
+    # back. It uses its own empty database: some downgrades rightly refuse to run
+    # while cases still use what they would remove, and race tests leave
+    # committed cases in the main test database.
+    command.upgrade(empty_database_config, "head")
+    command.downgrade(empty_database_config, "base")
+    command.upgrade(empty_database_config, "head")

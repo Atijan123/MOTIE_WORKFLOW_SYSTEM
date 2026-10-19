@@ -37,6 +37,9 @@ class CaseOut(BaseModel):
     updated_at: datetime
     # What *this* user may do next; the frontend shows one button per action.
     available_actions: list[ActionOut]
+    # True while an open blocking flag holds the case. None for applicants:
+    # a flag can be a fraud suspicion, which isn't theirs to see.
+    on_hold: bool | None
 
 
 class AuditEventOut(BaseModel):
@@ -44,6 +47,24 @@ class AuditEventOut(BaseModel):
     actor_user_id: int | None
     action: str
     details: dict[str, Any]
+
+
+class FlagOut(BaseModel):
+    id: int
+    code: str
+    message: str
+    details: dict[str, Any]
+    for_position: str
+    blocking: bool
+    raised_at: datetime
+    resolved_at: datetime | None
+    resolved_by: int | None
+    resolution: str | None
+
+
+class ResolveFlagRequest(BaseModel):
+    # A reason is required: "checked with the exporter, same shipment split in two".
+    resolution: str = Field(min_length=1, max_length=2000)
 
 
 class CreateDelegationRequest(BaseModel):

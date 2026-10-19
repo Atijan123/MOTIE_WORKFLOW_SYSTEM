@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from typing import Any
 
 from sqlalchemy import (
     BigInteger,
@@ -17,7 +18,9 @@ from sqlalchemy import (
     false,
     func,
     text,
+    true,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.identity.models import Position, Role
@@ -255,3 +258,36 @@ class Absence(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     cancelled_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("core.users.id"))
+
+
+class CaseFlag(Base):
+    """Something about a case that a post must look at. Created by alembic/versions/0016_case_flags.py.
+
+    Raise and resolve only through workflow/flags.py, which writes the audit rows.
+    """
+
+    __tablename__ = "case_flags"
+    __table_args__ = (
+        CheckConstraint(
+            "(resolved_at IS NULL) = (resolved_by IS NULL) AND (resolved_at IS NULL) = (resolution IS NULL)",
+            name="case_flags_resolved_complete",
+        ),
+        Index("case_flags_open_idx", "case_id", postgresql_where=text("resolved_at IS NULL")),
+        {"schema": "core"},
+    )
+    __mapper_args__ = {"eager_defaults": True}
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    case_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("core.cases.id"))
+    code: Mapped[str] = mapped_column(Text)
+    message: Mapped[str] = mapped_column(Text)
+    details: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    for_position_id: Mapped[int] = mapped_column(SmallInteger, ForeignKey("core.positions.id"))
+    blocking: Mapped[bool] = mapped_column(Boolean, server_default=true())
+    raised_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    raised_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("core.users.id"))
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resolved_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("core.users.id"))
+    resolution: Mapped[str | None] = mapped_column(Text)
+
+    for_position: Mapped[Position] = relationship(lazy="selectin", viewonly=True)

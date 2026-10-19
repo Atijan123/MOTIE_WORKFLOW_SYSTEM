@@ -12,9 +12,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.audit.service import record_event
 from app.core.identity.models import User
 from app.core.workflow.delegation import active_delegations_to, is_delegated_away
+from app.core.workflow.flags import open_flags
 from app.core.workflow.errors import (  # noqa: F401  (re-exported: callers use service.NotFound etc.)
     AlreadyCancelled,
+    AlreadyResolved,
     AlreadyRevoked,
+    CaseBlocked,
     InvalidAbsence,
     InvalidDelegation,
     NotFound,
@@ -205,6 +208,13 @@ async def change_status(
     permitted = await _permitted(session, case, actor, list(moves))
     if not permitted:
         raise NotPermitted("None of your positions can make this move.")
+    # Checked after permission, so someone who may not act at all gets 403, not
+    # a peek at why the case is held.
+    blocking = await open_flags(session, case.id, blocking_only=True)
+    if blocking:
+        raise CaseBlocked(
+            "This case is on hold until these are resolved: " + "; ".join(f.message for f in blocking)
+        )
     chosen = permitted[0]
     move, delegation, succession = chosen
     if delegation:

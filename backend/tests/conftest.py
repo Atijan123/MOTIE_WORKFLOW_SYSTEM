@@ -59,7 +59,7 @@ def anyio_backend():
     return "asyncio"
 
 
-async def _recreate_test_database() -> None:
+async def recreate_database(name: str) -> None:
     # CREATE/DROP DATABASE can't run inside a transaction, so use a plain asyncpg
     # connection to the built-in "postgres" database, as the superuser: the
     # owner and app users aren't allowed to create databases.
@@ -73,34 +73,36 @@ async def _recreate_test_database() -> None:
     try:
         # The name comes from our own config, not user input, so building the SQL
         # string here is safe. These statements don't accept $1 parameters.
-        name = TEST_DATABASE_URL.database
         await conn.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
         await conn.execute(f'CREATE DATABASE "{name}" OWNER {TEST_OWNER_URL.username}')
     finally:
         await conn.close()
 
 
-def _alembic_config() -> Config:
-    """Alembic config pointed at the test database instead of the dev one."""
+def alembic_config(database: str) -> Config:
+    """Alembic config pointed at a test database instead of the dev one."""
     cfg = Config(str(BACKEND_DIR / "alembic.ini"))
     cfg.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
-    url = TEST_OWNER_URL.render_as_string(hide_password=False)
+    url = TEST_OWNER_URL.set(database=database).render_as_string(hide_password=False)
     # Alembic's config file format treats % specially, so double it.
     cfg.set_main_option("sqlalchemy.url", url.replace("%", "%%"))
     return cfg
 
 
-@pytest.fixture(scope="session")
-def alembic_cfg() -> Config:
-    return _alembic_config()
-
-
 @pytest.fixture(scope="session", autouse=True)
-def test_database(alembic_cfg):
+def test_database():
     # Rebuilt from scratch every run, so the test database always matches the
     # migrations exactly, even after you edit one during development.
-    asyncio.run(_recreate_test_database())
-    command.upgrade(alembic_cfg, "head")
+    asyncio.run(recreate_database(TEST_DATABASE_URL.database))
+    command.upgrade(alembic_config(TEST_DATABASE_URL.database), "head")
+
+
+@pytest.fixture
+def empty_database_config() -> Config:
+    """Alembic config for a fresh, empty database of its own (for the downgrade test)."""
+    name = f"{TEST_DATABASE_URL.database}_migrations"
+    asyncio.run(recreate_database(name))
+    return alembic_config(name)
 
 
 @pytest.fixture
