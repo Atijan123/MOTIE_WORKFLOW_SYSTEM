@@ -2,22 +2,23 @@
 
 import pytest
 
-# Each staff role in the ETLS chain, and the post its test user holds.
-POSITION_FOR = {
-    "records_officer": "records_officer",
-    "minister": "minister",
-    "permanent_secretary": "permanent_secretary",
-    "director": "director_of_trade",
-    "officer": "trade_officer",
+# Each person in the ETLS chain: their role and the post they hold.
+STAFF = {
+    "records_officer": ("records_officer", "records_officer"),
+    "minister": ("minister", "minister"),
+    "permanent_secretary": ("permanent_secretary", "permanent_secretary"),
+    "dps": ("director", "dps_admin_finance"),  # there's no DPS role; any staff role will do
+    "director": ("director", "director_of_industry"),
+    "officer": ("officer", "industry_officer"),
 }
 
 
 @pytest.fixture
 async def people(make_user):
-    """One user per role in the ETLS chain, each holding the matching post."""
+    """The applicant plus one user per post in the ETLS chain."""
     users = {"applicant": await make_user("applicant")}
-    for role, position in POSITION_FOR.items():
-        users[role] = await make_user(role, positions=[position])
+    for key, (role, position) in STAFF.items():
+        users[key] = await make_user(role, positions=[position])
     return users
 
 

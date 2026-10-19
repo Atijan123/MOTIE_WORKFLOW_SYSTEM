@@ -16,6 +16,29 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 5a — The confirmed ETLS route (2026-10-19)
+**Built:** migration `0012` turns the placeholder ETLS workflow into the route the Ministry confirmed:
+- New posts: Director of Industry and Investment (`director_of_industry`), an Industry and Investment Officer (`industry_officer`) and the Deputy PS, Administration and Finance (`dps_admin_finance`), with their departments.
+- The ETLS route now goes through the PS. The Director's single step, "Sign and assign to an officer", covers both signing and minuting the file to an officer.
+- The Trade posts stay in the org chart, but ETLS no longer uses them.
+
+```
+submitted     --(records_officer: Register and forward to the Minister)--> with_minister
+with_minister --(minister: Minute to the Permanent Secretary)-----------> with_ps
+with_ps       --(permanent_secretary: Minute to the Director)-----------> with_director
+with_director --(director_of_industry: Sign and assign to an officer)----> with_officer
+with_officer  --(industry_officer)--> approved | rejected | back to with_director   [CONFIRM]
+```
+The old "With the Directorate" status was *renamed* to `with_director`, not replaced, so a case already in it keeps a valid status. The officer's three moves are still placeholders: the Ministry hasn't said what the officer does after the Director signs, or who may reject.
+
+The race test now gives its posts back when it ends (`release_posts`). It commits for real, and from step 5d a leftover "race" Minister would count as present in other tests.
+
+**Files:** backend/alembic/versions/0012_confirmed_etls_route.py, backend/tests/core/conftest.py (`STAFF` replaces `POSITION_FOR`, and adds the DPS), backend/tests/core/test_cases.py, backend/tests/core/test_case_race.py, backend/tests/core/test_delegations.py, backend/tests/core/test_workflow_definitions.py (`test_etls_route_is_the_one_the_ministry_confirmed`), backend/tests/core/test_positions.py
+**Try it:**
+- `docker compose run --rm tools alembic upgrade head`, then the transitions query from step 4c: 7 rows, matching the diagram.
+- `docker compose run --rm tools pytest tests/core/test_workflow_definitions.py tests/core/test_cases.py -v`
+**New concepts:** none. See Data migrations, and Changing a column with existing data (expand, backfill, contract).
+
 ### Step 4e — The PS acts for the Minister through delegation (2026-10-19)
 **Built:** migration `0011` removes the placeholder transition from step 3b that let the Permanent Secretary *always* make the Minister's move. Now the PS can only do it while the Minister's post has delegated to the PS post (step 4d). The audit row then says `"as_position": "permanent_secretary", "on_behalf_of": "minister"`. Without a delegation, the PS gets 403 and sees no button.
 
@@ -394,6 +417,17 @@ One short explanation per concept, where it lives in this codebase, and one free
 
 ## 3. Decisions
 
+### Confirmed by the Ministry
+
+These were open questions; the Ministry has answered them. The code follows them and no longer marks them `[CONFIRM]`.
+
+- **Chain of command (2026-10-19):** Minister → Permanent Secretary → Deputy PS.
+- **ETLS route (2026-10-19):** Records → Minister → PS → Director of Industry and Investment. The Director signs the file and assigns it to an officer. See backend/alembic/versions/0012_confirmed_etls_route.py.
+- **Who signs ETLS files (2026-10-19):** the Director of Industry and Investment.
+- **"Assign" means minuting the file to an officer (2026-10-19).** It doesn't pass on the Director's signing power, so delegations still can't be passed on (step 4d).
+
+### Choices made while building
+
 | Date | Decision | Alternatives considered | Why |
 | --- | --- | --- | --- |
 | 2026-10-18 | SQLAlchemy 2.0 async + asyncpg | raw asyncpg; SQLModel | Chosen by you. Widely used, works with Alembic, async fits FastAPI. |
@@ -468,6 +502,11 @@ One short explanation per concept, where it lives in this codebase, and one free
 | 2026-10-19 | `available_actions` always includes `on_behalf_of` (`null` for your own moves) | leave it out when empty | A fixed shape is easier for the frontend. One existing test assertion gained `"on_behalf_of": None`. |
 | 2026-10-19 | The PS placeholder row is deleted by a new migration (0011) | edit migration 0005 so the row was never seeded | Databases that already ran 0005 (yours, and any server) would never lose the row. Migrations that have run are never edited. |
 | 2026-10-19 | The Minister records each absence as a delegation | a standing Minister → PS delegation with no end date | A standing delegation would recreate the placeholder under another name. A dated one shows *when* the PS was entitled to act. |
+| 2026-10-19 | "With the Directorate" renamed to `with_director` in place | delete it and add a new status | Cases point at the status id. Renaming keeps every existing case valid; deleting would fail, or strand them. |
+| 2026-10-19 | The Trade posts stay in the org chart; ETLS moves to the Industry and Investment posts | delete the Trade posts | The Directorate of Trade exists and will have its own work. Deleting posts loses the audit trail's meaning for anyone who held them. |
+| 2026-10-19 | The officer's moves (approve, reject, return) are kept as they were | remove them, or make the Director's signature final | Without them, a case could never finish (the well-formedness test would fail). What the officer really does after signing is still an open question. |
+| 2026-10-19 | The DPS gets the `director` role in tests | add a `deputy_permanent_secretary` role | Roles only say "staff or applicant" now; the post is what counts. A new role waits for the role list question. |
+| 2026-10-19 | A test pins the whole ETLS route, row by row | only count the rows | The route is confirmed now. Any later change to it should be deliberate and show up as a failing test. |
 
 ## 4. Open questions
 
@@ -477,7 +516,7 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 - [ ] **Staff password policy:** does the Government of The Gambia have an ICT policy we must follow (length, expiry, two-factor)?
 - [ ] **Session length:** is 60 minutes before re-login acceptable for officers? (`ACCESS_TOKEN_MINUTES` in settings.)
 - [ ] **Security to-do before going live (not a Ministry question):** rate-limit `/auth/login` against password guessing, and serve the API only over HTTPS. Tokens sent over plain HTTP can be stolen.
-- [ ] **Org chart:** what are the real departments and posts, and who reports to whom? Does the Registry report to the PS? See backend/alembic/versions/0008_positions.py.
+- [ ] **Rest of the org chart:** the chain Minister → PS → DPS is confirmed. Still to check: the exact titles of the DPS and the ETLS officer post, which department the DPS sits in, whether there are other DPS posts, and where the Registry and the Directorate of Trade fit. See 0008 and 0012 in backend/alembic/versions/.
 - [ ] **Single-holder posts:** should the database refuse a second Minister, PS or Director at the same time? Right now any post can have several holders.
 - [ ] **Who may assign posts:** right now only someone with server access, through the CLI. Should an HR or admin officer do it from a screen?
 - [ ] **Who may record a delegation:** only the post holder, or also e.g. the Minister's private secretary or a system admin on their behalf? See `create_delegation()` in backend/app/core/workflow/delegation.py.
@@ -485,8 +524,7 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 - [ ] **Delegation rules:** should a delegation be passed on (PS → Director when both are away)? Should the delegating post be blocked while it is delegated?
 - [ ] **The PS acting for the Minister:** confirm the PS may make *every* Minister's move during an absence (that's what an unscoped delegation allows), or only some, e.g. ETLS only (`"workflow": "etls_application"`).
 - [ ] **Audit retention:** how long must audit records be kept under Gambian public records rules?
-- [ ] **ETLS workflow steps:** is Submitted → Minister → Directorate → Officer → Approved/Rejected the real path? Are there steps such as "returned to applicant for more documents", a fee payment, or an inspection? See backend/alembic/versions/0005_seed_etls_workflow.py.
-- [ ] **Who signs the ETLS approval:** the subject officer, the Director, or the Minister/PS?
+- [ ] **ETLS after the Director signs:** what does the officer do with the file (issue the certificate, notify the applicant)? Who may reject an application, and at which step? Are there steps such as "returned to applicant for more documents", a fee payment or an inspection? See the officer's moves in backend/alembic/versions/0012_confirmed_etls_route.py.
 - [ ] **Who may open an ETLS case:** only the applicant online, or can Records register walk-in applications too?
 - [ ] **Who may see a case:** right now, any staff member sees every case. Should staff see only cases in their directorate, or only cases assigned to them? See `can_view()` in backend/app/core/workflow/service.py.
 - [ ] **What applicants see:** only the current status, or also the steps taken (without internal comments)? See `case_history()` in backend/app/core/workflow/router.py.
@@ -495,6 +533,16 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 5a
+1. A case was "With the Directorate" when you ran migration 0012. Where is it afterwards, and why didn't the migration need to touch `core.cases`?
+2. Why does the ETLS workflow still have an officer "Approve" move, when the Director now signs?
+3. Why does the race test need `release_posts`, when other tests don't clean up after themselves?
+
+#### Show answers
+1. It's "With the Director of Industry and Investment". The case points at the status *id*, and 0012 renamed that status row (`code` and `name`) without changing its id. The next move is then the Director of Industry's "Sign and assign to an officer".
+2. Because the Ministry hasn't said yet what the officer does after the signature, or who may reject. Removing the officer's moves would leave "With the officer" as a dead end, which `test_every_workflow_is_well_formed` refuses. It's an open question.
+3. Other tests run inside a transaction that is rolled back (`db_session`). The race test commits for real on separate connections, so its post holders would stay for the rest of the run. Once absences matter (step 5d), a leftover Minister who isn't absent would make the Minister's post look present.
 
 ### Step 4e
 1. The Minister is in Banjul (no delegation exists). The PS tries to minute an ETLS file to the Directorate. What happens? How would that answer have differed before step 4e?

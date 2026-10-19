@@ -29,10 +29,38 @@ async def test_etls_workflow_is_seeded(db_session):
     assert workflow.start_role.code == "applicant"
 
     statuses, transitions = await _definition(db_session, workflow)
-    assert len(statuses) == 6
-    # Guards against a misspelt code in the seed: that row would be skipped silently.
-    # 7 seeded in 0005, minus the PS placeholder move removed in 0011.
-    assert len(transitions) == 6
+    # 6 seeded in 0005, plus "With the PS" from 0012.
+    assert len(statuses) == 7
+    # Guards against a misspelt code in a migration: that row would be skipped silently.
+    # 7 seeded in 0005, minus the PS placeholder (0011), plus the PS's own step (0012).
+    assert len(transitions) == 7
+
+
+async def test_etls_route_is_the_one_the_ministry_confirmed(db_session):
+    # Records -> Minister -> PS -> Director of Industry and Investment, who signs
+    # and assigns to an officer (confirmed 2026-10-19). The officer's three moves
+    # are still placeholders [CONFIRM].
+    rows = (
+        await db_session.execute(
+            text(
+                "SELECT f.code, t.code, p.code, x.name FROM core.workflow_transitions x "
+                "JOIN core.workflows w ON w.id = x.workflow_id "
+                "JOIN core.workflow_statuses f ON f.id = x.from_status_id "
+                "JOIN core.workflow_statuses t ON t.id = x.to_status_id "
+                "JOIN core.positions p ON p.id = x.required_position_id "
+                "WHERE w.code = 'etls_application'"
+            )
+        )
+    ).all()
+    assert {tuple(r) for r in rows} == {
+        ("submitted", "with_minister", "records_officer", "Register and forward to the Minister"),
+        ("with_minister", "with_ps", "minister", "Minute to the Permanent Secretary"),
+        ("with_ps", "with_director", "permanent_secretary", "Minute to the Director"),
+        ("with_director", "with_officer", "director_of_industry", "Sign and assign to an officer"),
+        ("with_officer", "with_director", "industry_officer", "Return to the Director"),
+        ("with_officer", "approved", "industry_officer", "Approve"),
+        ("with_officer", "rejected", "industry_officer", "Reject"),
+    }
 
 
 async def test_every_workflow_is_well_formed(db_session):

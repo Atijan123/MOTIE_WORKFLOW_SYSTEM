@@ -21,6 +21,9 @@ async def test_placeholder_org_chart_is_seeded(db_session):
         "records_officer",
         "director_of_trade",
         "trade_officer",
+        "dps_admin_finance",
+        "director_of_industry",
+        "industry_officer",
     }
     boss_of = {p.code: by_id[p.reports_to_id].code for p in positions.values() if p.reports_to_id}
     assert boss_of == {
@@ -28,6 +31,9 @@ async def test_placeholder_org_chart_is_seeded(db_session):
         "records_officer": "permanent_secretary",
         "director_of_trade": "permanent_secretary",
         "trade_officer": "director_of_trade",
+        "dps_admin_finance": "permanent_secretary",
+        "director_of_industry": "permanent_secretary",
+        "industry_officer": "director_of_industry",
     }
 
 

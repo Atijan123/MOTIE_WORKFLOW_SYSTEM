@@ -8,7 +8,7 @@ database, which is why it uses its own "race-" emails.
 import asyncio
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit.models import AuditEvent
@@ -33,7 +33,26 @@ async def _user(session, role, position=None, email=None):
     return user
 
 
-async def test_simultaneous_approve_and_reject_cannot_both_succeed(committing_engine):
+@pytest.fixture
+async def release_posts(committing_engine):
+    """Take the race users' posts away again when the test ends, pass or fail.
+
+    Their rows are committed, so without this a "race" Minister would still hold
+    the Minister's post in later tests, and count as present when those tests
+    mark their own Minister absent.
+    """
+    yield
+    async with AsyncSession(committing_engine) as session:
+        await session.execute(
+            text(
+                "DELETE FROM core.position_holders WHERE user_id IN "
+                "(SELECT id FROM core.users WHERE email LIKE 'race-%')"
+            )
+        )
+        await session.commit()
+
+
+async def test_simultaneous_approve_and_reject_cannot_both_succeed(committing_engine, release_posts):
     async with AsyncSession(committing_engine, expire_on_commit=False) as setup:
         applicant = await _user(setup, "applicant")
         people = {
@@ -41,15 +60,17 @@ async def test_simultaneous_approve_and_reject_cannot_both_succeed(committing_en
             for role, position in [
                 ("records_officer", "records_officer"),
                 ("minister", "minister"),
-                ("director", "director_of_trade"),
+                ("permanent_secretary", "permanent_secretary"),
+                ("director", "director_of_industry"),
             ]
         }
-        officer_a = await _user(setup, "officer", "trade_officer", email="race-officer-a@test.gm")
-        officer_b = await _user(setup, "officer", "trade_officer", email="race-officer-b@test.gm")
+        officer_a = await _user(setup, "officer", "industry_officer", email="race-officer-a@test.gm")
+        officer_b = await _user(setup, "officer", "industry_officer", email="race-officer-b@test.gm")
         case = await service.start_case(setup, workflow_code="etls_application", actor=applicant)
         for role, to_status in [
             ("records_officer", "with_minister"),
-            ("minister", "with_directorate"),
+            ("minister", "with_ps"),
+            ("permanent_secretary", "with_director"),
             ("director", "with_officer"),
         ]:
             await service.change_status(

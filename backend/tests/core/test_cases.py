@@ -21,7 +21,8 @@ async def test_case_walks_the_whole_chain_and_every_step_is_audited(act, people)
 
     steps = [
         ("records_officer", "with_minister"),
-        ("minister", "with_directorate"),
+        ("minister", "with_ps"),
+        ("permanent_secretary", "with_director"),
         ("director", "with_officer"),
         ("officer", "approved"),
     ]
@@ -35,9 +36,10 @@ async def test_case_walks_the_whole_chain_and_every_step_is_audited(act, people)
     assert final["available_actions"] == []
 
     history = (await act(people["director"], "get", f"/cases/{case['id']}/history")).json()
-    assert [e["action"] for e in history] == ["case.created"] + ["case.status_changed"] * 4
+    assert [e["action"] for e in history] == ["case.created"] + ["case.status_changed"] * 5
     assert [e["actor_user_id"] for e in history] == [
-        people[r].id for r in ("applicant", "records_officer", "minister", "director", "officer")
+        people[r].id
+        for r in ("applicant", "records_officer", "minister", "permanent_secretary", "director", "officer")
     ]
     assert history[1]["details"]["from"] == "submitted"
     assert history[1]["details"]["to"] == "with_minister"
@@ -86,10 +88,10 @@ async def test_permanent_secretary_can_act_for_the_minister(act, people):
     await _move(act, people["records_officer"], case["id"], "with_minister")
     await _minister_is_away(act, people)
 
-    response = await _move(act, people["permanent_secretary"], case["id"], "with_directorate")
+    response = await _move(act, people["permanent_secretary"], case["id"], "with_ps")
 
     assert response.status_code == 200
-    assert response.json()["status"]["code"] == "with_directorate"
+    assert response.json()["status"]["code"] == "with_ps"
     history = (await act(people["director"], "get", f"/cases/{case['id']}/history")).json()
     assert history[-1]["actor_user_id"] == people["permanent_secretary"].id
     assert history[-1]["details"]["as_position"] == "permanent_secretary"
@@ -102,7 +104,7 @@ async def test_permanent_secretary_cannot_act_for_the_minister_without_a_delegat
 
     as_ps = (await act(people["permanent_secretary"], "get", f"/cases/{case['id']}")).json()
     assert as_ps["available_actions"] == []
-    response = await _move(act, people["permanent_secretary"], case["id"], "with_directorate")
+    response = await _move(act, people["permanent_secretary"], case["id"], "with_ps")
     assert response.status_code == 403
 
 
@@ -124,25 +126,27 @@ async def test_the_position_decides_not_the_role(act, people, make_user):
 async def test_a_new_post_holder_takes_over_at_once(act, people, make_user, db_session):
     case = await _open_case(act, people["applicant"])
     await _move(act, people["records_officer"], case["id"], "with_minister")
-    await _move(act, people["minister"], case["id"], "with_directorate")
+    await _move(act, people["minister"], case["id"], "with_ps")
+    await _move(act, people["permanent_secretary"], case["id"], "with_director")
 
     old_director = people["director"]
     new_director = await make_user("director")
-    await remove_position(db_session, user=old_director, position_code="director_of_trade", actor=None)
-    await assign_position(db_session, user=new_director, position_code="director_of_trade", actor=None)
+    await remove_position(db_session, user=old_director, position_code="director_of_industry", actor=None)
+    await assign_position(db_session, user=new_director, position_code="director_of_industry", actor=None)
 
     # No workflow row changed: the move names the post, and the post changed hands.
     assert (await _move(act, old_director, case["id"], "with_officer")).status_code == 403
     assert (await _move(act, new_director, case["id"], "with_officer")).status_code == 200
 
 
-async def test_officer_can_return_a_case_to_the_directorate(act, people):
+async def test_officer_can_return_a_case_to_the_director(act, people):
     case = await _open_case(act, people["applicant"])
     for role, to_status in [
         ("records_officer", "with_minister"),
-        ("minister", "with_directorate"),
+        ("minister", "with_ps"),
+        ("permanent_secretary", "with_director"),
         ("director", "with_officer"),
-        ("officer", "with_directorate"),
+        ("officer", "with_director"),
     ]:
         assert (await _move(act, people[role], case["id"], to_status)).status_code == 200
 
@@ -151,13 +155,14 @@ async def test_final_status_cannot_be_left(act, people):
     case = await _open_case(act, people["applicant"])
     for role, to_status in [
         ("records_officer", "with_minister"),
-        ("minister", "with_directorate"),
+        ("minister", "with_ps"),
+        ("permanent_secretary", "with_director"),
         ("director", "with_officer"),
         ("officer", "rejected"),
     ]:
         await _move(act, people[role], case["id"], to_status)
 
-    response = await _move(act, people["officer"], case["id"], "with_directorate")
+    response = await _move(act, people["officer"], case["id"], "with_director")
     assert response.status_code == 409
 
 
