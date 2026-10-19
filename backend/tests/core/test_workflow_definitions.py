@@ -31,7 +31,8 @@ async def test_etls_workflow_is_seeded(db_session):
     statuses, transitions = await _definition(db_session, workflow)
     assert len(statuses) == 6
     # Guards against a misspelt code in the seed: that row would be skipped silently.
-    assert len(transitions) == 7
+    # 7 seeded in 0005, minus the PS placeholder move removed in 0011.
+    assert len(transitions) == 6
 
 
 async def test_every_workflow_is_well_formed(db_session):

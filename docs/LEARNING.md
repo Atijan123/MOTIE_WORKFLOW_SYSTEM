@@ -16,6 +16,29 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 4e — The PS acts for the Minister through delegation (2026-10-19)
+**Built:** migration `0011` removes the placeholder transition from step 3b that let the Permanent Secretary *always* make the Minister's move. Now the PS can only do it while the Minister's post has delegated to the PS post (step 4d). The audit row then says `"as_position": "permanent_secretary", "on_behalf_of": "minister"`. Without a delegation, the PS gets 403 and sees no button.
+
+**The ETLS moves now (6, down from 7):**
+```
+submitted --(records_officer: Register and forward)--> with_minister
+with_minister --(minister: Minute to the Directorate)--> with_directorate
+with_directorate --(director_of_trade: Assign to an officer)--> with_officer
+with_officer --(trade_officer)--> approved | rejected | back to with_directorate
+Any of these can also be made by a post the required post has delegated to.
+```
+**Tests changed, and why:**
+- `test_permanent_secretary_can_act_for_the_minister` now first has the Minister delegate for a week (`_minister_is_away`). Its original assertions are unchanged and still pass, and it also checks `on_behalf_of`.
+- `test_etls_workflow_is_seeded` now expects 6 transitions, not 7, because the row really is gone.
+- New: `test_permanent_secretary_cannot_act_for_the_minister_without_a_delegation`.
+
+**Files:** backend/alembic/versions/0011_remove_ps_placeholder_move.py, backend/tests/core/test_cases.py, backend/tests/core/test_workflow_definitions.py
+**Try it:**
+- `docker compose run --rm tools alembic upgrade head`, then rerun the transitions query from step 4c: 6 rows, no `permanent_secretary`.
+- Walk a case to "With the Minister". As the PS, `GET /cases/1` shows no actions. As the Minister, `POST /delegations` with `{"from_position": "minister", "to_position": "permanent_secretary", "starts_on": "<today>", "ends_on": "<today + 6 days>"}`. As the PS, the "Minute to the Directorate" button appears with `"on_behalf_of": "minister"`.
+- `docker compose run --rm tools pytest tests/core/test_cases.py -v`
+**New concepts:** none. This step uses Delegation (acting on behalf of) from step 4d.
+
 ### Step 4d — Delegation (2026-10-19)
 **Built:** `core.delegations`. A holder of a post can let another post act for it from one date to another, both days included, either for every workflow or for one. Example: the Director of Trade is on leave from 3 to 10 March and delegates to the Trade Officer post.
 - The engine now tries the actor's own posts first, then any delegation active *today* to a post they hold. `change_status()` records three keys in the audit row: `as_position` (the post the actor acted from), `on_behalf_of` (whose authority they used, or `null`) and `delegation_id`.
@@ -403,7 +426,7 @@ One short explanation per concept, where it lives in this codebase, and one free
 | 2026-10-18 | One generic audit table (`entity_type` + `entity_id` + JSON `details`) | a separate history table per record type | Every module can log to it, and "show everything user X did" is one query. |
 | 2026-10-18 | `record_event()` never commits | commit inside it | So a change and its audit row are always saved in the same transaction. |
 | 2026-10-18 | Transitions name a required *role* for now | name a *position* (e.g. "Director of Trade") | CLAUDE.md says approvals attach to positions, with delegation for absences. Positions need their own tables. Until then, roles keep the engine working, and switching the column later is one migration. **Done in step 4c (migration 0009).** |
-| 2026-10-18 | The PS gets the Minister's move as a second transition row | delegation | Placeholder for "PS when the Minister is away". With real delegation, the PS row goes and the Minister delegates when absent. |
+| 2026-10-18 | The PS gets the Minister's move as a second transition row | delegation | Placeholder for "PS when the Minister is away". With real delegation, the PS row goes and the Minister delegates when absent. **Done in step 4e (migration 0011).** |
 | 2026-10-18 | One role may start a workflow (`workflows.start_role_id`) | a link table allowing several roles | Enough for ETLS. Becomes a table if Records also needs to open cases for walk-in applicants (see Open questions). |
 | 2026-10-18 | The ETLS definition is seeded in the shared migration chain | a separate `etls` module migration | There's only one Alembic chain so far. When the `etls` schema arrives, its data can move with it. |
 | 2026-10-18 | Database constraints guard the workflow's structure; tests guard its logic | everything in Python | Constraints (one initial status, statuses from the same workflow) protect against any client. Rules like "no dead ends" need a whole-graph check, which is easier as a test. |
@@ -443,6 +466,8 @@ One short explanation per concept, where it lives in this codebase, and one free
 | 2026-10-19 | If several delegations cover the same post, the oldest is recorded | the newest; refuse overlaps | Any of them gives the same right. Refusing overlaps would block a sensible fix ("I set the wrong end date, here's a second one"). |
 | 2026-10-19 | Errors moved to `errors.py`; `service.py` still re-exports them | keep them in `service.py` | `delegation.py` needs them and `service.py` needs `delegation.py`. Importing each other would be a circular import. |
 | 2026-10-19 | `available_actions` always includes `on_behalf_of` (`null` for your own moves) | leave it out when empty | A fixed shape is easier for the frontend. One existing test assertion gained `"on_behalf_of": None`. |
+| 2026-10-19 | The PS placeholder row is deleted by a new migration (0011) | edit migration 0005 so the row was never seeded | Databases that already ran 0005 (yours, and any server) would never lose the row. Migrations that have run are never edited. |
+| 2026-10-19 | The Minister records each absence as a delegation | a standing Minister → PS delegation with no end date | A standing delegation would recreate the placeholder under another name. A dated one shows *when* the PS was entitled to act. |
 
 ## 4. Open questions
 
@@ -458,6 +483,7 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 - [ ] **Who may record a delegation:** only the post holder, or also e.g. the Minister's private secretary or a system admin on their behalf? See `create_delegation()` in backend/app/core/workflow/delegation.py.
 - [ ] **Delegation limits:** is 90 days the right maximum (`MAX_DELEGATION_DAYS`)? Is back-dating ever needed, e.g. after an emergency?
 - [ ] **Delegation rules:** should a delegation be passed on (PS → Director when both are away)? Should the delegating post be blocked while it is delegated?
+- [ ] **The PS acting for the Minister:** confirm the PS may make *every* Minister's move during an absence (that's what an unscoped delegation allows), or only some, e.g. ETLS only (`"workflow": "etls_application"`).
 - [ ] **Audit retention:** how long must audit records be kept under Gambian public records rules?
 - [ ] **ETLS workflow steps:** is Submitted → Minister → Directorate → Officer → Approved/Rejected the real path? Are there steps such as "returned to applicant for more documents", a fee payment, or an inspection? See backend/alembic/versions/0005_seed_etls_workflow.py.
 - [ ] **Who signs the ETLS approval:** the subject officer, the Director, or the Minister/PS?
@@ -469,6 +495,16 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 4e
+1. The Minister is in Banjul (no delegation exists). The PS tries to minute an ETLS file to the Directorate. What happens? How would that answer have differed before step 4e?
+2. Why did we write a new migration (0011) instead of deleting the PS line from migration 0005?
+3. The Minister delegates to the PS for ETLS only. What does the audit row look like when the PS minutes a file?
+
+#### Show answers
+1. **403**, and `available_actions` is empty for the PS. Before 4e the PS had their own transition row for that move, so it would have succeeded at any time, with nothing in the log showing the Minister was away.
+2. Migrations that have already run are never edited. Your dev database (and any server) ran 0005 and has the row. Alembic only runs migrations a database hasn't had yet, so an edited 0005 would never run there and the row would stay. A new migration removes it everywhere, and its `downgrade()` can put it back.
+3. `"as_position": "permanent_secretary"`, `"on_behalf_of": "minister"`, `"delegation_id": <its id>`, together with `from`, `to`, `transition` and `comment` as before. `actor_user_id` is the PS's user id.
 
 ### Step 4d
 1. The Director delegates to the Trade Officer post from 3 to 10 March. On 11 March a Trade Officer tries to assign a file. What happens, and which line decides it?

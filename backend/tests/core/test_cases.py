@@ -1,8 +1,11 @@
 """The workflow engine, tested through the HTTP API with the seeded ETLS workflow."""
 
+from datetime import timedelta
+
 import pytest
 
 from app.core.identity.service import assign_position, remove_position
+from app.core.workflow.delegation import today
 from tests.support import move as _move
 from tests.support import open_case as _open_case
 
@@ -60,14 +63,47 @@ async def test_the_right_move_by_the_wrong_role_is_forbidden(act, people):
         assert response.status_code == 403, role
 
 
+async def _minister_is_away(act, people):
+    """The Minister delegates their post to the PS for the coming week."""
+    response = await act(
+        people["minister"],
+        "post",
+        "/delegations",
+        json={
+            "from_position": "minister",
+            "to_position": "permanent_secretary",
+            "starts_on": today().isoformat(),
+            "ends_on": (today() + timedelta(days=6)).isoformat(),
+            "reason": "Travelling",
+        },
+    )
+    assert response.status_code == 201, response.text
+
+
 async def test_permanent_secretary_can_act_for_the_minister(act, people):
+    # Since step 4e this works through real delegation, not a standing rule.
     case = await _open_case(act, people["applicant"])
     await _move(act, people["records_officer"], case["id"], "with_minister")
+    await _minister_is_away(act, people)
 
     response = await _move(act, people["permanent_secretary"], case["id"], "with_directorate")
 
     assert response.status_code == 200
     assert response.json()["status"]["code"] == "with_directorate"
+    history = (await act(people["director"], "get", f"/cases/{case['id']}/history")).json()
+    assert history[-1]["actor_user_id"] == people["permanent_secretary"].id
+    assert history[-1]["details"]["as_position"] == "permanent_secretary"
+    assert history[-1]["details"]["on_behalf_of"] == "minister"
+
+
+async def test_permanent_secretary_cannot_act_for_the_minister_without_a_delegation(act, people):
+    case = await _open_case(act, people["applicant"])
+    await _move(act, people["records_officer"], case["id"], "with_minister")
+
+    as_ps = (await act(people["permanent_secretary"], "get", f"/cases/{case['id']}")).json()
+    assert as_ps["available_actions"] == []
+    response = await _move(act, people["permanent_secretary"], case["id"], "with_directorate")
+    assert response.status_code == 403
 
 
 async def test_the_position_decides_not_the_role(act, people, make_user):
