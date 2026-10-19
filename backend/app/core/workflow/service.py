@@ -80,9 +80,29 @@ async def get_case(
 
 
 async def start_case(session: AsyncSession, *, workflow_code: str, actor: User) -> Case:
+    """Open a case of a workflow that needs no module form (POST /cases)."""
+    case = await open_case(session, workflow_code=workflow_code, actor=actor, module=None)
+    await session.commit()
+    await session.refresh(case, ["workflow", "current_status"])
+    return case
+
+
+async def open_case(
+    session: AsyncSession, *, workflow_code: str, actor: User, module: str | None
+) -> Case:
+    """Add a new case and its audit row to the current transaction. Does NOT commit.
+
+    A module calls this with its own name, saves its form rows, then commits
+    once, so a case can never exist without its form. `module` must match the
+    workflow's opened_by_module: the generic endpoint can't open module cases.
+    """
     workflow = await session.scalar(select(Workflow).where(Workflow.code == workflow_code))
     if workflow is None:
         raise NotFound(f"No workflow called '{workflow_code}'.")
+    if workflow.opened_by_module != module:
+        raise NotPermitted(
+            f"Cases of '{workflow_code}' are opened through the {workflow.opened_by_module} module."
+        )
     if workflow.start_role.code not in actor.role_codes:
         raise NotPermitted("Your role can't open this kind of case.")
 
@@ -102,8 +122,6 @@ async def start_case(session: AsyncSession, *, workflow_code: str, actor: User) 
         entity_id=case.id,
         details={"workflow": workflow.code, "status": initial.code},
     )
-    await session.commit()
-    await session.refresh(case, ["workflow", "current_status"])
     return case
 
 

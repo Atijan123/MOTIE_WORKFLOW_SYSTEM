@@ -37,7 +37,7 @@ from app.core.identity.security import create_access_token
 from app.core.identity.service import assign_position, create_user
 from app.db.session import get_session
 from app.main import app
-from tests.support import TEST_PASSWORD
+from tests.support import STAFF, TEST_PASSWORD
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 
@@ -196,3 +196,22 @@ async def client(db_session):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+async def people(make_user):
+    """The applicant plus one user per post in the ETLS chain."""
+    users = {"applicant": await make_user("applicant")}
+    for key, (role, position) in STAFF.items():
+        users[key] = await make_user(role, positions=[position])
+    return users
+
+
+@pytest.fixture
+def act(client, auth_headers):
+    """Shortcut: `await act(user, "post", "/cases/1/status", json=...)`."""
+
+    async def _act(user, method, url, **kwargs):
+        return await getattr(client, method)(url, headers=auth_headers(user), **kwargs)
+
+    return _act

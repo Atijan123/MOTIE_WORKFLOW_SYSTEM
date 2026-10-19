@@ -11,7 +11,7 @@ from tests.support import open_case as _open_case
 
 pytestmark = pytest.mark.anyio
 
-# Fixtures `people` and `act` live in tests/core/conftest.py.
+# Fixtures `people` and `act` live in tests/conftest.py.
 
 
 async def test_case_walks_the_whole_chain_and_every_step_is_audited(act, people):

@@ -16,6 +16,35 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 6a — ETLS facility letter: the module, the workflow and the form (2026-10-19)
+**Built:** the first *module*: backend/app/modules/etls/, with its own Postgres schema `etls`. Migration `0015` adds:
+- workflow `etls_facility_letter`;
+- an ETLS Desk Officer post `[CONFIRM]`;
+- three form tables: `etls.facility_letters` (one row per case) and child tables for the product approval numbers and the certificate of origin numbers ("one or more" of each).
+
+`POST /etls/facility-letters` (applicants) checks the form and opens the case *and* saves the form in one transaction. `GET /etls/facility-letters/{case_id}` reads it back, using the core's visibility rule.
+```
+submitted          --(records_officer: Confirm originals received)--> originals_received
+originals_received --(etls_desk_officer: Verify)--------------------> verified
+                   --(etls_desk_officer: Reject)--------------------> rejected      [CONFIRM]
+verified           --(permanent_secretary: Sign the facility letter)-> signed        [CONFIRM reviewer before the PS]
+signed             --(etls_desk_officer: Send to GRA)----------------> sent_to_gra   [CONFIRM who]
+sent_to_gra        --(etls_desk_officer: Close the file)-------------> closed        [CONFIRM who]
+```
+Core changes:
+- `workflows.opened_by_module`: the generic `POST /cases` refuses module workflows, which would open a case with no form.
+- `start_case()` is split, so a module can call `open_case()` (no commit), add its rows, then commit once.
+
+The `people`/`act` fixtures moved to backend/tests/conftest.py, and `STAFF` (now with `desk`) to backend/tests/support.py, so module tests can use them too.
+
+**Files:** backend/alembic/versions/0015_etls_facility_letter.py, backend/app/modules/etls/ (`models.py`, `schemas.py`, `service.py`, `router.py`), backend/app/models.py, backend/app/main.py, backend/app/core/workflow/models.py (`opened_by_module`), backend/app/core/workflow/service.py (`open_case()`), backend/tests/modules/etls/test_facility_letter.py, backend/tests/conftest.py, backend/tests/support.py (`STAFF`, `facility_letter_form()`), backend/tests/core/test_db_privileges.py (now checks `etls` too)
+**Try it:**
+- `docker compose run --rm tools alembic upgrade head`
+- Log in as an applicant and `POST /etls/facility-letters` with the example body from `facility_letter_form()` in backend/tests/support.py. Then try a quantity of `0`, or the same certificate written twice (`"CO 1"` and `"co1"`): both give 422.
+- `docker compose exec db psql -U motie -d motie -c "SELECT * FROM etls.facility_letters"`
+- `docker compose run --rm tools pytest tests/modules/etls -v`
+**New concepts:** Modules on a shared core, `NUMERIC` vs floating point
+
 ### Step 5d — Acting for an absent post (2026-10-19)
 **Built:** the engine now uses absences and the succession order. For each move, `_permitted()` in backend/app/core/workflow/service.py tries three bases, in this order:
 1. **Own:** you hold the post the move needs. This works even while you're marked absent (you might be working remotely).
@@ -501,6 +530,16 @@ One short explanation per concept, where it lives in this codebase, and one free
 **Here:** the order is `core.succession_orders` (0013), absences are `core.absences` (0014), and `acting_successor()` in backend/app/core/workflow/succession.py combines them. `_permitted()` in backend/app/core/workflow/service.py decides between own post, delegation and succession.
 **Learn more:** [Wikipedia: Order of succession](https://en.wikipedia.org/wiki/Order_of_succession). The same idea, applied to heads of state.
 
+### Modules on a shared core
+**What:** the core (users, posts, workflow engine, audit) knows nothing about ETLS. A module adds its own tables in its own schema and calls core functions; the core never imports the module or reads its tables. So the next Ministry process can be added without touching ETLS, and the core stays one tested piece.
+**Here:** backend/app/modules/etls/service.py `submit_facility_letter()` calls `workflow.open_case()` from the core, adds `etls.*` rows, and commits once. The tables are in the `etls` schema (backend/alembic/versions/0015_etls_facility_letter.py). `workflows.opened_by_module` tells the core "don't open these yourself".
+**Learn more:** [Martin Fowler: Modular monolith (Monolith First)](https://martinfowler.com/bliki/MonolithFirst.html)
+
+### `NUMERIC` vs floating point
+**What:** a float stores numbers in binary, so most decimals are only approximated: in Python, `0.1 + 0.2 == 0.30000000000000004`. `NUMERIC(14, 3)` stores decimal digits exactly (up to 14 digits, 3 after the point), and Python's `Decimal` keeps them exact. Use it for anything copied onto an official document or added up as money.
+**Here:** `quantity` in `etls.facility_letters`, `Decimal` with `max_digits=14, decimal_places=3` in backend/app/modules/etls/schemas.py. `test_applicant_submits_the_form_and_a_case_opens` checks `1200.5` comes back as exactly `1200.500`.
+**Learn more:** [Python docs: decimal](https://docs.python.org/3/library/decimal.html)
+
 ## 3. Decisions
 
 ### Confirmed by the Ministry
@@ -614,6 +653,14 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-19 | The audit row keeps the key `on_behalf_of` for "acting for", and adds `basis` and `absence_ids` | a new `acting_for` key | Rows from step 4d already use `on_behalf_of`. One key for one meaning, however the right arose, keeps history queries simple. |
 | 2026-10-19 | `absence_ids` lists the skipped successors' absences too | only the needed post's absence | "Why did the DPS sign for the Minister?" needs both answers: the Minister was away, and so was the PS. |
 | 2026-10-19 | `available_actions` shows `on_behalf_of` for succession moves; no `basis` field there | add `basis` to the API | The button only needs "for whom". The response shape stays the same, so no existing test or client changes. |
+| 2026-10-19 | The facility letter is a module (backend/app/modules/etls/, schema `etls`) | put its tables in `core` | CLAUDE.md: one schema per module, and modules never touch each other's tables. ETLS fields don't belong in the shared core. |
+| 2026-10-19 | Module migrations stay in the one Alembic chain | a separate chain per module | One chain keeps the order of core and module changes obvious (0015 needs core tables from 0014). Split it when a second module arrives, if needed. |
+| 2026-10-19 | The case and its form are saved in one transaction (`open_case()` doesn't commit) | open the case, then save the form in a second request | A case without its form would be a half-filed application nobody can process. |
+| 2026-10-19 | The generic `POST /cases` refuses workflows with `opened_by_module` set | trust callers to use the right endpoint | Workflows are data: the rule is a column, not code that knows about ETLS. |
+| 2026-10-19 | "One or more" numbers are child tables, not arrays or JSON | `TEXT[]` or JSONB columns | Each certificate number needs its own row for the duplicate check (step 6b) and an index to find earlier uses. |
+| 2026-10-19 | No review step between the desk and the PS yet | a placeholder reviewer | We don't know who reviews; a guessed gate would block files. Adding one later is a status and two transitions in a migration. |
+| 2026-10-19 | The desk sends to GRA, closes and rejects (placeholders) | Records; the PS | The desk follows the file from verification on. All three are `[CONFIRM]`. GRA is sent to by hand until the GRA adapter exists. |
+| 2026-10-19 | Form fields are plain checked text (country, unit, product) | fixed lists (ECOWAS countries, units, product codes) | We don't have the lists yet. Lists would make the cement rule (step 6c) much more reliable. |
 
 ## 4. Open questions
 
@@ -637,6 +684,9 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 - [ ] **Who may record an absence on someone's behalf?** Placeholder: anyone with the `absence_recorder` role (e.g. the Minister's private secretary, HR). Should it instead be tied to posts, e.g. "the Minister's office may record the Minister's absences"? See backend/app/core/workflow/absence.py.
 - [ ] **Audit retention:** how long must audit records be kept under Gambian public records rules?
 - [ ] **ETLS after the Director signs:** what does the officer do with the file (issue the certificate, notify the applicant)? Who may reject an application, and at which step? Are there steps such as "returned to applicant for more documents", a fee payment or an inspection? See the officer's moves in backend/alembic/versions/0012_confirmed_etls_route.py.
+- [ ] **Facility letter route:** who reviews between the ETLS desk and the PS? Who sends the letter to GRA, who closes the file, and who may reject (and at which steps)? The placeholder is the ETLS desk for all three. See backend/alembic/versions/0015_etls_facility_letter.py.
+- [ ] **The ETLS desk post:** its real title and department (placeholder: "ETLS Desk Officer", Directorate of Industry and Investment).
+- [ ] **Facility letter form lists:** are there fixed lists for exporter country (ECOWAS members), unit and product? They would make checks such as the cement rule exact.
 - [ ] **Who may open an ETLS case:** only the applicant online, or can Records register walk-in applications too?
 - [ ] **Who may see a case:** right now, any staff member sees every case. Should staff see only cases in their directorate, or only cases assigned to them? See `can_view()` in backend/app/core/workflow/service.py.
 - [ ] **What applicants see:** only the current status, or also the steps taken (without internal comments)? See `case_history()` in backend/app/core/workflow/router.py.
@@ -645,6 +695,16 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 6a
+1. An applicant sends `POST /cases` with `{"workflow": "etls_facility_letter"}`. What happens, and why is that the right answer?
+2. Saving the certificate numbers fails halfway through `submit_facility_letter()`. Is there a case without a form left behind? Why not?
+3. Why is `quantity` a `NUMERIC(14, 3)` and not a `float`?
+
+#### Show answers
+1. **403**: "Cases of 'etls_facility_letter' are opened through the etls module." `open_case()` compares the workflow's `opened_by_module` (`etls`) with the caller's `module` (none). Otherwise the case would have no form, and nobody could process it.
+2. No. `open_case()` only adds the case and its audit row to the transaction. `submit_facility_letter()` commits once, after adding the form rows. If anything fails before that, the whole transaction is rolled back: no case, no audit row, no form.
+3. Floats approximate decimals in binary. A quantity typed as `1200.5` must appear exactly on an official letter to GRA. `NUMERIC` stores decimal digits exactly, and the schema refuses more than 3 decimal places instead of silently rounding.
 
 ### Step 5d
 1. The Minister is recorded absent and has *not* delegated. The DPS (who is at work) tries the Minister's step while the PS is also at work. What happens, and why?

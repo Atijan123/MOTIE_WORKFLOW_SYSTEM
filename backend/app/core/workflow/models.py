@@ -37,6 +37,9 @@ class Workflow(Base):
     code: Mapped[str] = mapped_column(Text, unique=True)
     name: Mapped[str] = mapped_column(Text)
     start_role_id: Mapped[int] = mapped_column(SmallInteger, ForeignKey("core.roles.id"))
+    # Set (e.g. "etls") when the module's own endpoint opens these cases, because
+    # each case needs the module's form saved with it. Added in 0015.
+    opened_by_module: Mapped[str | None] = mapped_column(Text)
 
     start_role: Mapped[Role] = relationship(lazy="selectin", viewonly=True)
 

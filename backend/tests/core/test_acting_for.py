@@ -10,8 +10,7 @@ import pytest
 
 from app.core.identity.service import remove_position
 from app.core.workflow import delegation
-from tests.core.conftest import STAFF
-from tests.support import move, open_case
+from tests.support import STAFF, move, open_case
 
 pytestmark = pytest.mark.anyio
 

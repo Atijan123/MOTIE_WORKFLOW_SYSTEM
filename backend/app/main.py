@@ -8,6 +8,7 @@ from app.core.workflow import absence_router, delegation_router
 from app.core.workflow import router as workflow
 from app.core.workflow.service import WorkflowError
 from app.db.session import engine
+from app.modules.etls import router as etls
 
 
 @asynccontextmanager
@@ -25,4 +26,5 @@ app.include_router(identity.router)
 app.include_router(workflow.router)
 app.include_router(delegation_router.router)
 app.include_router(absence_router.router)
+app.include_router(etls.router)
 app.add_exception_handler(WorkflowError, workflow.workflow_error_handler)

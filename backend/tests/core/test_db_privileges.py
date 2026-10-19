@@ -95,7 +95,7 @@ async def test_every_table_is_owned_by_motie_owner_and_readable_by_the_app(owner
             text(
                 "SELECT schemaname || '.' || tablename AS name, tableowner, "
                 "has_table_privilege('motie_app', schemaname || '.' || tablename, 'SELECT') AS readable "
-                "FROM pg_tables WHERE schemaname = 'core'"
+                "FROM pg_tables WHERE schemaname IN ('core', 'etls')"
             )
         )
     ).all()
