@@ -1,10 +1,13 @@
-from fastapi import APIRouter, Depends, status
+import re
+
+from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.identity.deps import get_current_user
 from app.core.identity.models import User
 from app.core.workflow import service as workflow
 from app.db.session import get_session
+from app.modules.etls import letter as facility_letter
 from app.modules.etls import service
 from app.modules.etls.models import FacilityLetter
 from app.modules.etls.schemas import FacilityLetterForm, FacilityLetterOut
@@ -48,3 +51,26 @@ async def get_facility_letter(
     session: AsyncSession = Depends(get_session),
 ):
     return await _out(session, await service.get_facility_letter(session, case_id, user), user)
+
+
+@router.get(
+    "/facility-letters/{case_id}/letter.pdf",
+    response_class=Response,
+    responses={200: {"content": {"application/pdf": {}}}},
+)
+async def download_facility_letter(
+    case_id: int,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """The signed letter to GRA, made fresh from the case's data each time."""
+    fields = await facility_letter.letter_fields(session, case_id, user)
+    name = re.sub(r"[^A-Za-z0-9-]+", "-", fields.file_reference).strip("-")
+    return Response(
+        content=facility_letter.render_pdf(fields),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="facility-letter-{name}.pdf"',
+            "X-Content-Type-Options": "nosniff",
+        },
+    )

@@ -1,0 +1,30 @@
+Ministry of Trade, Industry, Regional Integration and Employment
+The Quadrangle, Banjul, The Gambia
+
+Our ref: $file_reference
+Date: $date
+
+The Commissioner General
+Gambia Revenue Authority
+Banjul
+
+**Subject: Request for ETLS facility: $importer_name**
+
+The Ministry confirms that the goods described below, imported by $importer_name, originate from an ECOWAS Member State and qualify for treatment under the ECOWAS Trade Liberalisation Scheme (ETLS). You are kindly requested to grant the importer the ETLS facility for this consignment.
+
+Product: $product
+Quantity: $quantity
+Exporter: $exporter_name, $exporter_country
+Exporter's ETLS approval number: $exporter_approval_number
+Product approval number(s): $product_approval_numbers
+Certificate(s) of origin: $certificate_numbers
+
+Yours faithfully,
+
+
+
+$signer_name
+$signer_title
+$acting_for
+
+cc: $importer_name, $importer_address

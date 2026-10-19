@@ -1,5 +1,10 @@
-from pydantic import Field
+from string import Formatter
+
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
+
+# The only placeholders a file reference format may use.
+REFERENCE_FIELDS = {"year", "case_id"}
 
 
 class Settings(BaseSettings):
@@ -21,6 +26,20 @@ class Settings(BaseSettings):
     document_storage_dir: str = "/data/documents"
     # Bigger uploads are refused (413) while they stream in, before they fill the disk.
     max_upload_bytes: int = 10 * 1024 * 1024
+
+    # [CONFIRM] The Ministry's file reference format for ETLS facility letters.
+    # Placeholders: {year} and {case_id}, e.g. {case_id:05d} for 00042.
+    facility_letter_reference_format: str = "MOTIE/ETLS/FL/{year}/{case_id:05d}"
+
+    @field_validator("facility_letter_reference_format")
+    @classmethod
+    def _only_known_placeholders(cls, value: str) -> str:
+        # str.format() can reach into objects ("{case_id.__class__}"), so allow
+        # plain known names only, and fail at startup rather than on a letter.
+        for _, field, _, _ in Formatter().parse(value):
+            if field is not None and field not in REFERENCE_FIELDS:
+                raise ValueError(f"unknown placeholder {{{field}}}; use only {sorted(REFERENCE_FIELDS)}")
+        return value
 
 
 settings = Settings()

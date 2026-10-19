@@ -16,6 +16,24 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 6e — The facility letter PDF (2026-10-19)
+**Built:** `GET /etls/facility-letters/{case_id}/letter.pdf` returns the letter to GRA once the case is signed (409 before that; staff only). It's built in two halves, in backend/app/modules/etls/letter.py:
+- `letter_fields()` gathers the fields from the database:
+  - file reference, date, importer, product, quantity and unit, exporter and country, the exporter's ETLS approval number, product approval numbers, certificate numbers;
+  - the **signature block from the audit row of the "Sign" move**: the signer's name and post. If they signed acting for the PS (by delegation or succession), it adds "for the Permanent Secretary".
+- `render_pdf()` fills the text template backend/app/modules/etls/templates/facility_letter.txt (Python's built-in `string.Template`, `$name` placeholders, `**bold line**`) and lays it out on A4 with **fpdf2** (your choice; new library, `fpdf2==2.8.9`).
+
+The addressee (Commissioner General, GRA), the subject "Request for ETLS facility: [importer]" and "cc: [importer]" are in the template. The **file reference** comes from the setting `FACILITY_LETTER_REFERENCE_FORMAT` `[CONFIRM]`, default `MOTIE/ETLS/FL/{year}/{case_id:05d}` (e.g. `MOTIE/ETLS/FL/2026/00042`). Only `{year}` and `{case_id}` are allowed, checked when the app starts.
+
+**Files:** backend/app/modules/etls/letter.py, backend/app/modules/etls/templates/facility_letter.txt, backend/app/modules/etls/router.py, backend/app/core/config.py, backend/requirements.txt, backend/tests/modules/etls/test_letter.py
+**Try it:**
+- `docker compose build` (new library), `docker compose up -d`.
+- Walk a facility letter to "Signed by the PS" (step 6d shows how to get past Records), then as the desk open `localhost:8000/etls/facility-letters/<id>/letter.pdf` with your token (in `/docs`, use "Download file").
+- To change the reference format, add `FACILITY_LETTER_REFERENCE_FORMAT: "MOTIE/ETLS/{year}/{case_id}"` under the `api` service's `environment` in docker-compose.yml. A bad placeholder stops the API at startup with a clear message.
+- To change the wording, edit the template file; no Python changes.
+- `docker compose run --rm tools pytest tests/modules/etls/test_letter.py -v`
+**New concepts:** Generating documents from a template
+
 ### Step 6d — Transition checks, and originals seen in person (2026-10-19)
 **Built:** a move can now require named **checks** before it's allowed (migration `0018`):
 - **Which** move needs which check is data: `core.transition_checks` (transition id + check name).
@@ -628,6 +646,11 @@ One short explanation per concept, where it lives in this codebase, and one free
 **Here:** backend/app/core/workflow/checks.py `register()` and `problems()`, called from `change_status()`. Registrations at the bottom of backend/app/core/documents/service.py.
 **Learn more:** [Python Packaging Guide: creating and discovering plugins](https://packaging.python.org/en/latest/guides/creating-and-discovering-plugins/), the same idea at package scale.
 
+### Generating documents from a template
+**What:** keep *what* a letter says (a text file with placeholders) apart from *how* it's printed (code that lays text out on a page), and apart from *where the facts come from* (database queries). Each part can then change without the others: the Ministry rewords the letter, ICT changes the layout, or a field moves to another table. Testing is easier too. The fields are a plain object you can check, and the PDF can be written uncompressed so tests can find the printed text in its bytes.
+**Here:** `letter_fields()` (facts), templates/facility_letter.txt (words) and `render_pdf()` (layout) in backend/app/modules/etls/. `string.Template` only replaces `$names`; unlike `str.format()` it can't reach into objects, which is why we use it for text people may edit.
+**Learn more:** [Python docs: Template strings](https://docs.python.org/3/library/string.html#template-strings), [fpdf2 tutorial](https://py-pdf.github.io/fpdf2/Tutorial.html)
+
 ## 3. Decisions
 
 ### Confirmed by the Ministry
@@ -772,6 +795,13 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-19 | "Original seen" may be marked by whoever may make the move that needs it | name the Records post in code; any staff member | No post in code, and delegation and succession apply automatically. |
 | 2026-10-19 | "Seen" belongs to one upload; a newer scan must be seen again | mark the document *type* as seen | The audit row records which scan (by checksum) was compared with the original. A later scan could differ. |
 | 2026-10-19 | Moves that aren't ready still appear in `available_actions` | hide them | The officer sees the button and gets a clear list of what's missing. Hiding it would leave them guessing. `GET /cases/{id}/documents` shows the checklist beforehand. |
+| 2026-10-19 | fpdf2 with a plain-text template | WeasyPrint + HTML; ReportLab | Chosen by you. Pure Python, no system libraries, small. |
+| 2026-10-19 | The letter is made fresh from the case's data on each download | store the PDF as a document when it's signed | The data it's made from can't change (the form is insert-only, the signature is an audit row). The catch: a later template change would also change old letters. Storing the issued PDF is an open question. |
+| 2026-10-19 | The signature block comes from the audit row of the "Sign" move | a separate "signed_by" column | One source of truth for who acted and for whom (step 5d). The letter can never disagree with the history. |
+| 2026-10-19 | The letter date is the day it was signed, not the day it's downloaded | today | A reprint next month must say the same thing. |
+| 2026-10-19 | The reference format allows only `{year}` and `{case_id}`, checked at startup | any `str.format()` string | `str.format()` can read object attributes (`{case_id.__class__}`). A bad setting should stop the server at startup, not break the first letter. |
+| 2026-10-19 | Built-in PDF fonts (Latin-1); other characters print as "?" | ship a Unicode font file | Covers English and French names. A font file (e.g. DejaVu Sans) can be added later without other changes. |
+| 2026-10-19 | Only staff can download the letter | the applicant too (they're copied) | The importer gets the copy the Ministry sends. Opening it to applicants is one line, once confirmed. |
 
 ## 4. Open questions
 
@@ -800,6 +830,9 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 - [ ] **Facility letter form lists:** are there fixed lists for exporter country (ECOWAS members), unit and product? They would make checks such as the cement rule exact.
 - [ ] **Duplicate certificates:** does a number from a *rejected* case count as used? (Right now every earlier use counts.) May anyone besides the ETLS desk clear the flag?
 - [ ] **Originals:** besides the certificate of origin, must any other paper original be seen in person (e.g. the invoice)? It's one column per document (`original_required`).
+- [ ] **Facility letter text:** the exact wording, the Ministry's address line and letterhead, and the GRA address. See backend/app/modules/etls/templates/facility_letter.txt.
+- [ ] **File reference format:** what is the Ministry's real format? Placeholder `MOTIE/ETLS/FL/{year}/{case_id:05d}` (`FACILITY_LETTER_REFERENCE_FORMAT`).
+- [ ] **Issued letters:** should the PDF be stored when it's signed or sent to GRA, so later template changes never alter an issued letter? May the importer download it?
 - [ ] **The cement receipt:** which receipt is it (e.g. a payment receipt for a cement levy)? And should cement be recognised from a product list rather than the word "cement" in free text? See backend/alembic/versions/0017_documents.py.
 - [ ] **Document type names:** are "Business registration certificate", "Annual returns certificate", "Certificate of origin", "Invoice" (commercial invoice?) and "Export declaration" the official names?
 - [ ] **Who may upload, and until when:** right now the applicant and any staff member, until the case is closed.
@@ -812,6 +845,16 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 6e
+1. The PS is on leave and the DPS signs. What does the signature block say, and where does that information come from?
+2. Someone sets `FACILITY_LETTER_REFERENCE_FORMAT` to `MOTIE/{case_id.__class__}`. What happens, and when?
+3. Why does the test call `render_pdf(fields, compress=False)` before searching the PDF for text?
+
+#### Show answers
+1. The DPS's name, "Deputy Permanent Secretary, Administration and Finance", then "for the Permanent Secretary". `letter_fields()` reads the audit row of the move to `signed`: the actor, `as_position` and `on_behalf_of` (recorded by the engine in step 5d).
+2. The API refuses to start: `_only_known_placeholders()` in backend/app/core/config.py finds the placeholder `case_id.__class__`, which isn't `year` or `case_id`, and pydantic raises a validation error. Better at startup than on the day a letter is needed.
+3. PDFs normally compress each page's contents, so the words aren't readable in the raw bytes. Without compression, every printed line appears as text in the file, so the test can check what the letter actually says.
 
 ### Step 6d
 1. Records tries to confirm "originals received" with the invoice missing *and* the original certificate not yet seen. What do they get?

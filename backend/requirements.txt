@@ -6,3 +6,4 @@ pydantic-settings==2.7.0
 alembic==1.14.0
 pwdlib[argon2]==0.2.1
 PyJWT==2.10.1
+fpdf2==2.8.9
