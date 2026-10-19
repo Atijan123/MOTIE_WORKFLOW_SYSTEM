@@ -189,3 +189,37 @@ class Delegation(Base):
         foreign_keys=[to_position_id], lazy="selectin", viewonly=True
     )
     workflow: Mapped[Workflow | None] = relationship(lazy="selectin", viewonly=True)
+
+
+class SuccessionStep(Base):
+    """One place in a post's line of succession. Created by alembic/versions/0013_succession_orders.py.
+
+    Read by workflow/succession.py; written only by migrations.
+    """
+
+    __tablename__ = "succession_orders"
+    __table_args__ = (
+        CheckConstraint("rank >= 1", name="succession_orders_rank_positive"),
+        CheckConstraint("successor_position_id <> position_id", name="succession_orders_not_self"),
+        UniqueConstraint(
+            "position_id",
+            "workflow_id",
+            "rank",
+            name="succession_orders_rank_key",
+            postgresql_nulls_not_distinct=True,
+        ),
+        UniqueConstraint(
+            "position_id",
+            "workflow_id",
+            "successor_position_id",
+            name="succession_orders_successor_key",
+            postgresql_nulls_not_distinct=True,
+        ),
+        {"schema": "core"},
+    )
+
+    id: Mapped[int] = mapped_column(SmallInteger, Identity(), primary_key=True)
+    position_id: Mapped[int] = mapped_column(SmallInteger, ForeignKey("core.positions.id"))
+    workflow_id: Mapped[int | None] = mapped_column(SmallInteger, ForeignKey("core.workflows.id"))
+    rank: Mapped[int] = mapped_column(SmallInteger)
+    successor_position_id: Mapped[int] = mapped_column(SmallInteger, ForeignKey("core.positions.id"))

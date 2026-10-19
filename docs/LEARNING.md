@@ -16,6 +16,24 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 5b — Succession orders (2026-10-19)
+**Built:** `core.succession_orders`, the Ministry's standing rule for who is next in line when a post's holder is away. Each row says "when *post* is absent, *successor* is next, at *rank*", for every workflow or for one. Migration `0013` seeds:
+
+| Post | Workflow | 1st in line | 2nd in line |
+| --- | --- | --- | --- |
+| Minister | all | Permanent Secretary | DPS Admin & Finance `[CONFIRM]` |
+| Permanent Secretary | all | DPS Admin & Finance | |
+| Director of Industry and Investment | ETLS only | DPS Admin & Finance | |
+
+`succession_order()` in backend/app/core/workflow/succession.py returns the line for a post and a workflow. If a post has rows for that workflow, they *replace* its general rows. Nothing uses the table yet: step 5c records absences, and step 5d lets the engine act on them.
+
+**Files:** backend/alembic/versions/0013_succession_orders.py, backend/app/core/workflow/models.py (`SuccessionStep`), backend/app/core/workflow/succession.py, backend/tests/core/test_succession.py
+**Try it:**
+- `docker compose run --rm tools alembic upgrade head`
+- `docker compose exec db psql -U motie -d motie -c "SELECT p.code AS post, w.code AS workflow, s.rank, n.code AS next_in_line FROM core.succession_orders s JOIN core.positions p ON p.id = s.position_id JOIN core.positions n ON n.id = s.successor_position_id LEFT JOIN core.workflows w ON w.id = s.workflow_id ORDER BY p.code, s.rank"`
+- `docker compose run --rm tools pytest tests/core/test_succession.py -v`
+**New concepts:** NULL in unique constraints (`NULLS NOT DISTINCT`)
+
 ### Step 5a — The confirmed ETLS route (2026-10-19)
 **Built:** migration `0012` turns the placeholder ETLS workflow into the route the Ministry confirmed:
 - New posts: Director of Industry and Investment (`director_of_industry`), an Industry and Investment Officer (`industry_officer`) and the Deputy PS, Administration and Finance (`dps_admin_finance`), with their departments.
@@ -415,6 +433,11 @@ One short explanation per concept, where it lives in this codebase, and one free
 **Here:** `today()` in backend/app/core/workflow/delegation.py. `test_a_delegation_only_works_between_its_dates` in backend/tests/core/test_delegations.py moves "today" to the day before, the day after and the last day.
 **Learn more:** [pytest docs: monkeypatch](https://docs.pytest.org/en/stable/how-to/monkeypatch.html)
 
+### NULL in unique constraints (`NULLS NOT DISTINCT`)
+**What:** in SQL, `NULL` means "unknown", so two NULLs are never equal. Usually that's harmless, but it means a `UNIQUE (position_id, workflow_id, rank)` would let two general rules (workflow empty) share rank 1: Postgres doesn't see them as duplicates. Postgres 15 added `NULLS NOT DISTINCT`, which makes the constraint treat every NULL as the same value.
+**Here:** `succession_orders_rank_key` and `succession_orders_successor_key` in backend/alembic/versions/0013_succession_orders.py. The `same-rank` case in backend/tests/core/test_succession.py only passes because of it.
+**Learn more:** [PostgreSQL docs: Unique constraints](https://www.postgresql.org/docs/16/ddl-constraints.html#DDL-CONSTRAINTS-UNIQUE-CONSTRAINTS)
+
 ## 3. Decisions
 
 ### Confirmed by the Ministry
@@ -507,6 +530,11 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-19 | The officer's moves (approve, reject, return) are kept as they were | remove them, or make the Director's signature final | Without them, a case could never finish (the well-formedness test would fail). What the officer really does after signing is still an open question. |
 | 2026-10-19 | The DPS gets the `director` role in tests | add a `deputy_permanent_secretary` role | Roles only say "staff or applicant" now; the post is what counts. A new role waits for the role list question. |
 | 2026-10-19 | A test pins the whole ETLS route, row by row | only count the rows | The route is confirmed now. Any later change to it should be deliberate and show up as a failing test. |
+| 2026-10-19 | Succession is its own table, not a kind of delegation | standing delegations with no end date | A delegation is a person's choice for their own absence; succession is the Ministry's rule. Keeping them apart lets the audit log say which one was used, and lets the engine give delegations priority. |
+| 2026-10-19 | One line of succession per post, with ranks; no following of chains | look up each successor's own successor | The confirmed rule lists the whole chain (Minister → PS → DPS), so one list says it all and is easy to read. |
+| 2026-10-19 | A workflow-specific line replaces the post's general line for that workflow | add the two together | "For ETLS the Director is covered by DPS Admin & Finance" is a complete answer. Adding lists together would make the order hard to predict. |
+| 2026-10-19 | The PS's line (PS → DPS) is seeded too | seed only the Minister's line | It follows from the confirmed general chain. Without it, files would stop at "With the PS" whenever the PS is away. |
+| 2026-10-19 | Succession rules are loaded by migrations; the app only reads them | an admin screen | Same rule as workflows and the org chart: rare changes, reviewed like code. |
 
 ## 4. Open questions
 
@@ -523,6 +551,8 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 - [ ] **Delegation limits:** is 90 days the right maximum (`MAX_DELEGATION_DAYS`)? Is back-dating ever needed, e.g. after an emergency?
 - [ ] **Delegation rules:** should a delegation be passed on (PS → Director when both are away)? Should the delegating post be blocked while it is delegated?
 - [ ] **The PS acting for the Minister:** confirm the PS may make *every* Minister's move during an absence (that's what an unscoped delegation allows), or only some, e.g. ETLS only (`"workflow": "etls_application"`).
+- [ ] **Which DPS covers the Minister's step when both the Minister and the PS are away?** Placeholder: DPS Administration and Finance, the only DPS post we know of. See backend/alembic/versions/0013_succession_orders.py.
+- [ ] **The PS's own line:** we assumed the general chain means DPS Admin & Finance also covers the PS. Confirm.
 - [ ] **Audit retention:** how long must audit records be kept under Gambian public records rules?
 - [ ] **ETLS after the Director signs:** what does the officer do with the file (issue the certificate, notify the applicant)? Who may reject an application, and at which step? Are there steps such as "returned to applicant for more documents", a fee payment or an inspection? See the officer's moves in backend/alembic/versions/0012_confirmed_etls_route.py.
 - [ ] **Who may open an ETLS case:** only the applicant online, or can Records register walk-in applications too?
@@ -533,6 +563,16 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 5b
+1. The Ministry adds a rule: for ETLS only, the Minister is covered by the DPS straight away. Which rows does `succession_order()` return for the Minister on an ETLS case, and on a case of another workflow?
+2. Without `NULLS NOT DISTINCT`, what mistake could a migration make without the database noticing?
+3. Why is the PS → DPS row in the seed, when the Ministry only spelled out the Minister's chain and the Director's ETLS rule?
+
+#### Show answers
+1. On ETLS: only the DPS, because the ETLS rows *replace* the Minister's general line. On any other workflow: the general line, PS then DPS. `test_a_workflow_rule_replaces_the_general_one` checks exactly this.
+2. Insert two general rules for the same post with the same rank (or the same successor). Two NULLs are never equal, so the unique constraint wouldn't fire, and the order between the two rows would be a coin toss.
+3. The confirmed general chain is Minister → PS → DPS, so we read it as "the DPS covers the PS" too. Without it, files would stop at "With the PS" whenever the PS is away. It's listed under Open questions so the Ministry can confirm.
 
 ### Step 5a
 1. A case was "With the Directorate" when you ran migration 0012. Where is it afterwards, and why didn't the migration need to touch `core.cases`?
