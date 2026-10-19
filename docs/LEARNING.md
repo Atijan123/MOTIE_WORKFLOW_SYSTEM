@@ -16,6 +16,29 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 4a — Separate database users (2026-10-19)
+**Built:** the API no longer logs in to Postgres as the superuser. There are now three database users, each with one job:
+- `motie` (`POSTGRES_USER`, the superuser): only used by db/init/10-db-users.sh and to create the test database.
+- `motie_owner`: owns the database, the schemas and every table. Migrations run as it.
+- `motie_app`: what the API logs in as. It owns nothing, so it can't `ALTER` or `DROP` tables or disable the audit triggers. Migration `0007` grants it only what the API needs, table by table: read-only on roles and workflow definitions, no `DELETE` on users and cases, and only `SELECT` and `INSERT` on the audit log.
+
+Migrations and tests now run in a new one-off `tools` container, which has the owner's password. The long-running `api` container only gets `motie_app`'s.
+
+**Files:** db/init/10-db-users.sh, backend/alembic/versions/0007_app_privileges.py, docker-compose.yml, .env.example, backend/alembic/env.py, backend/app/core/config.py, backend/tests/conftest.py (`owner_session`), backend/tests/core/test_db_privileges.py, backend/tests/core/test_audit.py, backend/tests/core/test_workflow_definitions.py, CLAUDE.md (commands)
+**Try it:**
+- **Your `.env` needs two new passwords:** `MIGRATION_DB_PASSWORD` and `APP_DB_PASSWORD`. I added generated ones to your local `.env`. On any other machine, copy them from `.env.example` and change them.
+- **Commands changed.** Migrations: `docker compose run --rm tools alembic upgrade head`. Tests: `docker compose run --rm tools pytest -v`. `docker compose exec api alembic ...` now stops with "MIGRATION_DATABASE_URL is not set". That's on purpose: the API container doesn't have the owner's password.
+- A database created before this step (your dev one, or a server) needs the users script once, then the migration. I've already done both on your dev database:
+  ```
+  docker compose up -d
+  docker compose exec db bash /docker-entrypoint-initdb.d/10-db-users.sh
+  docker compose run --rm tools alembic upgrade head
+  ```
+  On a brand-new volume, Postgres runs the script by itself the first time it starts.
+- Try to switch off the audit protection as the app: `docker compose exec db psql -U motie_app -d motie -c "ALTER TABLE core.audit_log DISABLE TRIGGER ALL"` gives `ERROR: must be owner of table audit_log`. The same with `-c "DELETE FROM core.audit_log"` gives `permission denied`.
+- `docker compose run --rm tools pytest tests/core/test_db_privileges.py tests/core/test_audit.py -v`
+**New concepts:** Least privilege (database users), GRANT and table ownership, One-off containers (Compose profiles)
+
 ### Step 3c — Cases moving through the workflow (2026-10-18)
 **Built:** `core.cases` (one row per file, holding its current status) and the workflow engine in backend/app/core/workflow/service.py, the only code that creates cases or changes their status. `change_status()` does five things:
 1. Locks the case row.
@@ -34,25 +57,25 @@ Applicants see only their own cases. Someone else's case returns the same 404 as
 
 **Files:** backend/alembic/versions/0006_cases.py, backend/app/core/workflow/models.py (`Case`), backend/app/core/workflow/service.py, backend/app/core/workflow/schemas.py, backend/app/core/workflow/router.py, backend/app/main.py, backend/tests/core/test_cases.py, backend/tests/core/test_case_race.py
 **Try it:**
-1. `docker compose exec api alembic upgrade head`
+1. `docker compose run --rm tools alembic upgrade head`
 2. Create one user per role with the CLI (step 2b): `applicant`, `records_officer`, `minister`, `director`, `officer`.
 3. In `localhost:8000/docs`, log in as the applicant and `POST /cases` with `{"workflow": "etls_application"}`.
 4. Log in as the records officer, `GET /cases/1`, and look at `available_actions`. Then `POST /cases/1/status` with `{"to_status": "with_minister", "comment": "Registered"}`.
 5. Try something illegal, such as the officer approving straight away, and watch it get a 409 or 403.
 6. `GET /cases/1/history` as staff shows every step, with who and when.
-- `docker compose exec api pytest tests/core/test_cases.py tests/core/test_case_race.py -v`
+- `docker compose run --rm tools pytest tests/core/test_cases.py tests/core/test_case_race.py -v`
 **New concepts:** Row locking (`SELECT ... FOR UPDATE`), Hiding existence with 404
 
 ### Step 3b — Workflow definitions as data (2026-10-18)
 **Built:** three tables that *describe* a workflow. `workflows` holds the process and the role that may start one. `workflow_statuses` holds its steps, with one marked initial and some marked final. `workflow_transitions` holds the allowed moves, each with the role that may make it. The database refuses a second initial status and refuses a move that points into another workflow's status. Migration `0005` seeds a placeholder ETLS workflow `[CONFIRM]`. Tests check that every workflow has exactly one start, no dead ends, no moves out of final statuses, and no unreachable statuses.
 **Files:** backend/alembic/versions/0004_workflow_definitions.py, backend/alembic/versions/0005_seed_etls_workflow.py, backend/app/core/workflow/models.py, backend/tests/core/test_workflow_definitions.py
 **Try it:**
-- `docker compose exec api alembic upgrade head`
+- `docker compose run --rm tools alembic upgrade head`
 - See the ETLS moves as a table:
   ```
   docker compose exec db psql -U motie -d motie -c "SELECT f.code AS from_status, t.code AS to_status, r.code AS role, x.name FROM core.workflow_transitions x JOIN core.workflow_statuses f ON f.id = x.from_status_id JOIN core.workflow_statuses t ON t.id = x.to_status_id JOIN core.roles r ON r.id = x.required_role_id ORDER BY x.id"
   ```
-- `docker compose exec api pytest tests/core/test_workflow_definitions.py -v`
+- `docker compose run --rm tools pytest tests/core/test_workflow_definitions.py -v`
 **The placeholder ETLS workflow:**
 ```
 submitted --(records_officer: Register and forward)--> with_minister
@@ -66,9 +89,9 @@ with_officer --(officer)--> approved | rejected | back to with_directorate
 **Built:** `core.audit_log`, one row per event: who, what action, which record, when, and details as JSON. Postgres triggers reject every `UPDATE`, `DELETE` and `TRUNCATE` on it, so history can't be rewritten even with raw SQL. `record_event()` adds a row to the *current* transaction without committing, so the change and its audit row are saved together. `history()` lists a record's events, oldest first.
 **Files:** backend/alembic/versions/0003_audit_log.py, backend/app/core/audit/models.py, backend/app/core/audit/service.py, backend/app/models.py, backend/tests/core/test_audit.py
 **Try it:**
-- `docker compose exec api alembic upgrade head`
+- `docker compose run --rm tools alembic upgrade head`
 - See the protection yourself: `docker compose exec db psql -U motie -d motie -c "DELETE FROM core.audit_log"` gives `ERROR: core.audit_log is append-only: DELETE is not allowed`.
-- `docker compose exec api pytest tests/core/test_audit.py -v`
+- `docker compose run --rm tools pytest tests/core/test_audit.py -v`
 **New concepts:** Append-only audit log, Database triggers, Transactions (all-or-nothing)
 
 ### Step 2c — Login with tokens (2026-10-18)
@@ -78,27 +101,27 @@ with_officer --(officer)--> approved | rejected | back to with_directorate
 - **Your `.env` now needs `JWT_SECRET`.** I added a generated one to your local `.env`. On any other machine, generate one as `.env.example` shows. Compose refuses to start without it.
 - `docker compose up --build`, create a user with the CLI (step 2b), then open `localhost:8000/docs`. Run `POST /auth/login`, copy the `access_token`, click **Authorize**, paste it, and run `GET /auth/me`.
 - Or with curl: `curl -X POST localhost:8000/auth/login -H "Content-Type: application/json" -d '{"email":"you@motie.gov.gm","password":"..."}'`
-- `docker compose exec api pytest tests/core/test_auth.py -v`
+- `docker compose run --rm tools pytest tests/core/test_auth.py -v`
 **New concepts:** JWT access tokens, Authentication vs authorization (401 vs 403), User enumeration
 
 ### Step 2b — Roles and users (2026-10-18)
 **Built:** three tables in `core`. `roles` comes pre-filled with placeholder Ministry roles `[CONFIRM]`. `users` holds email, name, an Argon2 password hash, an active flag and a creation time. `user_roles` links them, because one person can hold several roles. A service function `create_user` enforces the rules: lowercase unique email, known roles only, password at least 12 characters. A CLI creates users from the terminal. A new test fails if the Python table classes and the migrations ever disagree.
 **Files:** backend/alembic/versions/0002_roles_and_users.py, backend/app/core/identity/models.py, backend/app/core/identity/security.py, backend/app/core/identity/service.py, backend/app/core/identity/cli.py, backend/app/models.py, backend/tests/core/test_users.py, backend/tests/test_migrations.py
 **Try it:**
-- `docker compose up --build` (new library: pwdlib), then `docker compose exec api alembic upgrade head`.
+- `docker compose up --build` (new library: pwdlib), then `docker compose run --rm tools alembic upgrade head`.
 - Create your own admin: `docker compose exec api python -m app.core.identity.cli create-user --email you@motie.gov.gm --name "Your Name" --role admin`
 - Look at the result in psql: `docker compose exec db psql -U motie -d motie -c "SELECT id, email, left(password_hash, 30) FROM core.users"`. The hash starts with `$argon2id$`.
-- `docker compose exec api pytest -v`
+- `docker compose run --rm tools pytest -v`
 **New concepts:** Password hashing, ORM models vs migrations
 
 ### Step 2a — Alembic and the core schema (2026-10-18)
 **Built:** Alembic migrations, set up for our async engine. Migration `0001` creates the `core` schema, where all shared tables will live. The test suite now rebuilds `motie_test` from the migrations on every run, and one test downgrades everything and upgrades again to prove every migration can be rolled back.
 **Files:** backend/alembic.ini, backend/alembic/env.py, backend/alembic/versions/0001_core_schema.py, backend/app/db/base.py, backend/app/models.py, backend/tests/conftest.py, backend/tests/test_migrations.py
 **Try it:**
-- `docker compose exec api alembic upgrade head` applies migrations to your dev database. Run this after pulling new migrations.
-- `docker compose exec api alembic current` shows which migration the database is at.
-- `docker compose exec api alembic upgrade head --sql` prints the SQL without running it.
-- `docker compose exec api pytest -v`
+- `docker compose run --rm tools alembic upgrade head` applies migrations to your dev database. Run this after pulling new migrations.
+- `docker compose run --rm tools alembic current` shows which migration the database is at.
+- `docker compose run --rm tools alembic upgrade head --sql` prints the SQL without running it.
+- `docker compose run --rm tools pytest -v`
 **New concepts:** Database migrations, Postgres schemas
 
 ### Step 1 — FastAPI skeleton connected to Postgres (2026-10-18)
@@ -106,7 +129,7 @@ with_officer --(officer)--> approved | rejected | back to with_directorate
 **Files:** docker-compose.yml, .env.example, backend/Dockerfile, backend/requirements.txt, backend/requirements-dev.txt, backend/app/main.py, backend/app/core/config.py, backend/app/db/session.py, backend/app/api/health.py, backend/tests/conftest.py, backend/tests/test_health.py
 **Try it:**
 - `docker compose up --build`, then `curl localhost:8000/health` and `curl localhost:8000/health/db`.
-- `docker compose exec api pytest -v` runs the tests inside the API container.
+- `docker compose run --rm tools pytest -v` runs the tests (since step 4a, in the tools container).
 - `docker compose stop db`, then `curl -i localhost:8000/health/db` should give 503 with no hostnames or usernames in the body. Bring it back with `docker compose start db`.
 - From your own machine, a database tool connects to `localhost:5433` (not 5432).
 **New concepts:** Docker Compose networking, Connection pool, Liveness vs readiness, Lifespan and `yield` dependencies, Test database with rollback
@@ -220,6 +243,21 @@ One short explanation per concept, where it lives in this codebase, and one free
 **Here:** backend/app/core/workflow/service.py `get_case()`. Tested by `test_applicants_only_see_their_own_cases`.
 **Learn more:** [OWASP: Insecure Direct Object Reference](https://cheatsheetseries.owasp.org/cheatsheets/Insecure_Direct_Object_Reference_Prevention_Cheat_Sheet.html)
 
+### Least privilege (database users)
+**What:** give each program only the rights it needs. If someone breaks into the API, they get whatever the API's database login can do. If that login owns the tables, they can switch off the audit trigger and rewrite history. As `motie_app`, they can only do what the API itself does. So there are three logins with three jobs: the superuser creates logins, the owner changes the structure (migrations), and the app reads and writes rows.
+**Here:** db/init/10-db-users.sh creates the users. docker-compose.yml gives the `api` container only `motie_app`'s password. backend/tests/core/test_db_privileges.py checks what `motie_app` can't do.
+**Learn more:** [OWASP Database Security Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Database_Security_Cheat_Sheet.html)
+
+### GRANT and table ownership
+**What:** in Postgres, whoever creates a table owns it. Only the owner (or a superuser) can `ALTER` or `DROP` it or touch its triggers. Everyone else needs a `GRANT` for each action: `SELECT`, `INSERT`, `UPDATE`, `DELETE`, `TRUNCATE`. Postgres checks privileges *before* it runs triggers, so the app's `DELETE FROM core.audit_log` fails with "permission denied" and never reaches the trigger. The trigger is now a second wall, and it holds even against the owner.
+**Here:** backend/alembic/versions/0007_app_privileges.py. Every future migration that adds a table must add its own `GRANT`. If one forgets, `test_every_table_is_owned_by_motie_owner_and_readable_by_the_app` names the table.
+**Learn more:** [PostgreSQL docs: Privileges](https://www.postgresql.org/docs/16/ddl-priv.html)
+
+### One-off containers (Compose profiles)
+**What:** `docker compose run --rm tools <command>` starts a fresh container from the `tools` service, runs one command, then deletes the container (`--rm`). `profiles: ["tools"]` stops `docker compose up` from starting it. We use it for jobs that need the owner's password, so that password never sits in a server that runs all day.
+**Here:** the `tools` service in docker-compose.yml.
+**Learn more:** [Docker docs: docker compose run](https://docs.docker.com/reference/cli/docker/compose/run/), [Using profiles with Compose](https://docs.docker.com/compose/how-tos/profiles/)
+
 ## 3. Decisions
 
 | Date | Decision | Alternatives considered | Why |
@@ -250,7 +288,7 @@ One short explanation per concept, where it lives in this codebase, and one free
 | 2026-10-18 | No refresh tokens yet | short access token + long refresh token | Keeps step 2 small. Users log in again after 60 minutes. Revisit with the frontend. |
 | 2026-10-18 | Login takes a JSON body | OAuth2 password form (`OAuth2PasswordRequestForm`) | The form version needs another library (`python-multipart`). JSON is all the Next.js frontend needs. |
 | 2026-10-18 | `JWT_SECRET` must be at least 32 characters, or the app won't start | accept anything | A short secret can be brute-forced, which would let someone forge logins as anyone. |
-| 2026-10-18 | Append-only enforced by a database trigger | only "be careful in Python"; `REVOKE UPDATE, DELETE` permissions | A trigger protects against every client, and works even while the app connects as the table owner. Revoking permissions is added before go-live (see Open questions). |
+| 2026-10-18 | Append-only enforced by a database trigger | only "be careful in Python"; `REVOKE UPDATE, DELETE` permissions | A trigger protects against every client, even the table owner. Since step 4a the app also has no `UPDATE`/`DELETE` rights on it, so there are two walls. |
 | 2026-10-18 | One generic audit table (`entity_type` + `entity_id` + JSON `details`) | a separate history table per record type | Every module can log to it, and "show everything user X did" is one query. |
 | 2026-10-18 | `record_event()` never commits | commit inside it | So a change and its audit row are always saved in the same transaction. |
 | 2026-10-18 | Transitions name a required *role* for now | name a *position* (e.g. "Director of Trade") | CLAUDE.md says approvals attach to positions, with delegation for absences. Positions need their own tables. Until then, roles keep the engine working, and switching the column later is one migration. |
@@ -264,6 +302,14 @@ One short explanation per concept, where it lives in this codebase, and one free
 | 2026-10-18 | 409 for "move not possible from here", 403 for "move exists but not for your role" | 400 for both | The frontend can show "this file has already moved on" (409) differently from "you can't do this" (403). |
 | 2026-10-18 | Engine errors are Python exceptions, turned into HTTP codes in one handler | raise `HTTPException` inside the service | The service stays usable from the CLI, background jobs and tests, without knowing about HTTP. |
 | 2026-10-18 | Applicants can't read the history | show applicants everything | History holds internal minutes and comments. Applicants see the current status only, until the Ministry decides otherwise. |
+| 2026-10-19 | Three database users: the superuser only for setup, `motie_owner` for migrations, `motie_app` for the API | app connects as owner and we `REVOKE` some rights; migrations run as the superuser | The owner can always disable its own table's triggers, so the app must not be the owner. Migrations as the superuser would give migration code unlimited rights over the whole server; `motie_owner` can change our tables and nothing else. |
+| 2026-10-19 | Database users created by a shell script in `docker-entrypoint-initdb.d`, safe to run again by hand | create them in a migration | Creating logins needs the superuser, and migrations deliberately don't have it. The passwords also stay in `.env`, out of committed files. |
+| 2026-10-19 | Fixed user names (`motie_owner`, `motie_app`), passwords from `.env` | names set in `.env` too | Migration 0007 needs the name to `GRANT` to. One server runs one copy of the platform, so there's nothing to configure. |
+| 2026-10-19 | Grants written out table by table in each migration | `ALTER DEFAULT PRIVILEGES` (new tables granted automatically) | Automatic grants fail *open*: a new append-only table would quietly get `DELETE`. Explicit grants fail *closed*: forget one and the API gets "permission denied", which a test catches straight away. |
+| 2026-10-19 | The app gets no `DELETE` on users and cases, and only `SELECT` on roles and workflow definitions | read and write everything | These were already our rules ("users are deactivated, never deleted"; "workflows are loaded by migrations"). Now the database enforces them too. |
+| 2026-10-19 | Migrations and tests run in a one-off `tools` container; the `api` container only has `motie_app`'s password | give the API container the owner's URL too, so `docker compose exec api alembic` keeps working | A dev Compose file tends to get copied to production. Keeping the owner's password out of the server that runs all day costs a few seconds per command. |
+| 2026-10-19 | Tests run the code as `motie_app` | run tests as the owner | A missing grant then fails a test, not the Ministry server. The few tests that write workflow rows use `owner_session`. |
+| 2026-10-19 | A database from before step 4a is handed over to `motie_owner` by the same script | wipe the volume and start again | No data is lost, and a Ministry server set up the old way would need the same handover. |
 
 ## 4. Open questions
 
@@ -273,7 +319,6 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 - [ ] **Staff password policy:** does the Government of The Gambia have an ICT policy we must follow (length, expiry, two-factor)?
 - [ ] **Session length:** is 60 minutes before re-login acceptable for officers? (`ACCESS_TOKEN_MINUTES` in settings.)
 - [ ] **Security to-do before going live (not a Ministry question):** rate-limit `/auth/login` against password guessing, and serve the API only over HTTPS. Tokens sent over plain HTTP can be stolen.
-- [ ] **Security to-do before going live:** the app connects as the database owner (`POSTGRES_USER`), who can disable triggers. Create a separate app database user with no rights to `ALTER` tables or to `UPDATE`/`DELETE` on `core.audit_log`.
 - [ ] **Audit retention:** how long must audit records be kept under Gambian public records rules?
 - [ ] **ETLS workflow steps:** is Submitted → Minister → Directorate → Officer → Approved/Rejected the real path? Are there steps such as "returned to applicant for more documents", a fee payment, or an inspection? See backend/alembic/versions/0005_seed_etls_workflow.py.
 - [ ] **Who signs the ETLS approval:** the subject officer, the Director, or the Minister/PS?
@@ -285,6 +330,16 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 4a
+1. Someone takes full control of the API process and runs `ALTER TABLE core.audit_log DISABLE TRIGGER ALL`. What happens, and why? What about `DELETE FROM core.audit_log`?
+2. You write migration `0012` that creates `core.documents` and forget the `GRANT`. What breaks, and what tells you?
+3. Why does `docker compose exec api alembic upgrade head` no longer work, and why is that good?
+
+#### Show answers
+1. `ERROR: must be owner of table audit_log`. The API logs in as `motie_app`, and only a table's owner (`motie_owner`) or a superuser may alter it or its triggers. The `DELETE` gives `permission denied`: `motie_app` was never granted `DELETE` on that table (see 0007), and Postgres checks that before the trigger even runs.
+2. The API gets "permission denied for table documents" the first time it touches the table, so it fails closed, never open. `test_every_table_is_owned_by_motie_owner_and_readable_by_the_app` fails and names `core.documents`. Any test using the table through `db_session` fails too, because tests run as `motie_app`.
+3. The `api` container has no `MIGRATION_DATABASE_URL`, so `get_url()` in backend/alembic/env.py stops with a clear message. That's good: the server that runs all day, and could be attacked, never holds the password that can change tables. Use `docker compose run --rm tools alembic upgrade head`.
 
 ### Step 3c
 1. An officer sends `{"to_status": "approved"}` for a case that is still "Submitted". Which status code comes back, and which line decides it? Does anything get written to the audit log?
@@ -313,7 +368,7 @@ Questions per step. Try to answer before reading the answers.
 
 #### Show answers
 1. So the change and its audit row are committed together, in one transaction. If `record_event()` committed on its own, a crash between the two commits could leave an audit row for a change that never happened, or a change with no audit row.
-2. The trigger `audit_log_no_update_delete` raises an error and the update is cancelled. The way around it is that the table owner or a superuser can disable the trigger. That's why the go-live to-do is to connect the app as a less-privileged database user.
+2. The trigger `audit_log_no_update_delete` raises an error and the update is cancelled. The way around it is that the table owner or a superuser can disable the trigger. That's why, since step 4a, the app connects as `motie_app`, which is neither.
 3. Different modules may use different kinds of keys (numbers, reference codes like `ETLS-2026-0001`). Text can hold any of them.
 
 ### Step 2c
@@ -342,7 +397,7 @@ Questions per step. Try to answer before reading the answers.
 3. Where does Alembic get the database password from, and why isn't it in `alembic.ini`?
 
 #### Show answers
-1. `docker compose exec api alembic upgrade head`. It reads `alembic_version` (0002) and runs only `0003`.
+1. `docker compose run --rm tools alembic upgrade head`. It reads `alembic_version` (0002) and runs only `0003`.
 2. `CASCADE` would silently delete every table inside `core`. Without it, Postgres refuses if tables still exist, which protects you from losing data with a mistaken downgrade.
 3. From `DATABASE_URL`, read by `get_url()` in backend/alembic/env.py (via `settings`). `alembic.ini` is committed to git, and passwords must never be in committed files.
 

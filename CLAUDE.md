@@ -58,7 +58,7 @@ Write for me, not for a reviewer: plain words, short paragraphs, real file paths
 
 - Start services: `docker compose up`
 - Run the API: `uvicorn app.main:app --reload`
-- Run migrations: `alembic upgrade head`
-- Run tests: `pytest`
-- Run tests in the container: `docker compose exec api pytest -v`
+- Run migrations: `docker compose run --rm tools alembic upgrade head` (runs as `motie_owner`)
+- Run tests: `docker compose run --rm tools pytest -v`
+- Database users: `motie_app` (the API), `motie_owner` (migrations), `motie` superuser (setup only). Created by `db/init/10-db-users.sh`; rerun it with `docker compose exec db bash /docker-entrypoint-initdb.d/10-db-users.sh` after changing a password in `.env`.
 - Postgres from the host: `localhost:5433` (5432 is taken by a local Windows Postgres)

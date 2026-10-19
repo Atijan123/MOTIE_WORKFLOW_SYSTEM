@@ -5,6 +5,9 @@ services:
     env_file: .env
     volumes:
       - pgdata:/var/lib/postgresql/data
+      # Scripts here run once, when the volume is first created. 10-db-users.sh
+      # creates the motie_owner and motie_app database users.
+      - ./db/init:/docker-entrypoint-initdb.d:ro
     ports:
       # 127.0.0.1 = only this machine can connect. Never expose Postgres to the network.
       # Host port 5433 because a Windows-installed Postgres may already own 5432.
@@ -25,7 +28,9 @@ services:
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     environment:
       # Host is "db" (the service name above), not localhost: each container has its own localhost.
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      # The API logs in as motie_app, which can't alter tables or disable the audit trigger.
+      # It gets no other database password, on purpose.
+      DATABASE_URL: postgresql+asyncpg://motie_app:${APP_DB_PASSWORD:?Set APP_DB_PASSWORD in .env}@db:5432/${POSTGRES_DB}
       # :? makes Compose stop with this message if JWT_SECRET is missing from .env.
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env (see .env.example)}
       # File-change events from a Windows bind mount often don't reach the container; poll instead.
@@ -35,6 +40,30 @@ services:
       - ./backend:/app
     ports:
       - "127.0.0.1:8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  tools:
+    # Same image as the API, for admin commands that need the schema owner:
+    #   docker compose run --rm tools alembic upgrade head
+    #   docker compose run --rm tools pytest -v
+    # The "tools" profile keeps it out of `docker compose up`. It runs one command
+    # and exits, so the owner password never sits in a long-running server.
+    profiles: ["tools"]
+    build:
+      context: ./backend
+      args:
+        REQUIREMENTS: requirements-dev.txt
+    # A harmless default, so `docker compose run --rm tools` alone just shows the migration.
+    command: alembic current
+    # Tests also read POSTGRES_USER/POSTGRES_PASSWORD from here, to create the test database.
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://motie_app:${APP_DB_PASSWORD}@db:5432/${POSTGRES_DB}
+      MIGRATION_DATABASE_URL: postgresql+asyncpg://motie_owner:${MIGRATION_DB_PASSWORD:?Set MIGRATION_DB_PASSWORD in .env}@db:5432/${POSTGRES_DB}
+    volumes:
+      - ./backend:/app
     depends_on:
       db:
         condition: service_healthy

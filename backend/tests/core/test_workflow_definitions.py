@@ -71,34 +71,38 @@ async def _add_test_workflow(session) -> int:
     ).scalar_one()
 
 
-async def test_database_refuses_a_second_initial_status(db_session):
-    wf = await _add_test_workflow(db_session)
-    await db_session.execute(
+# The next two tests write workflow definitions, which only the owner may do (the app
+# user can only read them), so they use owner_session.
+
+
+async def test_database_refuses_a_second_initial_status(owner_session):
+    wf = await _add_test_workflow(owner_session)
+    await owner_session.execute(
         text("INSERT INTO core.workflow_statuses (workflow_id, code, name, is_initial) VALUES (:wf, 'a', 'A', true)"),
         {"wf": wf},
     )
     with pytest.raises(IntegrityError):
-        await db_session.execute(
+        await owner_session.execute(
             text("INSERT INTO core.workflow_statuses (workflow_id, code, name, is_initial) VALUES (:wf, 'b', 'B', true)"),
             {"wf": wf},
         )
 
 
-async def test_database_refuses_a_move_into_another_workflows_status(db_session):
-    wf = await _add_test_workflow(db_session)
+async def test_database_refuses_a_move_into_another_workflows_status(owner_session):
+    wf = await _add_test_workflow(owner_session)
     own = (
-        await db_session.execute(
+        await owner_session.execute(
             text("INSERT INTO core.workflow_statuses (workflow_id, code, name) VALUES (:wf, 'a', 'A') RETURNING id"),
             {"wf": wf},
         )
     ).scalar_one()
-    etls_approved = await db_session.scalar(
+    etls_approved = await owner_session.scalar(
         select(WorkflowStatus.id)
         .join(Workflow, Workflow.id == WorkflowStatus.workflow_id)
         .where(Workflow.code == "etls_application", WorkflowStatus.code == "approved")
     )
     with pytest.raises(IntegrityError):
-        await db_session.execute(
+        await owner_session.execute(
             text(
                 "INSERT INTO core.workflow_transitions "
                 "(workflow_id, from_status_id, to_status_id, required_role_id, name) "

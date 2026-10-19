@@ -20,8 +20,15 @@ target_metadata = Base.metadata
 
 def get_url() -> str:
     # Tests point Alembic at the test database by setting sqlalchemy.url;
-    # everywhere else we use the app's own DATABASE_URL.
-    return config.get_main_option("sqlalchemy.url") or settings.database_url
+    # everywhere else we use the schema owner's MIGRATION_DATABASE_URL. Never fall
+    # back to DATABASE_URL: the app's user isn't allowed to change tables.
+    url = config.get_main_option("sqlalchemy.url") or settings.migration_database_url
+    if not url:
+        raise RuntimeError(
+            "MIGRATION_DATABASE_URL is not set. Run migrations from the tools container: "
+            "docker compose run --rm tools alembic upgrade head"
+        )
+    return url
 
 
 def run_migrations_offline() -> None:

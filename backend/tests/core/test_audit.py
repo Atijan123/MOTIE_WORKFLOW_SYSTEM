@@ -30,7 +30,7 @@ async def test_record_event_and_read_history(db_session, make_user):
     assert events[0].occurred_at is not None
 
 
-@pytest.mark.parametrize(
+CHANGES = pytest.mark.parametrize(
     "statement",
     [
         "UPDATE core.audit_log SET action = 'tampered'",
@@ -39,10 +39,24 @@ async def test_record_event_and_read_history(db_session, make_user):
     ],
     ids=["update", "delete", "truncate"],
 )
-async def test_audit_log_rejects_changes(db_session, statement):
+
+
+@CHANGES
+async def test_app_user_has_no_right_to_change_audit_rows(db_session, statement):
     record_event(db_session, actor=None, action="x", entity_type="test", entity_id=1)
     await db_session.commit()
 
-    # Even raw SQL that bypasses our Python code is refused by the database.
-    with pytest.raises(DBAPIError, match="append-only"):
+    # motie_app was never granted UPDATE, DELETE or TRUNCATE, so Postgres
+    # refuses before the trigger is even reached.
+    with pytest.raises(DBAPIError, match="permission denied"):
         await db_session.execute(text(statement))
+
+
+@CHANGES
+async def test_trigger_stops_even_the_table_owner(owner_session, statement):
+    record_event(owner_session, actor=None, action="x", entity_type="test", entity_id=1)
+    await owner_session.commit()
+
+    # The owner has every privilege, so here the trigger is what refuses.
+    with pytest.raises(DBAPIError, match="append-only"):
+        await owner_session.execute(text(statement))

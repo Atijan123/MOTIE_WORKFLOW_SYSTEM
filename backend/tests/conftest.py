@@ -4,12 +4,23 @@ Tests run against a separate database (<your db name>_test) so they never touch
 dev data. Each test runs inside a transaction that is rolled back at the end, so
 every test starts from the same clean state.
 
+Three database users are involved, as in production:
+- the Postgres superuser drops and recreates the test database;
+- motie_owner runs the migrations, so it owns the tables;
+- motie_app is what the code under test uses (db_session, client), so a
+  missing GRANT fails a test instead of failing on the Ministry server.
+
+Run the tests from the tools container, which has all three passwords:
+`docker compose run --rm tools pytest -v`.
+
 Async tests use the anyio pytest plugin, which ships with FastAPI's dependencies:
 mark a test module with `pytestmark = pytest.mark.anyio`.
 """
 
 import asyncio
 import itertools
+import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import asyncpg
@@ -30,12 +41,17 @@ from tests.support import TEST_PASSWORD
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 
+if not settings.migration_database_url:
+    raise RuntimeError("Tests need MIGRATION_DATABASE_URL. Run: docker compose run --rm tools pytest")
+
 _dev_url = make_url(settings.database_url)
 TEST_DATABASE_URL = _dev_url.set(database=f"{_dev_url.database}_test")
+TEST_OWNER_URL = make_url(settings.migration_database_url).set(database=TEST_DATABASE_URL.database)
 
 # NullPool: open a fresh connection each time instead of keeping a pool. Each test
 # gets its own event loop, and pooled asyncpg connections can't move between loops.
 test_engine = create_async_engine(TEST_DATABASE_URL, poolclass=NullPool)
+owner_engine = create_async_engine(TEST_OWNER_URL, poolclass=NullPool)
 
 
 @pytest.fixture(scope="session")
@@ -45,10 +61,11 @@ def anyio_backend():
 
 async def _recreate_test_database() -> None:
     # CREATE/DROP DATABASE can't run inside a transaction, so use a plain asyncpg
-    # connection to the built-in "postgres" database.
+    # connection to the built-in "postgres" database, as the superuser: the
+    # owner and app users aren't allowed to create databases.
     conn = await asyncpg.connect(
-        user=TEST_DATABASE_URL.username,
-        password=TEST_DATABASE_URL.password,
+        user=os.environ["POSTGRES_USER"],
+        password=os.environ["POSTGRES_PASSWORD"],
         host=TEST_DATABASE_URL.host,
         port=TEST_DATABASE_URL.port,
         database="postgres",
@@ -58,7 +75,7 @@ async def _recreate_test_database() -> None:
         # string here is safe. These statements don't accept $1 parameters.
         name = TEST_DATABASE_URL.database
         await conn.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
-        await conn.execute(f'CREATE DATABASE "{name}"')
+        await conn.execute(f'CREATE DATABASE "{name}" OWNER {TEST_OWNER_URL.username}')
     finally:
         await conn.close()
 
@@ -67,7 +84,7 @@ def _alembic_config() -> Config:
     """Alembic config pointed at the test database instead of the dev one."""
     cfg = Config(str(BACKEND_DIR / "alembic.ini"))
     cfg.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
-    url = TEST_DATABASE_URL.render_as_string(hide_password=False)
+    url = TEST_OWNER_URL.render_as_string(hide_password=False)
     # Alembic's config file format treats % specially, so double it.
     cfg.set_main_option("sqlalchemy.url", url.replace("%", "%%"))
     return cfg
@@ -96,15 +113,9 @@ def committing_engine():
     return test_engine
 
 
-@pytest.fixture
-async def db_session():
-    """A session whose changes are all rolled back when the test ends.
-
-    join_transaction_mode="create_savepoint" means code under test can call
-    session.commit() normally: it only commits a savepoint inside our outer
-    transaction, which we then roll back.
-    """
-    async with test_engine.connect() as conn:
+@asynccontextmanager
+async def _rolled_back_session(engine):
+    async with engine.connect() as conn:
         outer = await conn.begin()
         session = AsyncSession(
             bind=conn, join_transaction_mode="create_savepoint", expire_on_commit=False
@@ -114,6 +125,30 @@ async def db_session():
         finally:
             await session.close()
             await outer.rollback()
+
+
+@pytest.fixture
+async def db_session():
+    """A session, logged in as motie_app, whose changes are all rolled back when the test ends.
+
+    join_transaction_mode="create_savepoint" means code under test can call
+    session.commit() normally: it only commits a savepoint inside our outer
+    transaction, which we then roll back.
+    """
+    async with _rolled_back_session(test_engine) as session:
+        yield session
+
+
+@pytest.fixture
+async def owner_session():
+    """Like db_session but logged in as motie_owner, for tests that must write
+    tables the app may only read (e.g. workflow definitions) or that check what
+    the owner can and can't do. Also rolled back.
+
+    It's a separate connection, so it can't see db_session's uncommitted rows.
+    """
+    async with _rolled_back_session(owner_engine) as session:
+        yield session
 
 
 @pytest.fixture
