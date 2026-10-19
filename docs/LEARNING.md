@@ -16,6 +16,31 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 4d — Delegation (2026-10-19)
+**Built:** `core.delegations`. A holder of a post can let another post act for it from one date to another, both days included, either for every workflow or for one. Example: the Director of Trade is on leave from 3 to 10 March and delegates to the Trade Officer post.
+- The engine now tries the actor's own posts first, then any delegation active *today* to a post they hold. `change_status()` records three keys in the audit row: `as_position` (the post the actor acted from), `on_behalf_of` (whose authority they used, or `null`) and `delegation_id`.
+- `GET /cases/{id}` marks borrowed moves: `"on_behalf_of": "director_of_trade"`.
+- Rules (backend/app/core/workflow/delegation.py): only a holder of the post may delegate or revoke it. No delegating to yourself, no back-dating, at most 90 days `[CONFIRM]`. Delegations aren't passed on: a delegate can't hand the borrowed powers to someone else. The delegating post keeps its own powers.
+- A delegation is ended early by *revoking* it. It's never deleted or edited: the app may only set `revoked_at`/`revoked_by` (a column-level grant), so nobody can stretch the dates afterwards to cover an earlier action.
+
+Endpoints:
+- `POST /delegations` creates one.
+- `GET /delegations` lists current and upcoming ones given by, or to, your posts.
+- `POST /delegations/{id}/revoke` ends one.
+
+The workflow engine's errors moved to backend/app/core/workflow/errors.py, so the delegation code can use them too. A broken delegation rule returns **422**; revoking twice returns **409**.
+
+**Files:** backend/alembic/versions/0010_delegations.py, backend/app/core/workflow/models.py (`Delegation`), backend/app/core/workflow/delegation.py, backend/app/core/workflow/delegation_router.py, backend/app/core/workflow/errors.py, backend/app/core/workflow/service.py (`PermittedMove`, `_permitted()`, `change_status()`), backend/app/core/workflow/router.py, backend/app/core/workflow/schemas.py, backend/app/main.py, backend/tests/core/test_delegations.py, backend/tests/core/conftest.py (`people`, `act`, moved from test_cases.py), backend/tests/support.py (`open_case`, `move`), backend/tests/core/test_db_privileges.py
+**Try it:**
+1. `docker compose run --rm tools alembic upgrade head`
+2. Set up the step 4c users with their posts and walk a case to "With the Directorate".
+3. Log in as the Trade Officer: `GET /cases/1` shows no actions, and moving to `with_officer` gives 403.
+4. Log in as the Director and `POST /delegations` with `{"from_position": "director_of_trade", "to_position": "trade_officer", "starts_on": "<today>", "ends_on": "<today + 6 days>", "workflow": "etls_application", "reason": "Annual leave"}`.
+5. As the Trade Officer again: `GET /cases/1` now offers "Assign to an officer" with `"on_behalf_of": "director_of_trade"`. Make the move, then look at the last row of `GET /cases/1/history`.
+6. As the Director, `POST /delegations/1/revoke`. The officer loses the button.
+- `docker compose run --rm tools pytest tests/core/test_delegations.py -v`
+**New concepts:** Delegation (acting on behalf of), Column-level privileges, Testing with a fake "today" (monkeypatch)
+
 ### Step 4c — Approvals belong to positions (2026-10-19)
 **Built:** each workflow transition now names the *position* that may make it (`required_position_id`), not a role. Migration `0009` converted the existing ETLS moves with a fixed role-to-post mapping `[CONFIRM]`, then dropped `required_role_id`. The engine (backend/app/core/workflow/service.py) now checks the posts you hold:
 - `available_transitions()` lists moves for any post you hold.
@@ -329,6 +354,21 @@ One short explanation per concept, where it lives in this codebase, and one free
 **Here:** backend/alembic/versions/0009_transitions_require_positions.py: `add_column` (expand), the `UPDATE ... FROM (VALUES ...)` (backfill), `alter_column(..., nullable=False)` and `drop_column` (contract). `downgrade()` does the same in reverse.
 **Learn more:** [Martin Fowler: Parallel Change (expand and contract)](https://martinfowler.com/bliki/ParallelChange.html)
 
+### Delegation (acting on behalf of)
+**What:** letting someone use another person's authority for a limited time, while every action still records *who* acted and *whose* authority they used. In a ministry this is everyday work: "the PS, for the Minister". Three things make it safe: it's limited (dates, optionally one workflow), it's visible (both sides see it, and every use is logged) and it can be ended early (revoked).
+**Here:** backend/app/core/workflow/delegation.py: `create_delegation()` checks the rules, and `active_delegations_to()` answers "which posts may this user act for today?". backend/app/core/workflow/service.py: `_permitted()` combines own posts and delegations, and `change_status()` writes `on_behalf_of` and `delegation_id` into the audit row.
+**Learn more:** [Wikipedia: Delegation of authority](https://en.wikipedia.org/wiki/Delegation)
+
+### Column-level privileges
+**What:** a `GRANT` (see GRANT and table ownership) can name single columns: `GRANT UPDATE (revoked_at, revoked_by) ON core.delegations`. The app can then change those columns and nothing else in the row. Any `UPDATE` that touches another column fails with "permission denied". SQLAlchemy only sends the columns that actually changed, so ordinary code works.
+**Here:** backend/alembic/versions/0010_delegations.py. Tested by the `stretch-delegation` case in backend/tests/core/test_db_privileges.py.
+**Learn more:** [PostgreSQL docs: GRANT, column privileges](https://www.postgresql.org/docs/16/sql-grant.html)
+
+### Testing with a fake "today" (monkeypatch)
+**What:** code that asks "what's the date?" is hard to test: you can't wait until next week. So all delegation code gets the date from one function, `today()`. A test swaps that function for one returning any date it likes. pytest's `monkeypatch` fixture does the swap and puts the real function back when the test ends, even if it fails.
+**Here:** `today()` in backend/app/core/workflow/delegation.py. `test_a_delegation_only_works_between_its_dates` in backend/tests/core/test_delegations.py moves "today" to the day before, the day after and the last day.
+**Learn more:** [pytest docs: monkeypatch](https://docs.pytest.org/en/stable/how-to/monkeypatch.html)
+
 ## 3. Decisions
 
 | Date | Decision | Alternatives considered | Why |
@@ -393,6 +433,16 @@ One short explanation per concept, where it lives in this codebase, and one free
 | 2026-10-19 | Who may *start* a workflow is still a role (`workflows.start_role_id`) | a position | Applicants hold no post. "Who may open a case" is about the kind of user, not a post. |
 | 2026-10-19 | Seeing cases and history still depends on roles (`is_staff()`) | positions | Visibility rules aren't decided yet (see Open questions). Moves were the part CLAUDE.md said must follow posts. |
 | 2026-10-19 | The audit key `as_role` became `as_position` | keep writing `as_role` | It says what was actually checked. Old rows keep `as_role`; the log is append-only, so code reading history must accept both. |
+| 2026-10-19 | Delegation goes from post to post | from person to person | It matches "approvals attach to positions". If the PS changes while the Minister is away, the new PS can act at once. |
+| 2026-10-19 | The delegating post keeps its own powers | suspend the delegator while delegated | If the Minister comes back early, they can act without first revoking. Both sides' actions are logged either way. |
+| 2026-10-19 | Delegations aren't passed on (Minister → PS → Director doesn't let the Director act for the Minister) | follow chains | "Who could act for the Minister on 5 March?" stays one simple query, and nobody hands on powers they only borrowed. |
+| 2026-10-19 | The engine finds the delegation by itself; own posts are tried first | the caller says "I'm acting for X" | Fewer ways to get it wrong. The button shows `on_behalf_of` before the click, and the audit row records it after. Using your own post first means the log shows the strongest basis for the action. |
+| 2026-10-19 | Dates are whole days, both included, in UTC | start and end timestamps | People say "away from 3 to 10 March". The Gambia keeps GMT all year with no daylight saving, so the UTC date is the local date. |
+| 2026-10-19 | No back-dating; at most 90 days `[CONFIRM]` | allow both | A back-dated delegation could make an earlier action look authorised. A delegation with no limit would hand a post's powers over for good. |
+| 2026-10-19 | Revoke, never delete or edit; enforced by a column-level grant | let the app update or delete delegations | Audit rows point at `delegation_id`, so the delegation must stay as it was when it was used. |
+| 2026-10-19 | If several delegations cover the same post, the oldest is recorded | the newest; refuse overlaps | Any of them gives the same right. Refusing overlaps would block a sensible fix ("I set the wrong end date, here's a second one"). |
+| 2026-10-19 | Errors moved to `errors.py`; `service.py` still re-exports them | keep them in `service.py` | `delegation.py` needs them and `service.py` needs `delegation.py`. Importing each other would be a circular import. |
+| 2026-10-19 | `available_actions` always includes `on_behalf_of` (`null` for your own moves) | leave it out when empty | A fixed shape is easier for the frontend. One existing test assertion gained `"on_behalf_of": None`. |
 
 ## 4. Open questions
 
@@ -405,6 +455,9 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 - [ ] **Org chart:** what are the real departments and posts, and who reports to whom? Does the Registry report to the PS? See backend/alembic/versions/0008_positions.py.
 - [ ] **Single-holder posts:** should the database refuse a second Minister, PS or Director at the same time? Right now any post can have several holders.
 - [ ] **Who may assign posts:** right now only someone with server access, through the CLI. Should an HR or admin officer do it from a screen?
+- [ ] **Who may record a delegation:** only the post holder, or also e.g. the Minister's private secretary or a system admin on their behalf? See `create_delegation()` in backend/app/core/workflow/delegation.py.
+- [ ] **Delegation limits:** is 90 days the right maximum (`MAX_DELEGATION_DAYS`)? Is back-dating ever needed, e.g. after an emergency?
+- [ ] **Delegation rules:** should a delegation be passed on (PS → Director when both are away)? Should the delegating post be blocked while it is delegated?
 - [ ] **Audit retention:** how long must audit records be kept under Gambian public records rules?
 - [ ] **ETLS workflow steps:** is Submitted → Minister → Directorate → Officer → Approved/Rejected the real path? Are there steps such as "returned to applicant for more documents", a fee payment, or an inspection? See backend/alembic/versions/0005_seed_etls_workflow.py.
 - [ ] **Who signs the ETLS approval:** the subject officer, the Director, or the Minister/PS?
@@ -416,6 +469,16 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 4d
+1. The Director delegates to the Trade Officer post from 3 to 10 March. On 11 March a Trade Officer tries to assign a file. What happens, and which line decides it?
+2. Why can the app set `revoked_at` on a delegation but not change `ends_on`? What could go wrong if it could?
+3. The Director delegates to the Trade Officer post, and the Trade Officer post delegates to the Records Officer post. Can a Records Officer assign a file to an officer? Why?
+
+#### Show answers
+1. **403** "None of your positions can make this move." `active_delegations_to()` only returns delegations where `starts_on <= today` and `ends_on >= today`. On 11 March the delegation is no longer active, so `_permitted()` finds nothing.
+2. Migration 0010 grants `UPDATE` on those two columns only. If `ends_on` could change, someone could later stretch a delegation to cover a move made after it ended, and the audit trail would look legitimate. Revoking only ever shortens a delegation, and it's logged.
+3. No. `active_delegations_to()` only looks at delegations *to* posts the user holds. The Records Officer has one from the Trade Officer post, but the assign move needs the Director's post, and nothing delegates that to the Records Officer post. Delegations aren't passed on (`test_delegations_are_not_passed_on`).
 
 ### Step 4c
 1. The Ministry decides that the PS, not the Minister, minutes ETLS files to the Directorate. What do you change?

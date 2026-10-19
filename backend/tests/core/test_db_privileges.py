@@ -61,8 +61,20 @@ async def test_app_user_cannot_skip_triggers_with_replication_mode(db_session):
         "UPDATE core.workflow_transitions SET name = 'x'",
         "INSERT INTO core.roles (code, name) VALUES ('king', 'King')",
         "UPDATE core.positions SET reports_to_id = NULL",
+        # The app may revoke a delegation, but never move its dates or posts.
+        "UPDATE core.delegations SET ends_on = ends_on + 30",
+        "DELETE FROM core.delegations",
     ],
-    ids=["create-table", "delete-users", "delete-cases", "edit-workflow", "add-role", "edit-org-chart"],
+    ids=[
+        "create-table",
+        "delete-users",
+        "delete-cases",
+        "edit-workflow",
+        "add-role",
+        "edit-org-chart",
+        "stretch-delegation",
+        "delete-delegation",
+    ],
 )
 async def test_app_user_cannot_do_what_it_was_never_granted(db_session, statement):
     with pytest.raises(DBAPIError, match="permission denied"):

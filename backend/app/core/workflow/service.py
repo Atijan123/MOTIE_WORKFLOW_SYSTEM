@@ -4,30 +4,33 @@ Every status change is checked against core.workflow_transitions and recorded
 in core.audit_log in the same transaction.
 """
 
+from typing import NamedTuple
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit.service import record_event
 from app.core.identity.models import User
-from app.core.workflow.models import Case, Workflow, WorkflowStatus, WorkflowTransition
+from app.core.workflow.delegation import active_delegations_to
+from app.core.workflow.errors import (  # noqa: F401  (re-exported: callers use service.NotFound etc.)
+    AlreadyRevoked,
+    InvalidDelegation,
+    NotFound,
+    NotPermitted,
+    TransitionNotAllowed,
+    WorkflowError,
+)
+from app.core.workflow.models import Case, Delegation, Workflow, WorkflowStatus, WorkflowTransition
 
 AUDIT_ENTITY = "case"
 
 
-class WorkflowError(Exception):
-    """Base class; the API turns each subclass into an HTTP status (see router.py)."""
+class PermittedMove(NamedTuple):
+    """A move this user may make, and how: through a post they hold
+    (delegation is None) or on behalf of another post (the delegation used)."""
 
-
-class NotFound(WorkflowError):
-    pass
-
-
-class NotPermitted(WorkflowError):
-    pass
-
-
-class TransitionNotAllowed(WorkflowError):
-    pass
+    transition: WorkflowTransition
+    delegation: Delegation | None
 
 
 def is_staff(user: User) -> bool:
@@ -88,23 +91,39 @@ async def start_case(session: AsyncSession, *, workflow_code: str, actor: User) 
     return case
 
 
-async def available_transitions(
-    session: AsyncSession, case: Case, user: User
-) -> list[WorkflowTransition]:
+async def _permitted(
+    session: AsyncSession, case: Case, user: User, transitions: list[WorkflowTransition]
+) -> list[PermittedMove]:
+    """Which of these transitions the user may make: by their own posts first,
+    then by a delegation active today for this case's workflow."""
+    held = {p.id for p in user.positions}
+    own = [PermittedMove(t, None) for t in transitions if t.required_position_id in held]
+    if len(own) == len(transitions):
+        return own  # nothing left that a delegation could add, so skip the query
+    acting_for = await active_delegations_to(session, user, case.workflow_id)
+    delegated = [
+        PermittedMove(t, acting_for[t.required_position_id])
+        for t in transitions
+        if t.required_position_id not in held and t.required_position_id in acting_for
+    ]
+    return own + delegated
+
+
+async def available_transitions(session: AsyncSession, case: Case, user: User) -> list[PermittedMove]:
     """The moves this user may make on this case right now (the buttons to show)."""
-    result = await session.scalars(
-        select(WorkflowTransition)
-        .where(
-            WorkflowTransition.from_status_id == case.current_status_id,
-            WorkflowTransition.required_position_id.in_([p.id for p in user.positions]),
+    transitions = (
+        await session.scalars(
+            select(WorkflowTransition)
+            .where(WorkflowTransition.from_status_id == case.current_status_id)
+            .order_by(WorkflowTransition.id)
         )
-        .order_by(WorkflowTransition.id)
-    )
-    # The same move can be allowed for two of the user's posts; list it once.
-    moves: dict[int, WorkflowTransition] = {}
-    for move in result:
-        moves.setdefault(move.to_status_id, move)
-    return list(moves.values())
+    ).all()
+    # The same move can be allowed through two posts; list it once, preferring
+    # the user's own post over acting for someone else.
+    moves: dict[int, PermittedMove] = {}
+    for move in await _permitted(session, case, user, list(transitions)):
+        moves.setdefault(move.transition.to_status_id, move)
+    return sorted(moves.values(), key=lambda m: m.transition.id)
 
 
 async def change_status(
@@ -133,10 +152,12 @@ async def change_status(
         raise TransitionNotAllowed(
             f"A case can't move from '{from_status.code}' to '{to_status_code}'."
         )
-    held = {p.id for p in actor.positions}
-    move = next((m for m in moves if m.required_position_id in held), None)
-    if move is None:
+    # Own posts come first in the list, so acting for someone else is only used
+    # when the actor can't make the move in their own right.
+    permitted = await _permitted(session, case, actor, list(moves))
+    if not permitted:
         raise NotPermitted("None of your positions can make this move.")
+    move, delegation = permitted[0]
 
     case.current_status_id = move.to_status_id
     case.updated_at = func.now()
@@ -150,7 +171,11 @@ async def change_status(
             "from": from_status.code,
             "to": to_status_code,
             "transition": move.name,
-            "as_position": move.required_position.code,
+            # The post the actor acted from, and whose authority they used if it
+            # wasn't their own. Together: "PS, acting on behalf of the Minister".
+            "as_position": (delegation.to_position if delegation else move.required_position).code,
+            "on_behalf_of": delegation.from_position.code if delegation else None,
+            "delegation_id": delegation.id if delegation else None,
             "comment": comment,
         },
     )

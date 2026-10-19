@@ -1,9 +1,10 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
@@ -148,3 +149,43 @@ class Case(Base):
         lazy="selectin",
         viewonly=True,
     )
+
+
+class Delegation(Base):
+    """One post letting another act for it. Created by alembic/versions/0010_delegations.py.
+
+    Create and revoke only through workflow/delegation.py, which checks who may
+    delegate and writes the audit rows.
+    """
+
+    __tablename__ = "delegations"
+    __table_args__ = (
+        CheckConstraint("from_position_id <> to_position_id", name="delegations_not_to_self"),
+        CheckConstraint("starts_on <= ends_on", name="delegations_dates_in_order"),
+        CheckConstraint(
+            "(revoked_at IS NULL) = (revoked_by IS NULL)", name="delegations_revoked_complete"
+        ),
+        Index("delegations_to_position_idx", "to_position_id", "ends_on"),
+        {"schema": "core"},
+    )
+    __mapper_args__ = {"eager_defaults": True}
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    from_position_id: Mapped[int] = mapped_column(SmallInteger, ForeignKey("core.positions.id"))
+    to_position_id: Mapped[int] = mapped_column(SmallInteger, ForeignKey("core.positions.id"))
+    workflow_id: Mapped[int | None] = mapped_column(SmallInteger, ForeignKey("core.workflows.id"))
+    starts_on: Mapped[date] = mapped_column(Date)
+    ends_on: Mapped[date] = mapped_column(Date)
+    reason: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("core.users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("core.users.id"))
+
+    from_position: Mapped[Position] = relationship(
+        foreign_keys=[from_position_id], lazy="selectin", viewonly=True
+    )
+    to_position: Mapped[Position] = relationship(
+        foreign_keys=[to_position_id], lazy="selectin", viewonly=True
+    )
+    workflow: Mapped[Workflow | None] = relationship(lazy="selectin", viewonly=True)

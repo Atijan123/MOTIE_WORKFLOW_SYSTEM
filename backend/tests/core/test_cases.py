@@ -3,48 +3,12 @@
 import pytest
 
 from app.core.identity.service import assign_position, remove_position
+from tests.support import move as _move
+from tests.support import open_case as _open_case
 
 pytestmark = pytest.mark.anyio
 
-# Each staff role in the ETLS chain, and the post its test user holds.
-POSITION_FOR = {
-    "records_officer": "records_officer",
-    "minister": "minister",
-    "permanent_secretary": "permanent_secretary",
-    "director": "director_of_trade",
-    "officer": "trade_officer",
-}
-
-
-@pytest.fixture
-async def people(make_user):
-    """One user per role in the ETLS chain, each holding the matching post."""
-    users = {"applicant": await make_user("applicant")}
-    for role, position in POSITION_FOR.items():
-        users[role] = await make_user(role, positions=[position])
-    return users
-
-
-@pytest.fixture
-def act(client, auth_headers):
-    """Shortcut: `await act(user, "post", "/cases/1/status", json=...)`."""
-
-    async def _act(user, method, url, **kwargs):
-        return await getattr(client, method)(url, headers=auth_headers(user), **kwargs)
-
-    return _act
-
-
-async def _open_case(act, applicant) -> dict:
-    response = await act(applicant, "post", "/cases", json={"workflow": "etls_application"})
-    assert response.status_code == 201, response.text
-    return response.json()
-
-
-async def _move(act, user, case_id, to_status, comment=None):
-    return await act(
-        user, "post", f"/cases/{case_id}/status", json={"to_status": to_status, "comment": comment}
-    )
+# Fixtures `people` and `act` live in tests/core/conftest.py.
 
 
 async def test_case_walks_the_whole_chain_and_every_step_is_audited(act, people):
@@ -168,7 +132,11 @@ async def test_available_actions_depend_on_who_is_asking(act, people):
     as_officer = (await act(people["officer"], "get", f"/cases/{case['id']}")).json()
 
     assert as_records["available_actions"] == [
-        {"to_status": "with_minister", "name": "Register and forward to the Minister"}
+        {
+            "to_status": "with_minister",
+            "name": "Register and forward to the Minister",
+            "on_behalf_of": None,
+        }
     ]
     assert as_officer["available_actions"] == []
 

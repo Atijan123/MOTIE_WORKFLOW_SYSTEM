@@ -23,6 +23,8 @@ _ERROR_STATUS = {
     service.NotFound: status.HTTP_404_NOT_FOUND,
     service.NotPermitted: status.HTTP_403_FORBIDDEN,
     service.TransitionNotAllowed: status.HTTP_409_CONFLICT,  # valid request, wrong moment
+    service.AlreadyRevoked: status.HTTP_409_CONFLICT,
+    service.InvalidDelegation: status.HTTP_422_UNPROCESSABLE_ENTITY,  # breaks a rule, don't retry
 }
 
 
@@ -44,7 +46,14 @@ async def _case_out(session: AsyncSession, case: Case, user: User) -> CaseOut:
         created_by=case.created_by,
         created_at=case.created_at,
         updated_at=case.updated_at,
-        available_actions=[ActionOut(to_status=m.to_status.code, name=m.name) for m in moves],
+        available_actions=[
+            ActionOut(
+                to_status=m.transition.to_status.code,
+                name=m.transition.name,
+                on_behalf_of=m.delegation.from_position.code if m.delegation else None,
+            )
+            for m in moves
+        ],
     )
 
 
