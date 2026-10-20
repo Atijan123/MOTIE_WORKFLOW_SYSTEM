@@ -16,6 +16,17 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 6j — The letter date, the Ministry's way (2026-10-20)
+**Built:** the date on the facility letter now reads like the Ministry's letters: **"16th September, 2026"**, with an ordinal day and a comma before the year. `long_date()` and `_ordinal()` in backend/app/modules/etls/letter.py do it, including the awkward ones: 1st, 2nd, 3rd, but 11th, 12th, 13th, then 21st, 22nd, 23rd.
+
+The template file didn't change (it still just says `$date`), so its version stays `2`. The template version records the *wording*; the code that fills it in is recorded by the git commit. Letters already issued keep the date as it was printed: they're stored files.
+
+**Files:** backend/app/modules/etls/letter.py (`long_date()`, `_ordinal()`), backend/tests/modules/etls/test_letter.py
+**Try it:**
+- `docker compose run --rm tools pytest tests/modules/etls/test_letter.py -k date -v` runs one case per tricky day.
+- Sign a letter and download it: the top right says e.g. "20th October, 2026".
+**New concepts:** none.
+
 ### Step 6i — The Ministry's wording for the facility letter (2026-10-20)
 **Built:** backend/app/modules/etls/templates/facility_letter.txt now holds the Ministry's wording, word for word (including "benefitting" and "Liberalization"), as template version `2`. Each `[placeholder]` became a `$field`:
 
@@ -924,6 +935,7 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-20 | The signature line is the signing post's title, "For: ..." when acting; no name printed | print the signer's name and title too | Follows the Ministry's wording, which shows only "Permanent Secretary". Who actually signed is in the audit log and `issued_by`. `[CONFIRM]` |
 | 2026-10-20 | A ` >> ` mark for the reference and date line | a tab character; two template files | A tab is invisible and editors often turn it into spaces. ` >> ` is visible and explained in the template's notes. |
 | 2026-10-20 | Template version `2`, with a date and a short label | a date only; a number only | Numbers sort and compare easily; the label says what changed. |
+| 2026-10-20 | The date change in step 6j didn't bump the template version | bump it anyway | You asked to bump it only when the template file changes. `template_version` describes the wording; the commit describes the code. |
 | 2026-10-20 | The reset script is bash, run from the host with `docker compose` | a Python script; a Makefile | It drives Docker from outside the containers, which is what shell is for, and Git Bash is already how you run the other commands. No new tool. |
 | 2026-10-20 | Reset drops the database rather than downgrading every migration | `alembic downgrade base` | Faster, and it also clears anything a migration doesn't know about. The test suite already proves the downgrades work. |
 | 2026-10-20 | The seed is Python using the normal `create_user()`/`assign_position()` | SQL inserts | Passwords get hashed the same way as real ones, and the seed breaks loudly if those rules change. |
@@ -964,7 +976,7 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 - [ ] **Facility letter form lists:** are there fixed lists for exporter country (ECOWAS members), unit and product? They would make checks such as the cement rule exact.
 - [ ] **Duplicate certificates:** does a number from a *rejected* case count as used? (Right now every earlier use counts.) May anyone besides the ETLS desk clear the flag?
 - [ ] **Originals:** besides the certificate of origin, must any other paper original be seen in person (e.g. the invoice)? It's one column per document (`original_required`).
-- [ ] **Facility letter layout:** the wording is in (step 6i). Still to check: the letterhead (printed paper, or a logo and address we should add?); whether the subject line is bold; the date format ("20 October 2026"); and what the signature line says when someone acts for the PS (now "For: Permanent Secretary", no name). See backend/app/modules/etls/templates/facility_letter.txt.
+- [ ] **Facility letter layout:** the wording is in (step 6i). Still to check: the letterhead (printed paper, or a logo and address we should add?); whether the subject line is bold; and what the signature line says when someone acts for the PS (now "For: Permanent Secretary", no name). See backend/app/modules/etls/templates/facility_letter.txt.
 - [ ] **File reference format:** what is the Ministry's real format? Placeholder `MOTIE/ETLS/FL/{year}/{case_id:05d}` (`FACILITY_LETTER_REFERENCE_FORMAT`).
 - [ ] **Issued letters:** storing at signing is decided (step 6f). Still open: may the importer download it? And if a signed letter has a mistake, how does the Ministry correct it: cancel it and sign a new one, or a separate amendment letter? Right now a case can have only one.
 - [ ] **The cement receipt:** which receipt is it (e.g. a payment receipt for a cement levy)? Is "HS heading 2523" the right trigger, or only some subheadings (e.g. 2523.29 Portland cement, not 2523.10 clinker)? Are other headings subject to receipts too? See backend/alembic/versions/0020_facility_letter_hs_code.py.
@@ -980,6 +992,14 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 6j
+1. What does `long_date()` give for 12 March 2027 and for 22 March 2027, and which line makes them different?
+2. A letter was signed on 1 October with the old format "1 October 2026". After this step, what does its download show?
+
+#### Show answers
+1. "12th March, 2027" and "22nd March, 2027". In `_ordinal()`, `11 <= n % 100 <= 13` sends 11, 12 and 13 to "th"; otherwise the last digit decides (2 gives "nd").
+2. Still "1 October 2026". Downloads serve the file stored at signing (step 6f); nothing is rendered again.
 
 ### Step 6i
 1. The Ministry wants "Kindly" instead of "We hereby write to your good office to kindly". What do you change, and what happens to letters already issued?

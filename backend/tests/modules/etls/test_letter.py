@@ -2,7 +2,7 @@
 setting, and issuing it once at signing (stored, checksummed, never re-rendered)."""
 
 import hashlib
-from datetime import timedelta
+from datetime import date, timedelta
 
 import pytest
 from pydantic import ValidationError
@@ -80,7 +80,7 @@ async def test_the_letter_has_every_field(act, people, db_session):
     year = today().year
 
     assert fields.file_reference == f"MOTIE/ETLS/FL/{year}/{case_id:05d}"
-    assert fields.date == f"{today().day} {today():%B %Y}"
+    assert fields.date == letter.long_date(today())
     assert fields.importer_name == "Kombo Building Supplies Ltd"
     assert fields.importer_name_upper == "KOMBO BUILDING SUPPLIES LTD"
     assert fields.product == "Roofing sheets"
@@ -326,3 +326,29 @@ def test_the_template_only_uses_fields_the_letter_has():
     names = letter.LetterFields.__dataclass_fields__
     fields = letter.LetterFields(**{name: "x" for name in names})
     assert letter.render_pdf(fields).startswith(b"%PDF-")
+
+
+@pytest.mark.parametrize(
+    "day, expected",
+    [
+        (date(2026, 9, 16), "16th September, 2026"),  # the Ministry's example
+        (date(2026, 10, 1), "1st October, 2026"),
+        (date(2026, 10, 2), "2nd October, 2026"),
+        (date(2026, 10, 3), "3rd October, 2026"),
+        (date(2026, 10, 4), "4th October, 2026"),
+        (date(2026, 10, 11), "11th October, 2026"),
+        (date(2026, 10, 12), "12th October, 2026"),
+        (date(2026, 10, 13), "13th October, 2026"),
+        (date(2026, 10, 21), "21st October, 2026"),
+        (date(2026, 10, 22), "22nd October, 2026"),
+        (date(2026, 10, 23), "23rd October, 2026"),
+        (date(2026, 10, 31), "31st October, 2026"),
+    ],
+)
+def test_the_date_is_written_the_ministrys_way(day, expected):
+    assert letter.long_date(day) == expected
+
+
+def test_the_date_format_did_not_change_the_template_version():
+    # Only the code that writes the date changed, not the template file.
+    assert letter.load_template().version.startswith("2 ")

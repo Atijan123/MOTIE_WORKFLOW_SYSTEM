@@ -98,8 +98,15 @@ def download_name(reference: str) -> str:
     return "facility-letter-" + re.sub(r"[^A-Za-z0-9-]+", "-", reference).strip("-") + ".pdf"
 
 
-def _long_date(day: date) -> str:
-    return f"{day.day} {day:%B %Y}"  # 19 October 2026
+def _ordinal(n: int) -> str:
+    # 11th, 12th and 13th break the 1st/2nd/3rd pattern.
+    suffix = "th" if 11 <= n % 100 <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
+
+
+def long_date(day: date) -> str:
+    """The Ministry's letter date: "16th September, 2026"."""
+    return f"{_ordinal(day.day)} {day:%B}, {day.year}"
 
 
 def _quantity(letter: FacilityLetter) -> str:
@@ -129,7 +136,7 @@ async def build_fields(session: AsyncSession, case_id: int, signing: AuditEvent)
 
     return LetterFields(
         file_reference=file_reference(case_id, signed_on.year),
-        date=_long_date(signed_on),
+        date=long_date(signed_on),
         importer_name=letter.importer_name,
         importer_name_upper=letter.importer_name.upper(),
         importer_address=letter.importer_address,
