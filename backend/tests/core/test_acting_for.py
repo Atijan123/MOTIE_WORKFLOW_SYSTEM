@@ -51,7 +51,7 @@ async def _case_ready_for(act, people, status) -> int:
 
 
 async def _last_event(act, people, case_id) -> dict:
-    return (await act(people["records_officer"], "get", f"/cases/{case_id}/history")).json()[-1]
+    return (await act(people["records_officer"], "get", f"/cases/{case_id}/history")).json()[0]  # newest first
 
 
 async def _actions(act, person, case_id) -> list[dict]:
@@ -141,7 +141,7 @@ async def test_case_history_shows_who_acted_for_whom(act, people):
     ]:
         assert (await move(act, people[actor], case_id, to_status)).status_code == 200, actor
 
-    history = (await act(people["records_officer"], "get", f"/cases/{case_id}/history")).json()
+    history = (await act(people["records_officer"], "get", f"/cases/{case_id}/history")).json()[::-1]
     moves = [
         (e["actor_user_id"], e["details"]["as_position"], e["details"]["on_behalf_of"])
         for e in history

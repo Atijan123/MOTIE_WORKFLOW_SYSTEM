@@ -83,7 +83,7 @@ async def test_uploading_fills_the_checklist_and_is_audited(act, people):
     assert checklist["invoice"]["missing"] is False
     assert [d["id"] for d in checklist["invoice"]["documents"]] == [document["id"]]
 
-    history = (await act(people["desk"], "get", f"/cases/{case_id}/history")).json()
+    history = (await act(people["desk"], "get", f"/cases/{case_id}/history")).json()[::-1]  # oldest first
     assert history[-1]["action"] == "case.document_uploaded"
     assert history[-1]["details"]["sha256"] == document["sha256"]
 

@@ -35,7 +35,8 @@ async def test_case_walks_the_whole_chain_and_every_step_is_audited(act, people)
     assert final["status"]["is_final"] is True
     assert final["available_actions"] == []
 
-    history = (await act(people["director"], "get", f"/cases/{case['id']}/history")).json()
+    # The history is newest first; read it oldest first here.
+    history = (await act(people["director"], "get", f"/cases/{case['id']}/history")).json()[::-1]
     assert [e["action"] for e in history] == ["case.created"] + ["case.status_changed"] * 5
     assert [e["actor_user_id"] for e in history] == [
         people[r].id
@@ -92,7 +93,7 @@ async def test_permanent_secretary_can_act_for_the_minister(act, people):
 
     assert response.status_code == 200
     assert response.json()["status"]["code"] == "with_ps"
-    history = (await act(people["director"], "get", f"/cases/{case['id']}/history")).json()
+    history = (await act(people["director"], "get", f"/cases/{case['id']}/history")).json()[::-1]  # oldest first
     assert history[-1]["actor_user_id"] == people["permanent_secretary"].id
     assert history[-1]["details"]["as_position"] == "permanent_secretary"
     assert history[-1]["details"]["on_behalf_of"] == "minister"
@@ -119,7 +120,7 @@ async def test_the_position_decides_not_the_role(act, people, make_user):
     response = await _move(act, clerk, case["id"], "with_minister")
     assert response.status_code == 200
 
-    history = (await act(people["director"], "get", f"/cases/{case['id']}/history")).json()
+    history = (await act(people["director"], "get", f"/cases/{case['id']}/history")).json()[::-1]  # oldest first
     assert history[-1]["details"]["as_position"] == "records_officer"
 
 

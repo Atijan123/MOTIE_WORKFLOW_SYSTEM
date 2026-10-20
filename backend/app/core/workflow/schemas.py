@@ -70,11 +70,44 @@ class CaseSummaryOut(BaseModel):
     available_actions: list[ActionOut]  # in a queue: what I can do; empty in "my cases"
 
 
+class AbsenceSeenOut(BaseModel):
+    person: str
+    starts_on: date
+    ends_on: date
+
+
+class DelegationSeenOut(BaseModel):
+    from_position: str
+    to_position: str
+    starts_on: date
+    ends_on: date
+
+
+class ActingForOut(BaseModel):
+    """Set when the actor made another post's move: whose, and why they could."""
+
+    position: str  # e.g. "permanent_secretary"
+    title: str  # e.g. "Permanent Secretary": the screen says "acting for the Permanent Secretary"
+    basis: str  # "delegation" or "succession"
+    absences: list[AbsenceSeenOut]  # who was away, from when to when (succession)
+    delegation: DelegationSeenOut | None
+
+
 class AuditEventOut(BaseModel):
     occurred_at: datetime
     actor_user_id: int | None
+    actor_name: str | None
+    actor_title: str | None  # the post they acted from, e.g. "Deputy Permanent Secretary, ..."
+    acting_for: ActingForOut | None
     action: str
     details: dict[str, Any]
+
+
+class TimelineEntryOut(BaseModel):
+    """One line of the applicant's timeline: a plain label and when."""
+
+    occurred_at: datetime
+    label: str
 
 
 class FlagOut(BaseModel):

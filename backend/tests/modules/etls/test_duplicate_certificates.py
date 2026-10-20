@@ -63,7 +63,7 @@ async def test_a_reused_number_holds_the_case_for_the_desk(act, people, make_use
     assert response.status_code == 409
     assert "SN-CO-2026-0042" in response.json()["detail"]
 
-    history = (await act(people["desk"], "get", f"/cases/{second}/history")).json()
+    history = (await act(people["desk"], "get", f"/cases/{second}/history")).json()[::-1]  # oldest first
     assert [e["action"] for e in history] == ["case.created", "case.flag_raised"]
     # The first case is untouched.
     assert await _flags(act, people, first) == []
@@ -86,7 +86,7 @@ async def test_the_desk_resolves_the_flag_and_the_case_moves_on(act, people):
 
     await ready_for_records(act, people, case_id)
     assert (await move(act, people["records_officer"], case_id, "originals_received")).status_code == 200
-    history = (await act(people["desk"], "get", f"/cases/{case_id}/history")).json()
+    history = (await act(people["desk"], "get", f"/cases/{case_id}/history")).json()[::-1]  # oldest first
     assert history[2]["action"] == "case.flag_resolved"
     assert history[2]["details"]["resolution"].startswith("Same shipment")
 

@@ -2,10 +2,9 @@ from fastapi import APIRouter, Depends, Request, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.audit.service import history
 from app.core.identity.deps import get_current_user
 from app.core.identity.models import User
-from app.core.workflow import flags, queues, service
+from app.core.workflow import flags, history, queues, service
 from app.core.workflow.models import Case
 from app.core.workflow.schemas import (
     ActionOut,
@@ -17,6 +16,7 @@ from app.core.workflow.schemas import (
     ResolveFlagRequest,
     StartCaseRequest,
     StatusOut,
+    TimelineEntryOut,
 )
 from app.db.session import get_session
 
@@ -158,16 +158,20 @@ async def case_history(
     # internal comments (minutes). Applicants see the current status only.
     if not service.is_staff(user):
         raise service.NotPermitted("Only Ministry staff can see a case's history.")
-    events = await history(session, service.AUDIT_ENTITY, case.id)
-    return [
-        AuditEventOut(
-            occurred_at=e.occurred_at,
-            actor_user_id=e.actor_user_id,
-            action=e.action,
-            details=e.details,
-        )
-        for e in events
-    ]
+    # Newest first, with names, post titles and "acting for" spelled out.
+    return [AuditEventOut.model_validate(e, from_attributes=True) for e in await history.staff_history(session, case)]
+
+
+@router.get("/{case_id}/timeline", response_model=list[TimelineEntryOut])
+async def case_timeline(
+    case_id: int,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """The applicant's view of what happened: plain labels and dates, oldest first.
+    Staff may look at it too, to see what the applicant sees."""
+    case = await service.get_case(session, case_id, user)
+    return [TimelineEntryOut(occurred_at=e.occurred_at, label=e.label) for e in await history.applicant_timeline(session, case)]
 
 
 def _flag_out(f) -> FlagOut:

@@ -69,7 +69,7 @@ async def test_delegate_can_act_and_the_audit_log_says_on_whose_behalf(act, peop
     response = await move(act, officer, case_id, "with_officer", comment="Director on leave")
     assert response.status_code == 200, response.text
 
-    last = (await act(director, "get", f"/cases/{case_id}/history")).json()[-1]
+    last = (await act(director, "get", f"/cases/{case_id}/history")).json()[0]  # newest first
     assert last["actor_user_id"] == officer.id
     assert last["details"]["as_position"] == "industry_officer"
     assert last["details"]["on_behalf_of"] == "director_of_industry"
@@ -81,7 +81,7 @@ async def test_the_delegating_post_keeps_its_own_powers(act, people):
     await _delegate(act, people["director"], "director_of_industry", "industry_officer")
 
     assert (await move(act, people["director"], case_id, "with_officer")).status_code == 200
-    last = (await act(people["director"], "get", f"/cases/{case_id}/history")).json()[-1]
+    last = (await act(people["director"], "get", f"/cases/{case_id}/history")).json()[0]  # newest first
     assert last["details"]["as_position"] == "director_of_industry"
     assert last["details"]["on_behalf_of"] is None
 

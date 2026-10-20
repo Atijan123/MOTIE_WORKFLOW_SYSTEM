@@ -16,6 +16,31 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 7e — History for screens, and the applicant's timeline (2026-10-20)
+Chunk 1, step 5.
+
+**Built** (backend/app/core/workflow/history.py):
+- **`GET /cases/{id}/history`** (staff) is now **newest first**. Each entry adds:
+  - `actor_name`;
+  - `actor_title`: the post they acted from;
+  - `acting_for` when they made another post's move: the post and its title ("acting for the Permanent Secretary"), the basis (`succession` or `delegation`), and either the **absences** relied on (whose, and from when to when) or the **delegation** (from which post to which, with its dates).
+
+  The raw `details` are still there.
+- **`GET /cases/{id}/timeline`** (anyone who can see the case): the applicant's view, oldest first, **labels and dates only**:
+  - each status change shows its move's applicant wording ("Originals checked") or the new status's label (step 7a);
+  - hidden moves (cancelling a letter) are left out;
+  - a label repeating the one before it is shown once, so three internal minutes read "Accepted by the Ministry" once;
+  - uploads, flags and letters aren't on it.
+
+Nothing new is stored: both are read from the audit log, looking up names, titles, absences and delegations in a few batch queries. Several older tests read the history by position; they now say whether they read it newest or oldest first.
+
+**Files:** backend/app/core/workflow/history.py, backend/app/core/workflow/schemas.py (`AuditEventOut`, `ActingForOut`, `TimelineEntryOut`), backend/app/core/workflow/router.py (`case_history`, `case_timeline`), backend/tests/core/test_history.py, and older tests in tests/core and tests/modules/etls that index the history
+**Try it:**
+- Mark `ps@motie.test` absent, have `dps@motie.test` sign a letter, then `GET /cases/{id}/history` as the desk: the signing row has `"acting_for": {"title": "Permanent Secretary", "basis": "succession", "absences": [{"person": "Dev Permanent Secretary", "starts_on": ..., "ends_on": ...}]}`.
+- As the applicant, `GET /cases/{id}/timeline`: `Submitted`, `Originals checked`, `Awaiting signature`, `Letter signed`.
+- `docker compose run --rm tools pytest tests/core/test_history.py -v`
+**New concepts:** none (the audit log from step 3a, read two ways).
+
 ### Step 7d — Disabled actions explain why (2026-10-20)
 Chunk 1, step 4.
 
@@ -1095,6 +1120,10 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-20 | The signature line is the signing post's title, "For: ..." when acting; no name printed | print the signer's name and title too | Follows the Ministry's wording, which shows only "Permanent Secretary". Who actually signed is in the audit log and `issued_by`. `[CONFIRM]` |
 | 2026-10-20 | A ` >> ` mark for the reference and date line | a tab character; two template files | A tab is invisible and editors often turn it into spaces. ` >> ` is visible and explained in the template's notes. |
 | 2026-10-20 | Template version `2`, with a date and a short label | a date only; a number only | Numbers sort and compare easily; the label says what changed. |
+| 2026-10-20 | History and timeline are computed from the audit log on each request | store a separate timeline table | One source of truth (as in step 3c). A case has tens of rows, so it's cheap. |
+| 2026-10-20 | The timeline finds each move by its from-status, to-status and name, as recorded in the audit row | store the transition id in the audit row | Old rows don't have an id; the three together identify the move. New rows could also record the id, if moves are ever renamed. |
+| 2026-10-20 | Repeated labels on the timeline are shown once | show every move | To the applicant, three internal minutes are one step. |
+| 2026-10-20 | Staff may read the applicant's timeline too | applicants only | Records can see exactly what the applicant sees when they phone. |
 | 2026-10-20 | `blocked_by` is a dry run of the real checks, via one function shared in spirit with `change_status()` | separate "is it ready?" rules for the screens | The reason shown is exactly the reason the move would be refused. |
 | 2026-10-20 | Not worked out in queues (`null`) | run it for every row | A queue row only needs to say there's work; the case page explains. Keeps the queue fast. |
 | 2026-10-20 | The queue is filtered by the engine's own permission check, after a SQL pre-filter | the same rules again in SQL; ask the engine about every open case | One definition of "who may act" (no drift), and the SQL step keeps it fast. |
@@ -1176,6 +1205,14 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 7e
+1. The DPS signs while the PS is on leave. Where in the history response is the PS's absence, and where does that come from?
+2. Why doesn't the applicant's timeline show the PS cancelling a letter, and what does it show as the current status?
+
+#### Show answers
+1. In the signing row's `acting_for.absences`: the PS's name with `starts_on` and `ends_on`. The audit row only stores `absence_ids` (step 5d); `staff_history()` loads those absences and the absent person's name.
+2. The cancel move has `applicant_visible = false` (migration 0023), so `applicant_timeline()` skips it. The current status comes from `GET /cases/{id}`: `originals_received`, whose applicant label is "Being verified".
 
 ### Step 7d
 1. Why is it safe to run every check on every `GET /cases/{id}`, and what would break if someone wrote a check that saves something?
