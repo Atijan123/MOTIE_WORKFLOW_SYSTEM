@@ -43,6 +43,8 @@ class Workflow(Base):
     # Set (e.g. "etls") when the module's own endpoint opens these cases, because
     # each case needs the module's form saved with it. Added in 0015.
     opened_by_module: Mapped[str | None] = mapped_column(Text)
+    # Case references are "<prefix>/<year>/<number>", e.g. MOTIE/ETLS/FL/2026/0001 (0024).
+    reference_prefix: Mapped[str] = mapped_column(Text, unique=True)
 
     start_role: Mapped[Role] = relationship(lazy="selectin", viewonly=True)
 
@@ -151,6 +153,9 @@ class Case(Base):
     created_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("core.users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # The tracking number, set when the applicant submits (0024); null for a draft.
+    reference: Mapped[str | None] = mapped_column(Text, unique=True)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     workflow: Mapped[Workflow] = relationship(
         primaryjoin="Workflow.id == Case.workflow_id",
@@ -330,3 +335,17 @@ class TransitionEffect(Base):
         Integer, ForeignKey("core.workflow_transitions.id"), primary_key=True
     )
     effect_code: Mapped[str] = mapped_column(Text, primary_key=True)
+
+
+class ReferenceCounter(Base):
+    """The last case reference number used, per workflow per year (0024)."""
+
+    __tablename__ = "reference_counters"
+    __table_args__ = (
+        CheckConstraint("last_number > 0", name="reference_counters_positive"),
+        {"schema": "core"},
+    )
+
+    workflow_id: Mapped[int] = mapped_column(SmallInteger, ForeignKey("core.workflows.id"), primary_key=True)
+    year: Mapped[int] = mapped_column(SmallInteger, primary_key=True)
+    last_number: Mapped[int] = mapped_column(Integer)

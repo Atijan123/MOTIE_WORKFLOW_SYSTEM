@@ -6,12 +6,12 @@ in core.audit_log in the same transaction.
 
 from typing import NamedTuple
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit.service import record_event
 from app.core.identity.models import User
-from app.core.workflow.delegation import active_delegations_to, is_delegated_away
+from app.core.workflow.delegation import active_delegations_to, is_delegated_away, today
 from app.core.workflow import checks, effects
 from app.core.workflow.flags import open_flags
 from app.core.workflow.errors import (  # noqa: F401  (re-exported: callers use service.NotFound etc.)
@@ -140,18 +140,52 @@ async def open_case(
             WorkflowStatus.workflow_id == workflow.id, WorkflowStatus.is_initial
         )
     )
-    case = Case(workflow_id=workflow.id, current_status_id=initial.id, created_by=actor.id)
+    # Opening is submitting, for now: the case gets its reference straight away.
+    # With drafts (chunk 2) this moves to the applicant's "Submit".
+    case = Case(
+        workflow_id=workflow.id,
+        current_status_id=initial.id,
+        created_by=actor.id,
+        reference=await next_reference(session, workflow),
+        submitted_at=func.now(),
+    )
     session.add(case)
     await session.flush()  # sends the INSERT now, so case.id exists for the audit row
+    # func.now() is only known to the database; load it now, because async code
+    # can't load it later on first touch.
+    await session.refresh(case, ["submitted_at"])
     record_event(
         session,
         actor=actor,
         action="case.created",
         entity_type=AUDIT_ENTITY,
         entity_id=case.id,
-        details={"workflow": workflow.code, "status": initial.code},
+        details={"workflow": workflow.code, "status": initial.code, "reference": case.reference},
     )
     return case
+
+
+async def next_reference(session: AsyncSession, workflow: Workflow) -> str:
+    """The next case reference for this workflow this year, e.g. MOTIE/ETLS/FL/2026/0001.
+
+    One statement both creates the year's counter (at 1) and moves an existing
+    one on, and it locks the counter row until the transaction ends. So two
+    submissions at the same moment queue for the number instead of sharing it,
+    and a submission that rolls back gives its number back: there are no gaps.
+    (A Postgres SEQUENCE would be simpler, but never gives numbers back, and
+    can't restart each year by itself.)
+    """
+    year = today().year
+    number = await session.scalar(
+        text(
+            "INSERT INTO core.reference_counters AS c (workflow_id, year, last_number) "
+            "VALUES (:workflow_id, :year, 1) "
+            "ON CONFLICT (workflow_id, year) DO UPDATE SET last_number = c.last_number + 1 "
+            "RETURNING last_number"
+        ),
+        {"workflow_id": workflow.id, "year": year},
+    )
+    return f"{workflow.reference_prefix}/{year}/{number:04d}"
 
 
 async def _permitted(

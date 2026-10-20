@@ -64,6 +64,7 @@ class FacilityLetterForm(BaseModel):
 
 class FacilityLetterOut(FacilityLetterForm):
     case_id: int
+    reference: str | None  # the case's tracking number, e.g. MOTIE/ETLS/FL/2026/0001
     status: str | None  # internal status code, for staff only; GET /cases/{id} has the full case
     status_label: str  # what the applicant sees, e.g. "Being verified"
     # Cases from before step 6g have no declared code.

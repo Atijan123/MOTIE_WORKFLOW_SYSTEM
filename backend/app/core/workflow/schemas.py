@@ -36,6 +36,8 @@ class ActionOut(BaseModel):
 
 class CaseOut(BaseModel):
     id: int
+    reference: str | None  # e.g. MOTIE/ETLS/FL/2026/0001; null while a draft
+    submitted_at: datetime | None
     workflow: str
     status: StatusOut
     created_by: int

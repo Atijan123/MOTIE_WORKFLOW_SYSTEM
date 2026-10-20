@@ -93,8 +93,8 @@ async def _add_test_workflow(session) -> int:
     return (
         await session.execute(
             text(
-                "INSERT INTO core.workflows (code, name, start_role_id) "
-                "SELECT 'test_wf', 'Test', id FROM core.roles WHERE code = 'applicant' RETURNING id"
+                "INSERT INTO core.workflows (code, name, start_role_id, reference_prefix) "
+                "SELECT 'test_wf', 'Test', id, 'TEST' FROM core.roles WHERE code = 'applicant' RETURNING id"
             )
         )
     ).scalar_one()

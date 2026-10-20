@@ -48,6 +48,8 @@ async def _case_out(session: AsyncSession, case: Case, user: User) -> CaseOut:
     moves = await service.available_transitions(session, case, user)
     return CaseOut(
         id=case.id,
+        reference=case.reference,
+        submitted_at=case.submitted_at,
         workflow=case.workflow.code,
         status=StatusOut(**service.status_view(case.current_status, user)),
         created_by=case.created_by,

@@ -16,6 +16,25 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 7b — Case reference numbers (2026-10-20)
+Chunk 1, step 2.
+
+**Built:** every case gets a tracking number when it's submitted: `MOTIE/ETLS/FL/2026/0001` for facility letters, `MOTIE/ETLS/AP/2026/0001` for approvals, a sequence per service per year (migration `0024`):
+- `core.workflows.reference_prefix` (required, unique) says how a workflow's cases are numbered `[CONFIRM]` format.
+- `core.reference_counters` holds the last number used per workflow per year. `next_reference()` in backend/app/core/workflow/service.py takes the next one with a single upsert (`INSERT ... ON CONFLICT DO UPDATE ... RETURNING`).
+- `core.cases.reference` and `submitted_at`: set together (a check constraint says so). Today that's in `open_case()`, because opening a case *is* submitting it; with drafts (chunk 2) it moves to "Submit".
+- `GET /cases/{id}` and `GET /etls/facility-letters/{id}` show `reference`; the `case.created` audit row records it.
+- Existing dev cases got numbers in the order they were opened.
+
+This is **not** the reference printed on the letter: that's the Ministry's registry file reference, still the `FACILITY_LETTER_REFERENCE_FORMAT` setting (SCREENS.md, global rules).
+
+**Files:** backend/alembic/versions/0024_case_references.py, backend/app/core/workflow/models.py (`Workflow.reference_prefix`, `Case.reference`, `Case.submitted_at`, `ReferenceCounter`), backend/app/core/workflow/service.py (`next_reference()`, `open_case()`), backend/app/core/workflow/schemas.py, backend/app/core/workflow/router.py, backend/app/modules/etls/router.py, backend/app/modules/etls/schemas.py, backend/tests/core/test_case_references.py, backend/tests/core/test_workflow_definitions.py
+**Try it:**
+- `docker compose run --rm tools alembic upgrade head`, then `docker compose exec db psql -U motie -d motie -c "SELECT id, reference, submitted_at FROM core.cases ORDER BY id"`.
+- Submit two facility letters: `0001`, `0002` (or the next numbers this year).
+- `docker compose run --rm tools pytest tests/core/test_case_references.py -v`. The last test opens two real connections and shows the second submission *waiting* for the first.
+**New concepts:** Gapless numbering (a counter row, not a sequence)
+
 ### Step 7a — Applicant status labels (2026-10-20)
 Chunk 1 of docs/GAPS.md (shared foundations), step 1.
 
@@ -847,6 +866,11 @@ A trigger stops anyone from quietly un-cancelling or deleting.
 **Here:** `cancel()` and `issue()` in backend/app/core/documents/issued.py, `cancel_letter()` in backend/app/modules/etls/letter.py, the index and trigger in backend/alembic/versions/0022_letter_corrections.py.
 **Learn more:** [PostgreSQL docs: Partial indexes](https://www.postgresql.org/docs/16/indexes-partial.html). Example 11.3 there is exactly "only one current row".
 
+### Gapless numbering (a counter row, not a sequence)
+**What:** Postgres has `SEQUENCE`s for numbering, and our ids use them. But a sequence never gives a number back: if a transaction takes 42 and then fails, 42 is gone, and the registry sees 41, 43 and wonders where 42 went. For official numbers people track, we keep the last number in an ordinary row instead, and take the next one with `UPDATE ... SET last_number = last_number + 1 RETURNING last_number` (as an upsert, so the first case of a year creates the row). That `UPDATE` locks the row until the transaction ends. A second submission at the same moment waits, then gets the next number. And if the first one rolls back, its `+ 1` rolls back too. The price is that submissions queue for a moment, which is fine at the Ministry's volume.
+**Here:** `next_reference()` in backend/app/core/workflow/service.py; `core.reference_counters` in backend/alembic/versions/0024_case_references.py. `test_two_submissions_at_the_same_moment_get_different_numbers` and `test_a_submission_that_fails_gives_its_number_back` in backend/tests/core/test_case_references.py.
+**Learn more:** [PostgreSQL docs: INSERT ... ON CONFLICT](https://www.postgresql.org/docs/16/sql-insert.html#SQL-ON-CONFLICT) and the note on sequences not being transactional in [Sequence Manipulation Functions](https://www.postgresql.org/docs/16/functions-sequence.html)
+
 ### Three answers: yes, no, not known yet
 **What:** "does this case need a cement receipt?" can't always be answered yet. Squeezing "don't know" into yes or no is a classic bug: say *yes* and you ask honest applicants for papers they don't need; say *no* and the requirement quietly disappears. So the answer has a third value, `None`, and each place that uses it decides what "not known yet" means *for it*. The early check (Records) lets it wait; the late check (Verify) refuses to go on until it's known. SQL works the same way: `NULL = 'x'` is neither true nor false but unknown, which is why `WHERE` needs `IS NULL`.
 **Here:** `holds()` in backend/app/core/documents/conditions.py, `RequirementStatus.undecided` and the checks `known_documents_complete`/`documents_complete` in backend/app/core/documents/service.py.
@@ -1027,6 +1051,10 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-20 | The signature line is the signing post's title, "For: ..." when acting; no name printed | print the signer's name and title too | Follows the Ministry's wording, which shows only "Permanent Secretary". Who actually signed is in the audit log and `issued_by`. `[CONFIRM]` |
 | 2026-10-20 | A ` >> ` mark for the reference and date line | a tab character; two template files | A tab is invisible and editors often turn it into spaces. ` >> ` is visible and explained in the template's notes. |
 | 2026-10-20 | Template version `2`, with a date and a short label | a date only; a number only | Numbers sort and compare easily; the label says what changed. |
+| 2026-10-20 | Case references come from a counter row per workflow per year | a Postgres `SEQUENCE`; the case id | A sequence leaves gaps on rollback and doesn't restart yearly; the case id runs across all services. The spec wants a sequence per service per year. |
+| 2026-10-20 | The prefix is a column on `workflows` | a format setting per module | Workflows are data; a new service gets its numbering with its migration. |
+| 2026-10-20 | The year is today's date (UTC = Gambian time), via the same `today()` as delegations | `submitted_at`'s year | One clock the tests can move. They can't differ except across midnight on 31st December. |
+| 2026-10-20 | The app may in principle update `cases.reference` (its `UPDATE` grant on `core.cases` is table-wide) | narrow the grant to named columns now | No code changes it, and narrowing the grant touches every column the engine writes. Worth doing in a hardening step. |
 | 2026-10-20 | Applicant labels live on statuses (required), with optional timeline wording and a "hidden" flag on moves | a label per move only; a mapping in the frontend | Labels are data, like the rest of the workflow, and the database refuses a status without one. "Originals checked" vs "Being verified" needs both: one for what happened, one for where the case is. |
 | 2026-10-20 | Applicants get `null` for the internal code and name, rather than those fields being removed | separate response models for applicants and staff | One shape for the frontend; the rule is in one function, `status_view()`. |
 | 2026-10-20 | The cancel move is hidden, but earlier "Letter signed" timeline entries stay | rewrite the applicant's timeline to drop everything about the cancelled letter | The applicant may already have seen "Letter signed"; hiding history they saw would be confusing and dishonest. `[CONFIRM]` |
@@ -1098,6 +1126,14 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 7b
+1. Two applicants press Submit in the same second. Why can't they get the same number?
+2. A submission takes `MOTIE/ETLS/FL/2026/0007`, then fails while saving the form. What number does the next submission get, and why would a `SEQUENCE` give a different answer?
+
+#### Show answers
+1. `next_reference()` updates the year's counter row, which locks it until the first transaction ends. The second waits, then reads the new value and adds one.
+2. `0007` again: the counter's `+ 1` was part of the failed transaction and rolled back with it. A sequence's `nextval()` is never rolled back, so the next one would be `0008` and `0007` would be missing.
 
 ### Step 7a
 1. Where does the applicant's "Being verified" come from, and why don't they see "originals_received"?
