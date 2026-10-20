@@ -11,9 +11,12 @@ Items marked `[CONFIRM]` are assumptions still to check with the ETLS desk.
 - **Every case page for staff shows its history** from the audit log, newest first, including "acting for [position]" and the absence or delegation it relied on.
 - **Acting banner:** when a staff member is acting for an absent position, a banner says so on every screen, e.g. "You are acting for the Director of Industry & Investment (absent 20th–24th October)".
 - **Disabled actions explain why** (e.g. "Tick ‘Original seen’ to accept"). The API must be able to say what is blocking a move.
-- **Returning needs a written reason**, shown to the applicant.
+- **Returning needs a written reason.** A return has two texts: a **message to the applicant** (shown to them) and an optional **internal minute** (staff only). Rejecting also needs a reason.
+- **Drafts:** every application starts as a draft the applicant can edit and upload to; "Submit" moves it to Records. A returned case becomes editable again and is resubmitted with the same reference and history.
+- **Case history is newest first**, with the actor's name and post title, and absence or delegation dates when someone acted for another post.
 - **Dates** in the Ministry format: "16th October, 2026".
-- **Reference numbers** per service: `MOTIE/ETLS/FL/…` (facility letter), `MOTIE/ETLS/AP/…` (approval), `MOTIE/ETLS/CO/…` (certificate of origin). Format `[CONFIRM]`.
+- **Case reference numbers** per service, a sequence per service per year, assigned when the applicant submits: `MOTIE/ETLS/FL/2026/0001` (facility letter), `MOTIE/ETLS/AP/…` (approval), `MOTIE/ETLS/CO/…` (certificate of origin). This is the tracking number shown to applicants and staff.
+- **The Ministry's registry file reference** (e.g. `ADM 151/420/01/PART IV`) is separate: it is what the facility letter prints at the top. Kept as a setting until the desk explains its parts `[CONFIRM]`.
 - **Uploads:** PDF, PNG or JPEG, max 10 MB, type checked from content.
 - **Notifications:** applicants are emailed at each status change and when a case is returned.
 - **Queues** show how long each case has waited at its current step.
@@ -30,9 +33,10 @@ Items marked `[CONFIRM]` are assumptions still to check with the ETLS desk.
 ### A2. Facility letter application (`Apply`)
 - Importer: business name, address.
 - Goods: product, quantity (number), unit, HS code (optional).
-- Exporter: name, country, ETLS approval number, one or more product approval numbers, one or more certificate of origin numbers.
-- Documents checklist: business registration, annual returns certificate, certificate of origin (with note: bring the original to Records), invoice, export declaration, receipt (cement only, shown as "not known yet" until the HS code is confirmed).
+- Exporter: name, country, ETLS approval number, one or more product approval numbers, one or more certificates of origin, **each with its number and issue date** (so the system can check the six-month validity).
+- Documents checklist: business registration, annual returns certificate, certificate of origin (with note: bring the original to Records), invoice, export declaration, receipt (cement only, shown as "not known yet" until the **desk confirms** the HS code; a code the applicant declares does not decide it).
 - Save draft; Submit is disabled until required documents are uploaded, with a count of what is missing.
+- **Applicant labels (facility letter):** Draft → Submitted ("Bring the original certificate of origin to Records") → Originals checked → Being verified → Awaiting signature → Letter signed → Letter sent to GRA. Plus: Returned: action needed (with the message), Rejected (with the reason). A cancelled and reissued letter is invisible to the applicant: the case simply shows "Being verified" again.
 
 ### A3. Status on a phone (`Track`)
 - One case: reference, goods, exporter, current applicant status with a one-line explanation, timeline.
@@ -58,18 +62,20 @@ Items marked `[CONFIRM]` are assumptions still to check with the ETLS desk.
 
 ## Staff screens: facility letters
 
-Route: Records (originals seen) → ETLS desk (verify) → PS (sign) → sent to GRA → closed.
+Route: Records (originals seen) → ETLS desk (verify) → PS (sign) → **Records dispatches the signed letter to GRA** (outgoing correspondence is Records' job) → sent to GRA. "Sent to GRA" is the final status; there is no separate manual "Close" step unless GRA turns out to report back `[CONFIRM]`.
 
 ### S1. Records queue (`Records`)
 - Queue of all services, oldest first, with service, applicant, goods and days waiting.
 - Case: documents list with view links; for facility letters, "Original seen in person" on the certificate of origin.
 - Accept (disabled until originals seen) or return to applicant with reason.
+- **Outgoing tab:** signed facility letters to dispatch. Download the stored letter, then "Mark sent to GRA" with the dispatch date.
 
 ### S2. ETLS desk verification (`Desk`)
-- Duplicate certificate flag: which earlier case used the number, its status and date; finding (required) to clear; or reject.
+- Duplicate certificate flag: which earlier case used the number, its status and date; finding (required) to clear; **or reject directly while the flag is open** (the rejection reason also resolves the flag) `[CONFIRM]`.
 - Application summary.
 - HS code: enter or confirm; shows whether the cement receipt applies.
-- Checks against the ECOWAS ETLS list, each a recorded tick: exporter approval listed; product approval covers the goods; certificates within six months of issue.
+- Checks against the ECOWAS ETLS list, each a recorded tick: exporter approval listed; product approval covers the goods.
+- Certificate validity is **computed** from the issue dates on the form: any certificate more than six months old is flagged.
 - Verify (disabled until flag cleared, HS code confirmed, checks ticked, documents complete) or return to applicant.
 - History panel.
 
@@ -78,7 +84,15 @@ Route: Records (originals seen) → ETLS desk (verify) → PS (sign) → sent to
 - Letter preview in the Ministry's wording.
 - Sign (stores the letter) or return to desk. Cancel and reissue for signed letters.
 
+### S11. Absences and delegations (all staff)
+- **My absences:** a post holder records their own absence (dates, reason optional) or delegates to another post (dates, all workflows or one). Shows who will act for them under the succession order.
+- **Record for someone else:** staff with the `absence_recorder` role (PS's office, HR `[CONFIRM]`) record an absence on a post holder's behalf; audited as "recorded by".
+- List of current and upcoming absences, with revoke for delegations.
+
 ## Staff screens: ETLS approval
+
+The approval workflow is a new `etls_approval` workflow; the placeholder `etls_application` is retired.
+**Per-product outcomes:** the case status tracks the file (with NAC, with ECOWAS, done); each product carries its own decision (NAC: approve / not approve / defer; ECOWAS: approved / not approved).
 
 Route: Records (samples received) → Minister → PS → Director of Industry & Investment (signs and assigns; DPS Admin & Finance when absent) → officer (technical review and inspection) → NAC → ECOWAS submission → ECOWAS outcome → approved register.
 
