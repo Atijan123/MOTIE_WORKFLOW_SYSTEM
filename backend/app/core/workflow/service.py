@@ -313,6 +313,7 @@ async def change_status(
 
     case.current_status_id = move.to_status_id
     case.updated_at = func.now()
+    case.status_changed_at = func.now()
     event = record_event(
         session,
         actor=actor,
@@ -342,5 +343,5 @@ async def change_status(
     except BaseException:
         effects.undo_all(undos)
         raise
-    await session.refresh(case, ["current_status", "updated_at"])
+    await session.refresh(case, ["current_status", "updated_at", "status_changed_at"])
     return case

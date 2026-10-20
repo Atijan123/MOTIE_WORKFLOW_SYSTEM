@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.audit.service import record_event
 from app.core.documents import facts
 from app.core.identity.models import User
-from app.core.workflow import checks, flags
+from app.core.workflow import checks, flags, summaries
 from app.core.workflow import service as workflow
 from app.core.workflow.models import Case
 from app.modules.etls.models import (
@@ -174,6 +174,14 @@ async def facility_letter_facts(session: AsyncSession, case_id: int) -> dict:
     }
 
 
+async def facility_letter_summaries(session: AsyncSession, case_ids: list[int]) -> dict[int, str]:
+    """The goods, for lists and queues: "Roofing sheets, 1200.5 tonnes"."""
+    letters = await session.scalars(select(FacilityLetter).where(FacilityLetter.case_id.in_(case_ids)))
+    # normalize() drops NUMERIC's trailing zeros (1200.500 -> 1200.5).
+    return {l.case_id: f"{l.product}, {format(l.quantity.normalize(), 'f')} {l.unit}" for l in letters}
+
+
 # Registered when the module is imported (main.py imports its router).
 facts.register(FACILITY_LETTER, facility_letter_facts)
+summaries.register(FACILITY_LETTER, facility_letter_summaries)
 checks.register(HS_CODE_CONFIRMED, _check_hs_code_confirmed)

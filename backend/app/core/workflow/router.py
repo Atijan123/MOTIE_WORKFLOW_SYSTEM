@@ -5,12 +5,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.audit.service import history
 from app.core.identity.deps import get_current_user
 from app.core.identity.models import User
-from app.core.workflow import flags, service
+from app.core.workflow import flags, queues, service
 from app.core.workflow.models import Case
 from app.core.workflow.schemas import (
     ActionOut,
     AuditEventOut,
     CaseOut,
+    CaseSummaryOut,
     ChangeStatusRequest,
     FlagOut,
     ResolveFlagRequest,
@@ -44,6 +45,32 @@ async def workflow_error_handler(request: Request, exc: service.WorkflowError) -
     return JSONResponse(status_code=_ERROR_STATUS[type(exc)], content={"detail": str(exc)})
 
 
+def _action_out(m: service.PermittedMove) -> ActionOut:
+    return ActionOut(
+        to_status=m.transition.to_status.code,
+        name=m.transition.name,
+        on_behalf_of=m.on_behalf_of,
+        requires_comment=m.transition.requires_comment,
+    )
+
+
+def _summary_out(item: queues.QueueItem, user: User) -> CaseSummaryOut:
+    case = item.case
+    return CaseSummaryOut(
+        id=case.id,
+        reference=case.reference,
+        workflow=case.workflow.code,
+        service=case.workflow.name,
+        status=StatusOut(**service.status_view(case.current_status, user)),
+        submitted_at=case.submitted_at,
+        status_since=case.status_changed_at,
+        days_waiting=item.days_waiting,
+        summary=item.summary,
+        applicant_name=item.applicant_name,
+        available_actions=[_action_out(m) for m in item.moves],
+    )
+
+
 async def _case_out(session: AsyncSession, case: Case, user: User) -> CaseOut:
     moves = await service.available_transitions(session, case, user)
     return CaseOut(
@@ -55,15 +82,7 @@ async def _case_out(session: AsyncSession, case: Case, user: User) -> CaseOut:
         created_by=case.created_by,
         created_at=case.created_at,
         updated_at=case.updated_at,
-        available_actions=[
-            ActionOut(
-                to_status=m.transition.to_status.code,
-                name=m.transition.name,
-                on_behalf_of=m.on_behalf_of,
-                requires_comment=m.transition.requires_comment,
-            )
-            for m in moves
-        ],
+        available_actions=[_action_out(m) for m in moves],
         on_hold=bool(await flags.open_flags(session, case.id, blocking_only=True))
         if service.is_staff(user)
         else None,
@@ -78,6 +97,29 @@ async def start_case(
 ):
     case = await service.start_case(session, workflow_code=body.workflow, actor=user)
     return await _case_out(session, case, user)
+
+
+# These two come before "/{case_id}", or FastAPI would try to read "queue" as a case id.
+@router.get("", response_model=list[CaseSummaryOut])
+async def my_cases(
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """The cases I applied for, newest first (the applicant's "my applications")."""
+    return [_summary_out(item, user) for item in await queues.my_cases(session, user)]
+
+
+@router.get("/queue", response_model=list[CaseSummaryOut])
+async def my_queue(
+    status: str | None = None,
+    workflow: str | None = None,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Open cases where I can make a move now (own post, delegation or succession),
+    longest-waiting first. `?status=signed` narrows it, e.g. to Records' outgoing letters."""
+    items = await queues.queue(session, user, status=status, workflow=workflow)
+    return [_summary_out(item, user) for item in items]
 
 
 @router.get("/{case_id}", response_model=CaseOut)

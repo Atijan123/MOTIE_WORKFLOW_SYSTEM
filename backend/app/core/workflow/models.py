@@ -143,6 +143,7 @@ class Case(Base):
             name="cases_status_fkey",
         ),
         Index("cases_created_by_idx", "created_by"),
+        Index("cases_status_idx", "current_status_id", "status_changed_at"),  # queues (0025)
         {"schema": "core"},
     )
     __mapper_args__ = {"eager_defaults": True}
@@ -156,6 +157,9 @@ class Case(Base):
     # The tracking number, set when the applicant submits (0024); null for a draft.
     reference: Mapped[str | None] = mapped_column(Text, unique=True)
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # When it entered its current status: queues' "waiting since" (0025). Set
+    # only by the engine, so editing a draft doesn't reset it.
+    status_changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     workflow: Mapped[Workflow] = relationship(
         primaryjoin="Workflow.id == Case.workflow_id",

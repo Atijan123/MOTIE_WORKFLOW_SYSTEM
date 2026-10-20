@@ -16,6 +16,30 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 7c — Lists and queues (2026-10-20)
+Chunk 1, step 3.
+
+**Built:**
+- **`GET /cases`**, the applicant's "my applications" (A1): the cases I applied for, newest first.
+- **`GET /cases/queue`**, a staff member's queue (S1, S2, S3): every open case where I can make a move *right now*, by my own post, a delegation or the succession order, longest-waiting first. `?status=signed` (or `?workflow=...`) narrows it, e.g. for Records' Outgoing tab in chunk 2. Applicants get 403.
+- Each row has the reference, service name, status (labels for applicants, as in step 7a), submitted date, `status_since` and **`days_waiting`**, the applicant's name (staff only), a one-line `summary` and, in a queue, the moves I can make (with `on_behalf_of` when acting for someone).
+- **`core.cases.status_changed_at`** (migration `0025`): when the case reached its current step, set only by the engine. `updated_at` would have been reset by editing a draft (chunk 2).
+- **Summaries from modules:** backend/app/core/workflow/summaries.py, the same plug-in pattern as facts and checks. ETLS registers "Roofing sheets, 1200.5 tonnes" (`facility_letter_summaries()` in backend/app/modules/etls/service.py). It takes many case ids at once, so a queue costs one query per module.
+
+**How the queue decides** (backend/app/core/workflow/queues.py `queue()`):
+1. SQL narrows to open cases whose next step belongs to a post I *might* act as: mine, any delegated to me today, any whose succession line names one of mine.
+2. For each, the engine's own `available_transitions()` gives the final answer.
+
+So the queue and the case page's buttons can never disagree.
+
+**Files:** backend/alembic/versions/0025_status_changed_at.py, backend/app/core/workflow/queues.py, backend/app/core/workflow/summaries.py, backend/app/core/workflow/models.py (`status_changed_at`, index), backend/app/core/workflow/service.py, backend/app/core/workflow/schemas.py (`CaseSummaryOut`), backend/app/core/workflow/router.py (`my_cases`, `my_queue`, `_action_out()`), backend/app/modules/etls/service.py, backend/tests/core/test_queues.py
+**Try it:**
+- `docker compose run --rm tools alembic upgrade head`
+- As `applicant@motie.test`, submit two facility letters and `GET /cases`. As `records@motie.test`, `GET /cases/queue`: both, with `days_waiting: 0`. Accept one: it leaves Records' queue and appears in `desk@motie.test`'s.
+- Mark the PS absent (`POST /absences` as `ps@motie.test`), and the DPS's queue picks up letters awaiting signature, each action marked `"on_behalf_of": "permanent_secretary"`.
+- `docker compose run --rm tools pytest tests/core/test_queues.py -v`
+**New concepts:** Narrow in SQL, decide in code
+
 ### Step 7b — Case reference numbers (2026-10-20)
 Chunk 1, step 2.
 
@@ -866,6 +890,11 @@ A trigger stops anyone from quietly un-cancelling or deleting.
 **Here:** `cancel()` and `issue()` in backend/app/core/documents/issued.py, `cancel_letter()` in backend/app/modules/etls/letter.py, the index and trigger in backend/alembic/versions/0022_letter_corrections.py.
 **Learn more:** [PostgreSQL docs: Partial indexes](https://www.postgresql.org/docs/16/indexes-partial.html). Example 11.3 there is exactly "only one current row".
 
+### Narrow in SQL, decide in code
+**What:** "which cases can I act on?" depends on rules that live in Python: own post, delegation, succession with absences, the order between them. Writing all of that again in SQL would give two versions of the rules that could drift apart. Running the Python on every open case would be slow once there are thousands. So we do both in turn. A cheap SQL query keeps only cases that *could* concern me (a generous superset, never missing one). Then the real rule decides for each of the few left. The superset may let through a case I can't act on, but the second step drops it; it must never leave out one I can, which is why it's generous.
+**Here:** `_positions_i_might_act_as()` and `queue()` in backend/app/core/workflow/queues.py; the final word is `available_transitions()` in backend/app/core/workflow/service.py.
+**Learn more:** [Martin Fowler: Specification pattern (PDF, with Eric Evans)](https://martinfowler.com/apsupp/spec.pdf), on keeping one definition of a rule and using it for both selecting and checking.
+
 ### Gapless numbering (a counter row, not a sequence)
 **What:** Postgres has `SEQUENCE`s for numbering, and our ids use them. But a sequence never gives a number back: if a transaction takes 42 and then fails, 42 is gone, and the registry sees 41, 43 and wonders where 42 went. For official numbers people track, we keep the last number in an ordinary row instead, and take the next one with `UPDATE ... SET last_number = last_number + 1 RETURNING last_number` (as an upsert, so the first case of a year creates the row). That `UPDATE` locks the row until the transaction ends. A second submission at the same moment waits, then gets the next number. And if the first one rolls back, its `+ 1` rolls back too. The price is that submissions queue for a moment, which is fine at the Ministry's volume.
 **Here:** `next_reference()` in backend/app/core/workflow/service.py; `core.reference_counters` in backend/alembic/versions/0024_case_references.py. `test_two_submissions_at_the_same_moment_get_different_numbers` and `test_a_submission_that_fails_gives_its_number_back` in backend/tests/core/test_case_references.py.
@@ -1051,6 +1080,10 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-20 | The signature line is the signing post's title, "For: ..." when acting; no name printed | print the signer's name and title too | Follows the Ministry's wording, which shows only "Permanent Secretary". Who actually signed is in the audit log and `issued_by`. `[CONFIRM]` |
 | 2026-10-20 | A ` >> ` mark for the reference and date line | a tab character; two template files | A tab is invisible and editors often turn it into spaces. ` >> ` is visible and explained in the template's notes. |
 | 2026-10-20 | Template version `2`, with a date and a short label | a date only; a number only | Numbers sort and compare easily; the label says what changed. |
+| 2026-10-20 | The queue is filtered by the engine's own permission check, after a SQL pre-filter | the same rules again in SQL; ask the engine about every open case | One definition of "who may act" (no drift), and the SQL step keeps it fast. |
+| 2026-10-20 | A separate `status_changed_at` column | use `updated_at` | Editing a draft (chunk 2) updates the case without moving it; "days waiting" mustn't reset. |
+| 2026-10-20 | `GET /cases` is "cases I applied for", for anyone; staff use `/cases/queue` | one endpoint that behaves differently for staff | Two clear questions, two endpoints. Walk-ins (chunk 2) will decide whether "applied for" means the applicant or whoever typed it in. |
+| 2026-10-20 | Days waiting counts whole calendar days | working days | Simple and honest for now. Working days need the Ministry's holiday calendar `[CONFIRM]` if deadlines use them. |
 | 2026-10-20 | Case references come from a counter row per workflow per year | a Postgres `SEQUENCE`; the case id | A sequence leaves gaps on rollback and doesn't restart yearly; the case id runs across all services. The spec wants a sequence per service per year. |
 | 2026-10-20 | The prefix is a column on `workflows` | a format setting per module | Workflows are data; a new service gets its numbering with its migration. |
 | 2026-10-20 | The year is today's date (UTC = Gambian time), via the same `today()` as delegations | `submitted_at`'s year | One clock the tests can move. They can't differ except across midnight on 31st December. |
@@ -1126,6 +1159,16 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 7c
+1. The PS is on leave and the DPS opens their queue. Which facility letters do they see, and how does the queue know?
+2. Why does the queue still call `available_transitions()` for each case, after the SQL query has already filtered?
+3. A desk officer edits nothing, but someone uploads a new invoice to a case. Does its `days_waiting` change?
+
+#### Show answers
+1. Letters in "Verified" (the PS's step). The SQL step includes posts whose succession line names one of the DPS's posts (the PS's line does). Then `available_transitions()` checks the PS's holders really are all absent today and nobody holds a delegation, and marks the move `on_behalf_of: permanent_secretary`.
+2. The SQL is a deliberately generous superset: it doesn't know who is absent today or which delegations block succession. The engine's check is the real rule, so the queue and the case page always agree.
+3. No. Only the engine sets `status_changed_at`, when the status changes. Uploads don't touch it.
 
 ### Step 7b
 1. Two applicants press Submit in the same second. Why can't they get the same number?

@@ -50,6 +50,23 @@ class CaseOut(BaseModel):
     on_hold: bool | None
 
 
+class CaseSummaryOut(BaseModel):
+    """One row of a list or queue."""
+
+    id: int
+    reference: str | None
+    workflow: str
+    service: str  # e.g. "ETLS facility letter"
+    status: StatusOut
+    submitted_at: datetime | None
+    # When it reached its current step, and the whole days since (queues).
+    status_since: datetime
+    days_waiting: int
+    summary: str | None  # the module's one line, e.g. "Roofing sheets, 1200.5 tonnes"
+    applicant_name: str | None  # staff only
+    available_actions: list[ActionOut]  # in a queue: what I can do; empty in "my cases"
+
+
 class AuditEventOut(BaseModel):
     occurred_at: datetime
     actor_user_id: int | None
