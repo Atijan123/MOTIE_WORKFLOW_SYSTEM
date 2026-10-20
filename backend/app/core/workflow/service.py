@@ -257,6 +257,17 @@ async def may_make_move_with_check(
     return bool(transitions) and bool(await _permitted(session, case, user, list(transitions)))
 
 
+async def what_blocks(session: AsyncSession, case: Case, transition: WorkflowTransition) -> list[str]:
+    """Why this move can't be made right now, without making it (a dry run).
+
+    The same two things change_status() refuses with, in the same order: open
+    blocking flags, then the move's checks. Empty means the button can be
+    pressed. Checks only read (see checks.py), so this changes nothing.
+    """
+    reasons = [f"On hold: {f.message}" for f in await open_flags(session, case.id, blocking_only=True)]
+    return reasons + await checks.problems(session, case, transition.id)
+
+
 async def change_status(
     session: AsyncSession,
     *,

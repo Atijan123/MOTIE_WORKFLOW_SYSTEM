@@ -3,7 +3,9 @@
 Which transition needs which check is data (core.transition_checks). What a
 check does is a function registered here under its name, by whichever part of
 the code knows how (e.g. the documents service registers "documents_complete").
-A check returns the problems it found; an empty list means it passed.
+A check returns the problems it found; an empty list means it passed. A check
+must only read: the API also runs every check as a dry run, to show staff why a
+button is disabled (service.what_blocks()).
 """
 
 import logging

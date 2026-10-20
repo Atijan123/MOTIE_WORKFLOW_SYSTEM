@@ -45,12 +45,13 @@ async def workflow_error_handler(request: Request, exc: service.WorkflowError) -
     return JSONResponse(status_code=_ERROR_STATUS[type(exc)], content={"detail": str(exc)})
 
 
-def _action_out(m: service.PermittedMove) -> ActionOut:
+def _action_out(m: service.PermittedMove, blocked_by: list[str] | None = None) -> ActionOut:
     return ActionOut(
         to_status=m.transition.to_status.code,
         name=m.transition.name,
         on_behalf_of=m.on_behalf_of,
         requires_comment=m.transition.requires_comment,
+        blocked_by=blocked_by,
     )
 
 
@@ -82,7 +83,8 @@ async def _case_out(session: AsyncSession, case: Case, user: User) -> CaseOut:
         created_by=case.created_by,
         created_at=case.created_at,
         updated_at=case.updated_at,
-        available_actions=[_action_out(m) for m in moves],
+        # On the case page each action says what (if anything) stops it.
+        available_actions=[_action_out(m, await service.what_blocks(session, case, m.transition)) for m in moves],
         on_hold=bool(await flags.open_flags(session, case.id, blocking_only=True))
         if service.is_staff(user)
         else None,

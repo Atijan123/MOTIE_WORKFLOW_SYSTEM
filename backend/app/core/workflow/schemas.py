@@ -32,6 +32,9 @@ class ActionOut(BaseModel):
     on_behalf_of: str | None
     # The move needs a written reason in the comment (e.g. cancelling a letter).
     requires_comment: bool
+    # Why the button is disabled right now, e.g. ["Invoice is missing"]; empty
+    # when it can be pressed. Null where it isn't worked out (queues, for speed).
+    blocked_by: list[str] | None = None
 
 
 class CaseOut(BaseModel):

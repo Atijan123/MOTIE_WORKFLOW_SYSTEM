@@ -16,6 +16,21 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 7d — Disabled actions explain why (2026-10-20)
+Chunk 1, step 4.
+
+**Built:** on `GET /cases/{id}`, every available action now has `blocked_by`: the reasons it can't be pressed right now, or `[]` when it can. Examples: `["Invoice is missing", "the original certificate of origin hasn't been marked as seen"]`, or `["On hold: Certificate of origin number(s) already used ..."]`.
+
+It's a **dry run** of what `change_status()` would refuse with, in the same order: open blocking flags, then the move's checks (`what_blocks()` in backend/app/core/workflow/service.py). Nothing changes: no status, no audit row. That's safe because checks only read, a rule now written into backend/app/core/workflow/checks.py.
+
+Two things aren't in it: a missing reason for moves that need one (that's a field to fill, shown by `requires_comment`), and effects (they only run on a real move). In queues `blocked_by` is `null`: running every check for every row would make the queue slow, and the case page is where the button is.
+
+**Files:** backend/app/core/workflow/service.py (`what_blocks()`), backend/app/core/workflow/checks.py (the read-only rule), backend/app/core/workflow/schemas.py (`ActionOut.blocked_by`), backend/app/core/workflow/router.py, backend/tests/core/test_blocked_actions.py, and three tests that compare actions exactly
+**Try it:**
+- Submit a facility letter, then as `records@motie.test` `GET /cases/{id}`: the accept action lists every missing document. Upload them and look again: only the original certificate remains.
+- `docker compose run --rm tools pytest tests/core/test_blocked_actions.py -v`
+**New concepts:** none. It reuses A registry of named checks; a check is now also run as a preview.
+
 ### Step 7c — Lists and queues (2026-10-20)
 Chunk 1, step 3.
 
@@ -1080,6 +1095,8 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-20 | The signature line is the signing post's title, "For: ..." when acting; no name printed | print the signer's name and title too | Follows the Ministry's wording, which shows only "Permanent Secretary". Who actually signed is in the audit log and `issued_by`. `[CONFIRM]` |
 | 2026-10-20 | A ` >> ` mark for the reference and date line | a tab character; two template files | A tab is invisible and editors often turn it into spaces. ` >> ` is visible and explained in the template's notes. |
 | 2026-10-20 | Template version `2`, with a date and a short label | a date only; a number only | Numbers sort and compare easily; the label says what changed. |
+| 2026-10-20 | `blocked_by` is a dry run of the real checks, via one function shared in spirit with `change_status()` | separate "is it ready?" rules for the screens | The reason shown is exactly the reason the move would be refused. |
+| 2026-10-20 | Not worked out in queues (`null`) | run it for every row | A queue row only needs to say there's work; the case page explains. Keeps the queue fast. |
 | 2026-10-20 | The queue is filtered by the engine's own permission check, after a SQL pre-filter | the same rules again in SQL; ask the engine about every open case | One definition of "who may act" (no drift), and the SQL step keeps it fast. |
 | 2026-10-20 | A separate `status_changed_at` column | use `updated_at` | Editing a draft (chunk 2) updates the case without moving it; "days waiting" mustn't reset. |
 | 2026-10-20 | `GET /cases` is "cases I applied for", for anyone; staff use `/cases/queue` | one endpoint that behaves differently for staff | Two clear questions, two endpoints. Walk-ins (chunk 2) will decide whether "applied for" means the applicant or whoever typed it in. |
@@ -1159,6 +1176,14 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 7d
+1. Why is it safe to run every check on every `GET /cases/{id}`, and what would break if someone wrote a check that saves something?
+2. An action's `blocked_by` is `[]`, but the move still fails. What could cause that?
+
+#### Show answers
+1. Checks only read data, so a dry run changes nothing. A check that wrote something would write it each time anyone *looked* at the case, possibly without it ever being committed, or commit it unintentionally. That's why the rule is written in backend/app/core/workflow/checks.py.
+2. Things the dry run deliberately leaves out: a missing reason on a move with `requires_comment`, an effect failing (e.g. the letter can't be stored), or the case changing between the look and the click (another officer moved it first, giving 409).
 
 ### Step 7c
 1. The PS is on leave and the DPS opens their queue. Which facility letters do they see, and how does the queue know?
