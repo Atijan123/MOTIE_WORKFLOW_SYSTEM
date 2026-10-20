@@ -25,25 +25,32 @@ from app.core.workflow.models import Case
 _UNSAFE = re.compile(r"[^A-Za-z0-9._ -]")
 
 # Transition check names this service provides (see core/workflow/checks.py).
-DOCUMENTS_COMPLETE = "documents_complete"
+DOCUMENTS_COMPLETE = "documents_complete"  # strict: nothing missing, nothing undecided
+KNOWN_DOCUMENTS_COMPLETE = "known_documents_complete"  # lenient: undecided ones wait
 ORIGINALS_SEEN = "originals_seen"
 
 
 @dataclass
 class RequirementStatus:
     requirement: DocumentRequirement
-    applies: bool  # False when its condition doesn't hold for this case
+    # False when its condition doesn't hold for this case; None when that can't
+    # be told yet, because a fact it depends on has no value yet.
+    applies: bool | None
     documents: list[CaseDocument]  # uploads of this type, newest first
 
     @property
     def missing(self) -> bool:
-        return self.applies and not self.documents
+        return self.applies is True and not self.documents
+
+    @property
+    def undecided(self) -> bool:
+        return self.applies is None
 
     @property
     def original_pending(self) -> bool:
         """The paper original must be seen, and the newest upload hasn't been.
         A re-upload after the original was seen must be checked again."""
-        if not (self.applies and self.requirement.original_required):
+        if not (self.applies is True and self.requirement.original_required):
             return False
         return not self.documents or self.documents[0].original_seen_at is None
 
@@ -201,6 +208,20 @@ async def mark_original_seen(
 
 
 async def _check_documents_complete(session: AsyncSession, case: Case) -> list[str]:
+    problems = []
+    for s in await checklist(session, case):
+        name = s.requirement.document_type.name
+        if s.missing:
+            problems.append(f"{name} is missing")
+        elif s.undecided and not s.documents:
+            # Can't tell yet whether it's needed: treat that as not ready.
+            problems.append(f"it isn't known yet whether {name.lower()} is needed")
+    return problems
+
+
+async def _check_known_documents_complete(session: AsyncSession, case: Case) -> list[str]:
+    """Every document known to be needed is in. Ones that can't be decided yet
+    are left for a later, strict documents_complete check."""
     return [f"{name} is missing" for name in await missing_documents(session, case)]
 
 
@@ -213,4 +234,5 @@ async def _check_originals_seen(session: AsyncSession, case: Case) -> list[str]:
 
 
 checks.register(DOCUMENTS_COMPLETE, _check_documents_complete)
+checks.register(KNOWN_DOCUMENTS_COMPLETE, _check_known_documents_complete)
 checks.register(ORIGINALS_SEEN, _check_originals_seen)

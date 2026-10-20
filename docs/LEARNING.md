@@ -16,6 +16,28 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 6k — The HS code is optional for the applicant (2026-10-20)
+**Built:** an applicant may now leave `hs_code` out of the form. The ETLS desk must still enter or confirm it before "Verify", exactly as in step 6g: `POST /etls/facility-letters/{id}/hs-code`.
+
+The interesting part is the receipt rule. Without a code, nobody can say whether the cement receipt is needed. Before this step, a missing fact made the rule *fail closed* (receipt required), so every applicant who skipped the code would have been asked for a cement receipt. Now a condition has **three answers** (backend/app/core/documents/conditions.py `holds()`):
+- `True`: the document is needed;
+- `False`: it isn't;
+- `None`: **not known yet**. The module supplies the fact, but it has no value yet. ETLS now always supplies `hs_heading`, as `None` until there's a code.
+
+A fact the module *doesn't supply at all* (e.g. a typo in a rule) still fails closed. That safety net is unchanged.
+
+The checklist (`GET /cases/{id}/documents`) shows `"applies": null` for an undecided document, with `"missing": false`. Two checks now use this (backend/app/core/documents/service.py):
+- `known_documents_complete` (new, on Records' "Confirm originals received", migration `0021`): every document *known* to be needed is in. Undecided ones wait.
+- `documents_complete` (on the desk's "Verify"): now strict. An undecided document with nothing uploaded is a problem: "it isn't known yet whether receipt (cement imports) is needed". Together with `hs_code_confirmed`, nothing undecided can reach the PS.
+
+**Files:** backend/alembic/versions/0021_optional_hs_code.py, backend/app/core/documents/conditions.py, backend/app/core/documents/service.py (`RequirementStatus.applies`/`undecided`, the two checks), backend/app/core/documents/router.py, backend/app/modules/etls/schemas.py, backend/app/modules/etls/service.py (`facility_letter_facts()`), backend/tests/modules/etls/test_hs_code.py, backend/tests/modules/etls/test_documents.py
+**Try it:**
+- `docker compose run --rm tools alembic upgrade head`
+- Submit a facility letter without `hs_code`. `GET /cases/{id}/documents`: the receipt has `"applies": null`. Records can confirm the originals without it.
+- As the desk, try "Verify": 409, listing both the missing HS code and the undecided receipt. Enter `{"hs_code": "2523.29"}`: now the receipt is required. Upload it, and Verify works.
+- `docker compose run --rm tools pytest tests/modules/etls/test_hs_code.py -v`
+**New concepts:** Three answers: yes, no, not known yet
+
 ### Step 6j — The letter date, the Ministry's way (2026-10-20)
 **Built:** the date on the facility letter now reads like the Ministry's letters: **"16th September, 2026"**, with an ordinal day and a comma before the year. `long_date()` and `_ordinal()` in backend/app/modules/etls/letter.py do it, including the awkward ones: 1st, 2nd, 3rd, but 11th, 12th, 13th, then 21st, 22nd, 23rd.
 
@@ -80,7 +102,7 @@ The subject line is bold. The Ministry's text didn't say; I chose bold because t
 
 ### Step 6g — The HS code decides the receipt rule (2026-10-20)
 **Built:** the placeholder rule "product text contains *cement*" is gone. The receipt now depends on the **HS code** (migration `0020`):
-- **The applicant declares it** on the form: new required field `hs_code`. Dots and spaces are ignored (`2523.29`, `2523 29` and `252329` are the same), and it's stored as 6, 8 or 10 digits. Anything else gives 422.
+- **The applicant declares it** on the form: new field `hs_code` (required here; optional since step 6k). Dots and spaces are ignored (`2523.29`, `2523 29` and `252329` are the same), and it's stored as 6, 8 or 10 digits. Anything else gives 422.
 - **An officer confirms it**, or corrects it: `POST /etls/facility-letters/{case_id}/hs-code` with `{"hs_code": "2523.29"}`. Who may do it is the engine's rule, as for "original seen" in step 6d: whoever may make the move that needs the check `hs_code_confirmed`. That's the desk's "Verify" move, so the ETLS desk (or someone acting for it), and only while the case waits for verification. Each confirmation is audited (`case.hs_code_confirmed`, with the declared, confirmed and previous codes). The declared code is kept as the applicant gave it; the app can't change it (column-level grant).
 - **The rule is still a row:** `{"field": "hs_heading", "op": "equals", "value": "2523"}` `[CONFIRM]`. The ETLS module supplies the fact `hs_heading`: the first 4 digits of the confirmed code, or of the declared code until an officer confirms. A case with no code at all (from before this step) has no `hs_heading`, so the rule fails closed: the receipt counts as required.
 - **The desk's "Verify" move now has two checks:** `hs_code_confirmed`, and `documents_complete` again. So if the officer corrects the code to 2523, the case can't be verified until the receipt is uploaded. Records' earlier check uses the declared code.
@@ -760,6 +782,11 @@ Since step 6f, the same pattern also covers **effects**: things a move sets off 
 **Here:** scripts/reset-dev.sh, `seed()` and `main()` in backend/app/dev_seed.py, `app_env` in backend/app/core/config.py.
 **Learn more:** [The Twelve-Factor App: Dev/prod parity](https://12factor.net/dev-prod-parity) and [Config](https://12factor.net/config)
 
+### Three answers: yes, no, not known yet
+**What:** "does this case need a cement receipt?" can't always be answered yet. Squeezing "don't know" into yes or no is a classic bug: say *yes* and you ask honest applicants for papers they don't need; say *no* and the requirement quietly disappears. So the answer has a third value, `None`, and each place that uses it decides what "not known yet" means *for it*. The early check (Records) lets it wait; the late check (Verify) refuses to go on until it's known. SQL works the same way: `NULL = 'x'` is neither true nor false but unknown, which is why `WHERE` needs `IS NULL`.
+**Here:** `holds()` in backend/app/core/documents/conditions.py, `RequirementStatus.undecided` and the checks `known_documents_complete`/`documents_complete` in backend/app/core/documents/service.py.
+**Learn more:** [Wikipedia: Three-valued logic (in SQL)](https://en.wikipedia.org/wiki/Null_(SQL)#Comparisons_with_NULL_and_the_three-valued_logic_(3VL))
+
 ### HS codes
 **What:** the Harmonized System is the world's shared numbering of goods, kept by the World Customs Organization and used by GRA and ECOWAS tariffs. The first 2 digits are the chapter (25: salt, earths and stone, cement), the first 4 the *heading* (2523: cement), the first 6 the subheading (2523.29: other Portland cement). Countries add digits for their own tariff lines (8 or 10). Because everyone uses the same numbers, "is this cement?" becomes "does the code start with 2523?", which free text like "cement mixer" can't fool.
 **Here:** `normalize_hs_code()` in backend/app/modules/etls/schemas.py, `hs_heading()` and `facility_letter_facts()` in backend/app/modules/etls/service.py, the rule row in backend/alembic/versions/0020_facility_letter_hs_code.py.
@@ -935,6 +962,8 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-20 | The signature line is the signing post's title, "For: ..." when acting; no name printed | print the signer's name and title too | Follows the Ministry's wording, which shows only "Permanent Secretary". Who actually signed is in the audit log and `issued_by`. `[CONFIRM]` |
 | 2026-10-20 | A ` >> ` mark for the reference and date line | a tab character; two template files | A tab is invisible and editors often turn it into spaces. ` >> ` is visible and explained in the template's notes. |
 | 2026-10-20 | Template version `2`, with a date and a short label | a date only; a number only | Numbers sort and compare easily; the label says what changed. |
+| 2026-10-20 | A condition can answer "not known yet" (`None`) when a supplied fact has no value | keep failing closed (receipt required); treat unknown as "not needed" | Failing closed would ask every applicant without a code for a cement receipt; "not needed" would let the receipt vanish. A fact the module doesn't supply at all still fails closed, so a typo in a rule is still caught. |
+| 2026-10-20 | Records gets a lenient check (`known_documents_complete`); `documents_complete` became strict | one check that's lenient everywhere; make the applicant answer before submitting | The desk decides the code after Records, so Records can't wait for it. The strict check plus `hs_code_confirmed` on Verify guarantees it's settled before signing. The default (`documents_complete`) is the safe one. |
 | 2026-10-20 | The date change in step 6j didn't bump the template version | bump it anyway | You asked to bump it only when the template file changes. `template_version` describes the wording; the commit describes the code. |
 | 2026-10-20 | The reset script is bash, run from the host with `docker compose` | a Python script; a Makefile | It drives Docker from outside the containers, which is what shell is for, and Git Bash is already how you run the other commands. No new tool. |
 | 2026-10-20 | Reset drops the database rather than downgrading every migration | `alembic downgrade base` | Faster, and it also clears anything a migration doesn't know about. The test suite already proves the downgrades work. |
@@ -946,7 +975,7 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-20 | Facts use the confirmed code once there is one, the declared code before | only the confirmed code | Records can then ask for the receipt early. The desk's Verify move re-checks documents with the confirmed code, so a correction can't slip through. |
 | 2026-10-20 | Confirmation happens during the desk's verification, by whoever may make that move | a named post; any staff member; at any status | No post in code (same pattern as "original seen"), and the code can't change after the file is verified and the letter is on its way to the PS. |
 | 2026-10-20 | The HS code is stored as digits only, 6, 8 or 10 of them | keep it as typed | "2523.29" and "252329" must compare equal. Printed back with dots on the letter. |
-| 2026-10-20 | `hs_code` is nullable in the database but required on new forms | `NOT NULL` with a made-up value for old rows | Old dev cases have no code, and inventing one would be false data. Their receipt rule fails closed. |
+| 2026-10-20 | `hs_code` is nullable in the database but required on new forms | `NOT NULL` with a made-up value for old rows | Old dev cases have no code, and inventing one would be false data. Their receipt rule fails closed. **Changed in step 6k: optional on the form; a missing code makes the rule "not known yet".** |
 | 2026-10-20 | Cases signed before step 6f get 404, not a freshly made letter | render one now for old cases | A letter made today isn't the one that was signed. Only your dev database has such cases. |
 
 ## 4. Open questions
@@ -980,7 +1009,7 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 - [ ] **File reference format:** what is the Ministry's real format? Placeholder `MOTIE/ETLS/FL/{year}/{case_id:05d}` (`FACILITY_LETTER_REFERENCE_FORMAT`).
 - [ ] **Issued letters:** storing at signing is decided (step 6f). Still open: may the importer download it? And if a signed letter has a mistake, how does the Ministry correct it: cancel it and sign a new one, or a separate amendment letter? Right now a case can have only one.
 - [ ] **The cement receipt:** which receipt is it (e.g. a payment receipt for a cement levy)? Is "HS heading 2523" the right trigger, or only some subheadings (e.g. 2523.29 Portland cement, not 2523.10 clinker)? Are other headings subject to receipts too? See backend/alembic/versions/0020_facility_letter_hs_code.py.
-- [ ] **HS code on the form:** do importers know their HS code when they apply (it's required on the form now)? Which officer confirms it: the ETLS desk (placeholder) or someone else? How many digits does GRA use (we accept 6, 8 or 10)?
+- [ ] **HS code:** it's optional for applicants now (step 6k). Which officer enters or confirms it: the ETLS desk (placeholder) or someone else? How many digits does GRA use (we accept 6, 8 or 10)?
 - [ ] **Document type names:** are "Business registration certificate", "Annual returns certificate", "Certificate of origin", "Invoice" (commercial invoice?) and "Export declaration" the official names?
 - [ ] **Who may upload, and until when:** right now the applicant and any staff member, until the case is closed.
 - [ ] **Security to-do before going live (not a Ministry question):** scan uploads for viruses (e.g. ClamAV), back up the `documents` volume together with the database, and add a clean-up job for files left behind if the server crashes mid-upload.
@@ -992,6 +1021,16 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 6k
+1. An applicant gives no HS code. What does the checklist say about the cement receipt, and can Records confirm the originals?
+2. Someone writes a rule `{"field": "hs_haeding", ...}` (typo). Does the document become "not known yet"? Why not?
+3. Why is `documents_complete` (the strict one) the check on Verify, and not on Records?
+
+#### Show answers
+1. `"applies": null`, `"missing": false`. Yes: Records' move uses `known_documents_complete`, which waits on undecided documents.
+2. No. `holds()` only returns `None` when the module supplies the fact with no value. A fact name the module never supplies fails closed (`True`, required) and logs a warning, so the typo shows up as a document everyone is asked for.
+3. The desk enters the HS code during verification, after Records' step. By Verify the answer must be known, so the strict check (with `hs_code_confirmed`) makes sure nothing undecided goes to the PS. On Records it would block every case without a code.
 
 ### Step 6j
 1. What does `long_date()` give for 12 March 2027 and for 22 March 2027, and which line makes them different?

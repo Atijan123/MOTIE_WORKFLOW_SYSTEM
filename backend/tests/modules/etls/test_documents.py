@@ -169,7 +169,9 @@ def test_conditions():
     assert not holds(cement, {"product": "Rice"})
     assert holds({"field": "unit", "op": "equals", "value": "tonnes"}, {"unit": " Tonnes "})
     # A rule about a fact the module doesn't supply fails closed: document required.
-    assert holds(cement, {})
+    assert holds(cement, {}) is True
+    # A fact the module supplies but that has no value yet: not known yet.
+    assert holds({"field": "hs_heading", "op": "equals", "value": "2523"}, {"hs_heading": None}) is None
 
 
 async def test_database_refuses_conditions_it_cannot_evaluate(owner_session):

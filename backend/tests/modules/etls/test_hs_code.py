@@ -45,10 +45,62 @@ async def test_a_malformed_hs_code_is_refused(act, people, bad):
     assert (await _submit(act, people, hs_code=bad)).status_code == 422
 
 
-async def test_the_form_needs_an_hs_code(act, people):
-    form = facility_letter_form()
+def _form_without_hs_code(**changes) -> dict:
+    form = facility_letter_form(**changes)
     del form["hs_code"]
-    assert (await act(people["applicant"], "post", "/etls/facility-letters", json=form)).status_code == 422
+    return form
+
+
+async def test_the_applicant_may_leave_the_hs_code_out(act, people):
+    response = await act(people["applicant"], "post", "/etls/facility-letters", json=_form_without_hs_code())
+    assert response.status_code == 201, response.text
+    assert response.json()["hs_code"] is None
+    # Without a code, nobody can tell yet whether the cement receipt is needed.
+    checklist = (await act(people["applicant"], "get", f"/cases/{response.json()['case_id']}/documents")).json()
+    receipt = next(item for item in checklist if item["type"] == "cement_receipt")
+    assert receipt["applies"] is None
+    assert receipt["missing"] is False
+
+
+async def _at_desk_without_code(act, people, **changes) -> int:
+    response = await act(people["applicant"], "post", "/etls/facility-letters", json=_form_without_hs_code(**changes))
+    case_id = response.json()["case_id"]
+    await ready_for_records(act, people, case_id)  # skips the undecided receipt
+    # Records isn't held up by a receipt nobody can decide on yet.
+    response = await move(act, people["records_officer"], case_id, "originals_received")
+    assert response.status_code == 200, response.text
+    return case_id
+
+
+async def test_without_a_code_the_desk_must_enter_one_before_verify(act, people):
+    case_id = await _at_desk_without_code(act, people)
+    response = await move(act, people["desk"], case_id, "verified")
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert "HS code hasn't been confirmed" in detail
+    assert "isn't known yet whether receipt (cement imports) is needed" in detail
+
+    entered = await confirm_hs_code(act, people, case_id, "7210.49")
+    assert entered.json()["hs_code"] is None  # the applicant gave none; the desk's is kept apart
+    assert entered.json()["hs_code_confirmed"] == "721049"
+    assert (await move(act, people["desk"], case_id, "verified")).status_code == 200
+
+
+async def test_when_the_desk_enters_a_cement_code_the_receipt_is_needed(act, people, db_session):
+    case_id = await _at_desk_without_code(act, people, certificate_of_origin_numbers=["CO-NO-CODE"])
+    assert (await confirm_hs_code(act, people, case_id, "2523.29")).status_code == 200
+    assert await _receipt_applies(act, people, case_id) is True
+    response = await move(act, people["desk"], case_id, "verified")
+    assert response.status_code == 409
+    assert "Receipt (cement imports) is missing" in response.json()["detail"]
+
+    assert (await upload(act, people["applicant"], case_id, "cement_receipt")).status_code == 201
+    assert (await move(act, people["desk"], case_id, "verified")).status_code == 200
+
+    [event] = await db_session.scalars(
+        select(AuditEvent).where(AuditEvent.entity_id == str(case_id), AuditEvent.action == "case.hs_code_confirmed")
+    )
+    assert event.details["declared"] is None
 
 
 # --- Confirming it -----------------------------------------------------------

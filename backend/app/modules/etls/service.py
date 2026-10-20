@@ -164,16 +164,14 @@ async def facility_letter_facts(session: AsyncSession, case_id: int) -> dict:
     letter = await session.get(FacilityLetter, case_id)
     if letter is None:
         return {}
-    found = {
+    return {
         "product": letter.product,
         "unit": letter.unit,
         "exporter_country": letter.exporter_country,
+        # None until someone gives an HS code: a rule on it is then "not known
+        # yet" (see core documents/conditions.py), decided once the desk enters it.
+        "hs_heading": hs_heading(letter),
     }
-    # Left out when unknown (a case from before 0020), so a rule on it fails
-    # closed: the document counts as required.
-    if heading := hs_heading(letter):
-        found["hs_heading"] = heading
-    return found
 
 
 # Registered when the module is imported (main.py imports its router).

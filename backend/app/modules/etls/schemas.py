@@ -33,10 +33,9 @@ class FacilityLetterForm(BaseModel):
     importer_name: ShortText
     importer_address: LongText
     product: ShortText
-    # [CONFIRM] Required from the applicant: importers have it from their
-    # customs declaration, and the documents check needs it before an officer
-    # confirms it.
-    hs_code: HsCode
+    # Optional: the applicant may not know it. The ETLS desk enters or confirms
+    # it before verifying the file.
+    hs_code: HsCode | None = None
     quantity: Decimal = Field(gt=0, max_digits=14, decimal_places=3)
     unit: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=30)]
     exporter_name: ShortText

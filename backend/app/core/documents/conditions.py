@@ -22,8 +22,12 @@ OPERATORS = {
 }
 
 
-def holds(condition: dict[str, Any] | None, facts: dict[str, Any]) -> bool:
-    """Does this requirement apply to a case with these facts?"""
+def holds(condition: dict[str, Any] | None, facts: dict[str, Any]) -> bool | None:
+    """Does this requirement apply to a case with these facts?
+
+    True or False, or None for "not known yet": the module supplies the fact,
+    but it has no value yet (e.g. no HS code until an officer enters one).
+    """
     if condition is None:
         return True
     field = condition["field"]
@@ -32,4 +36,6 @@ def holds(condition: dict[str, Any] | None, facts: dict[str, Any]) -> bool:
         # Fail closed: require the document, and say so in the server log.
         logger.warning("Document condition uses unknown fact %r; treating it as required", field)
         return True
+    if facts[field] is None:
+        return None
     return OPERATORS[condition["op"]](facts[field], condition["value"])
