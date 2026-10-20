@@ -1,6 +1,6 @@
 """The small condition language used by document requirements.
 
-A condition is JSON: {"field": "product", "op": "contains", "value": "cement"}.
+A condition is JSON: {"field": "hs_heading", "op": "equals", "value": "2523"}.
 It is tested against the case's facts (a dict the module supplies, see facts.py).
 Text is compared ignoring case and surrounding spaces. Nothing is ever eval()-ed:
 only the two operators below exist, and the database refuses any other shape.

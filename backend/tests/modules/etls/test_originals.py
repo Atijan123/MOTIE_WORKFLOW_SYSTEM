@@ -21,10 +21,8 @@ from tests.support import (
 
 pytestmark = pytest.mark.anyio
 
-async def _case(act, people, product="Roofing sheets") -> int:
-    response = await act(
-        people["applicant"], "post", "/etls/facility-letters", json=facility_letter_form(product=product)
-    )
+async def _case(act, people, **form) -> int:
+    response = await act(people["applicant"], "post", "/etls/facility-letters", json=facility_letter_form(**form))
     return response.json()["case_id"]
 
 
@@ -131,7 +129,7 @@ async def test_marking_twice_changes_nothing(act, people):
 
 
 async def test_a_cement_import_cannot_pass_records_without_the_receipt(act, people):
-    case_id = await _case(act, people, product="Portland cement")
+    case_id = await _case(act, people, product="Portland cement", hs_code="2523.29")
     ids = await _upload_all(act, people, case_id, FACILITY_LETTER_DOCUMENTS)
     await act(people["records_officer"], "post", _seen_url(case_id, ids["certificate_of_origin"]))
 
@@ -144,7 +142,7 @@ async def test_a_cement_import_cannot_pass_records_without_the_receipt(act, peop
 
 
 async def test_the_same_documents_are_enough_for_a_non_cement_import(act, people):
-    case_id = await _case(act, people, product="Roofing sheets")
+    case_id = await _case(act, people, product="Roofing sheets", hs_code="7210.49")
     await ready_for_records(act, people, case_id)
     assert (await _confirm(act, people, case_id)).status_code == 200
 

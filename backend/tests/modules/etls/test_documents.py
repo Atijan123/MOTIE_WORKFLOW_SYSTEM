@@ -1,4 +1,4 @@
-"""Documents on facility letter cases: requirements (with the cement rule), uploads, downloads."""
+"""Documents on facility letter cases: requirements (with the HS code rule), uploads, downloads."""
 
 import hashlib
 
@@ -21,10 +21,8 @@ from tests.support import (
 
 pytestmark = pytest.mark.anyio
 
-async def _case(act, people, product="Roofing sheets") -> int:
-    response = await act(
-        people["applicant"], "post", "/etls/facility-letters", json=facility_letter_form(product=product)
-    )
+async def _case(act, people, **form) -> int:
+    response = await act(people["applicant"], "post", "/etls/facility-letters", json=facility_letter_form(**form))
     assert response.status_code == 201, response.text
     return response.json()["case_id"]
 
@@ -44,11 +42,32 @@ async def test_five_documents_are_always_required(act, people):
     assert checklist["cement_receipt"]["missing"] is False
 
 
-@pytest.mark.parametrize("product", ["Cement", "Portland CEMENT 42.5N", "  bulk cement "])
-async def test_a_cement_import_also_needs_the_receipt(act, people, product):
-    checklist = await _checklist(act, people["applicant"], await _case(act, people, product=product))
+@pytest.mark.parametrize("hs_code", ["2523.29", "252321", "2523 90 00 00"])
+async def test_hs_heading_2523_also_needs_the_receipt(act, people, hs_code):
+    checklist = await _checklist(act, people["applicant"], await _case(act, people, hs_code=hs_code))
     assert checklist["cement_receipt"]["applies"] is True
     assert checklist["cement_receipt"]["missing"] is True
+
+
+async def test_the_product_wording_no_longer_decides(act, people):
+    # The old rule matched "cement" in the text, so a cement mixer needed a receipt.
+    mixer = await _case(act, people, product="Cement mixer", hs_code="8474.31")
+    assert (await _checklist(act, people["applicant"], mixer))["cement_receipt"]["applies"] is False
+    # ...and cement described without the word "cement" was missed.
+    clinker = await _case(act, people, product="Grey clinker", hs_code="2523.10")
+    assert (await _checklist(act, people["applicant"], clinker))["cement_receipt"]["applies"] is True
+
+
+async def test_the_receipt_rule_is_a_row_testing_the_hs_heading(db_session):
+    condition = await db_session.scalar(
+        text(
+            "SELECT r.condition FROM core.document_requirements r "
+            "JOIN core.document_types t ON t.id = r.document_type_id "
+            "JOIN core.workflows w ON w.id = r.workflow_id "
+            "WHERE w.code = 'etls_facility_letter' AND t.code = 'cement_receipt'"
+        )
+    )
+    assert condition == {"field": "hs_heading", "op": "equals", "value": "2523"}
 
 
 async def test_uploading_fills_the_checklist_and_is_audited(act, people):

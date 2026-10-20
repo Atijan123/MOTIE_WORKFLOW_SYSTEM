@@ -34,6 +34,7 @@ def facility_letter_form(**changes) -> dict:
         "importer_name": "Kombo Building Supplies Ltd",
         "importer_address": "12 Kairaba Avenue, Serrekunda",
         "product": "Roofing sheets",
+        "hs_code": "7210.49",  # galvanised flat-rolled steel; not cement (2523)
         "quantity": "1200.5",
         "unit": "tonnes",
         "exporter_name": "Dakar Steel SA",
@@ -46,7 +47,7 @@ def facility_letter_form(**changes) -> dict:
     return form
 
 
-# Documents a facility letter always needs (a cement import also needs cement_receipt).
+# Documents a facility letter always needs (HS heading 2523, cement, also needs cement_receipt).
 FACILITY_LETTER_DOCUMENTS = [
     "business_registration",
     "annual_returns_certificate",
@@ -71,6 +72,11 @@ async def upload(act, user, case_id, type_code, content=PDF, filename="scan.pdf"
         params={"filename": filename},
         headers_extra={"Content-Type": "application/octet-stream"},
     )
+
+
+async def confirm_hs_code(act, people, case_id, hs_code="7210.49"):
+    """The desk confirms the HS code, which its "Verify" move needs. Returns the response."""
+    return await act(people["desk"], "post", f"/etls/facility-letters/{case_id}/hs-code", json={"hs_code": hs_code})
 
 
 async def ready_for_records(act, people, case_id) -> None:

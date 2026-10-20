@@ -16,6 +16,22 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 6g — The HS code decides the receipt rule (2026-10-20)
+**Built:** the placeholder rule "product text contains *cement*" is gone. The receipt now depends on the **HS code** (migration `0020`):
+- **The applicant declares it** on the form: new required field `hs_code`. Dots and spaces are ignored (`2523.29`, `2523 29` and `252329` are the same), and it's stored as 6, 8 or 10 digits. Anything else gives 422.
+- **An officer confirms it**, or corrects it: `POST /etls/facility-letters/{case_id}/hs-code` with `{"hs_code": "2523.29"}`. Who may do it is the engine's rule, as for "original seen" in step 6d: whoever may make the move that needs the check `hs_code_confirmed`. That's the desk's "Verify" move, so the ETLS desk (or someone acting for it), and only while the case waits for verification. Each confirmation is audited (`case.hs_code_confirmed`, with the declared, confirmed and previous codes). The declared code is kept as the applicant gave it; the app can't change it (column-level grant).
+- **The rule is still a row:** `{"field": "hs_heading", "op": "equals", "value": "2523"}` `[CONFIRM]`. The ETLS module supplies the fact `hs_heading`: the first 4 digits of the confirmed code, or of the declared code until an officer confirms. A case with no code at all (from before this step) has no `hs_heading`, so the rule fails closed: the receipt counts as required.
+- **The desk's "Verify" move now has two checks:** `hs_code_confirmed`, and `documents_complete` again. So if the officer corrects the code to 2523, the case can't be verified until the receipt is uploaded. Records' earlier check uses the declared code.
+- The confirmed code is available to the letter template as `$hs_code`, printed as `2523.29`. The current template doesn't use it yet.
+
+**Files:** backend/alembic/versions/0020_facility_letter_hs_code.py, backend/app/modules/etls/models.py, backend/app/modules/etls/schemas.py (`normalize_hs_code()`, `HsCode`, `HsCodeConfirmation`), backend/app/modules/etls/service.py (`confirm_hs_code()`, `hs_heading()`, `facility_letter_facts()`, the `hs_code_confirmed` check), backend/app/modules/etls/router.py, backend/app/modules/etls/letter.py (`hs_code` field), backend/tests/modules/etls/test_hs_code.py, backend/tests/modules/etls/test_documents.py, backend/tests/modules/etls/test_originals.py, backend/tests/support.py (`confirm_hs_code()`, `hs_code` in the form), backend/tests/core/test_db_privileges.py
+**Try it:**
+- `docker compose run --rm tools alembic upgrade head`
+- Submit a facility letter with `"hs_code": "7210.49"`: `GET /cases/{id}/documents` shows `cement_receipt` with `applies: false`. Submit another with `"product": "Grey clinker", "hs_code": "2523.10"`: `applies: true`, although the product text never says "cement".
+- Walk one to "Originals received", then as the desk `POST /etls/facility-letters/{id}/hs-code` with `{"hs_code": "2523.29"}`. Try "Verify": 409, the receipt is missing. Upload it, and Verify works.
+- `docker compose run --rm tools pytest tests/modules/etls/test_hs_code.py -v`
+**New concepts:** HS codes
+
 ### Step 6f — Issued letters are stored, never re-rendered (2026-10-20)
 **Built:** the facility letter is now made **once**, at the moment it's signed, and stored. Every download serves that stored file.
 - **Transition effects (core, migration `0019`):** the twin of step 6d's checks. A check runs *before* a move and can stop it; an *effect* runs *after* the status change, in the same transaction. Which move sets off which effect is a row in `core.transition_effects`; the code is registered by name in backend/app/core/workflow/effects.py. The PS's "Sign" move has the effect `issue_facility_letter`.
@@ -100,7 +116,7 @@ The addressee (Commissioner General, GRA), the subject "Request for ETLS facilit
 **Files:** backend/alembic/versions/0017_documents.py, backend/app/core/documents/ (`models.py`, `conditions.py`, `facts.py`, `storage.py`, `service.py`, `router.py`), backend/app/core/config.py (`DOCUMENT_STORAGE_DIR`, `MAX_UPLOAD_BYTES`), backend/app/modules/etls/service.py (`facility_letter_facts()`), docker-compose.yml (`documents` volume), backend/tests/modules/etls/test_documents.py, backend/tests/conftest.py (`document_storage`: each test gets a temporary folder), backend/tests/support.py (`upload()`, sample `PDF`/`PNG`/`JPEG` bytes)
 **Try it:**
 - `docker compose up -d` (adds the volume to the API), then `docker compose run --rm tools alembic upgrade head`.
-- Submit a facility letter with `"product": "Portland cement"`, then `GET /cases/{id}/documents`: `cement_receipt` has `applies: true`.
+- Submit a facility letter with `"product": "Portland cement"`, then `GET /cases/{id}/documents`: `cement_receipt` has `applies: true`. (Since step 6g the HS code decides, not the product text: use `"hs_code": "2523.29"`.)
 - Upload with curl: `curl -X POST "localhost:8000/cases/1/documents/invoice?filename=invoice.pdf" -H "Authorization: Bearer <token>" --data-binary @invoice.pdf`. Then try a `.txt` file renamed to `.pdf`: 415.
 - `docker compose run --rm tools pytest tests/modules/etls/test_documents.py -v`
 - **Note:** while testing this step I made a real user (`smoke-applicant@test.gm`), case 1 and one file in your *dev* database. They can't be deleted cleanly because the case has audit rows, so they'll stay in dev.
@@ -677,6 +693,11 @@ Since step 6f, the same pattern also covers **effects**: things a move sets off 
 **Here:** `build_fields()` (facts), templates/facility_letter.txt (words) and `render_pdf()` (layout) in backend/app/modules/etls/. `string.Template` only replaces `$names`; unlike `str.format()` it can't reach into objects, which is why we use it for text people may edit.
 **Learn more:** [Python docs: Template strings](https://docs.python.org/3/library/string.html#template-strings), [fpdf2 tutorial](https://py-pdf.github.io/fpdf2/Tutorial.html)
 
+### HS codes
+**What:** the Harmonized System is the world's shared numbering of goods, kept by the World Customs Organization and used by GRA and ECOWAS tariffs. The first 2 digits are the chapter (25: salt, earths and stone, cement), the first 4 the *heading* (2523: cement), the first 6 the subheading (2523.29: other Portland cement). Countries add digits for their own tariff lines (8 or 10). Because everyone uses the same numbers, "is this cement?" becomes "does the code start with 2523?", which free text like "cement mixer" can't fool.
+**Here:** `normalize_hs_code()` in backend/app/modules/etls/schemas.py, `hs_heading()` and `facility_letter_facts()` in backend/app/modules/etls/service.py, the rule row in backend/alembic/versions/0020_facility_letter_hs_code.py.
+**Learn more:** [WCO: What is the Harmonized System?](https://www.wcoomd.org/en/topics/nomenclature/overview/what-is-the-harmonized-system.aspx)
+
 ### Issue once, store with a checksum
 **What:** a signed letter is a record, not a report. A report is made fresh from the data each time you ask; a record must say tomorrow exactly what it said when it was signed. So the letter is rendered once, at signing, and the bytes are kept. A *checksum* (SHA-256) is a 64-character fingerprint of those bytes: change one byte and it's completely different. Writing it in the append-only audit log means anyone can later prove a copy is the one issued, by hashing it again and comparing. We also record the *template version*, so you can tell which wording a letter used without opening it.
 Two more ideas here:
@@ -817,7 +838,7 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-19 | Uploads are the raw request body, one file per request | `python-multipart` form uploads | Chosen by you. No new library; a Next.js `fetch()` sends a file body directly. |
 | 2026-10-19 | Documents are a core service; requirements, conditions and facts are generic | ETLS-only document tables | Every Ministry process has required documents. The module only supplies facts. |
 | 2026-10-19 | Conditions are a tiny JSON language (`equals`, `contains`) checked by a database constraint | Python expressions in the database; one hard-coded `if` for cement | Data-driven, as you asked, without letting data run code. Add operators only when a real rule needs them. |
-| 2026-10-19 | The cement rule matches "cement" anywhere in the product text | an exact product name | The product is free text for now. It's a placeholder: it would also match "cement mixer". A product list would make it exact. |
+| 2026-10-19 | The cement rule matches "cement" anywhere in the product text | an exact product name | The product is free text for now. It's a placeholder: it would also match "cement mixer". A product list would make it exact. **Replaced in step 6g by the HS heading.** |
 | 2026-10-19 | Files on a local Docker volume (`/data/documents`), random names, SHA-256 kept | store files in Postgres; object storage (S3-like) | Simple on one Ministry server, and it keeps the database small. `storage.py` is the only code touching the disk, so moving to object storage later changes one file. |
 | 2026-10-19 | Accept only PDF, PNG and JPEG, detected from the first bytes; 10 MB limit | accept anything; trust `Content-Type` | Scans of official papers come as these. Anything else (Office files, scripts) is a risk we don't need yet. |
 | 2026-10-19 | Re-uploading adds a newer version; nothing is deleted | replace the old file | Same rule as the audit log: what someone submitted stays on record. |
@@ -841,6 +862,12 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-20 | Issued documents are a core table (`core.issued_documents`) with a `kind` | an `etls.issued_letters` table; reuse `core.case_documents` | Other modules will issue certificates too. Uploads are what applicants *gave*; issued documents are what the Ministry *produced*. Mixing them would apply the upload rules (applicants may download uploads) to signed letters. |
 | 2026-10-20 | Template version = a `## version:` label in the file, plus the file's own SHA-256 | only a label; only the hash; a version table | The label is readable; the hash catches an edit where someone forgot to change the label. |
 | 2026-10-20 | Re-hash the stored file on every download | trust the disk | The letter is small, so it costs nothing, and a damaged or edited file is caught before it reaches GRA. |
+| 2026-10-20 | The applicant declares the HS code; an officer confirms or corrects it; both are kept | only the officer enters it; the officer overwrites the applicant's | Records' documents check comes before the desk, so it needs a code to work with. Keeping both shows when, and by whom, a declared code was corrected. |
+| 2026-10-20 | The receipt fact is the *heading* (4 digits) tested with `equals` | a new `starts_with` operator on the full code | No change to the condition language or its database constraint. Headings are how tariff rules are usually written. |
+| 2026-10-20 | Facts use the confirmed code once there is one, the declared code before | only the confirmed code | Records can then ask for the receipt early. The desk's Verify move re-checks documents with the confirmed code, so a correction can't slip through. |
+| 2026-10-20 | Confirmation happens during the desk's verification, by whoever may make that move | a named post; any staff member; at any status | No post in code (same pattern as "original seen"), and the code can't change after the file is verified and the letter is on its way to the PS. |
+| 2026-10-20 | The HS code is stored as digits only, 6, 8 or 10 of them | keep it as typed | "2523.29" and "252329" must compare equal. Printed back with dots on the letter. |
+| 2026-10-20 | `hs_code` is nullable in the database but required on new forms | `NOT NULL` with a made-up value for old rows | Old dev cases have no code, and inventing one would be false data. Their receipt rule fails closed. |
 | 2026-10-20 | Cases signed before step 6f get 404, not a freshly made letter | render one now for old cases | A letter made today isn't the one that was signed. Only your dev database has such cases. |
 
 ## 4. Open questions
@@ -873,7 +900,8 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 - [ ] **Facility letter text:** the exact wording, the Ministry's address line and letterhead, and the GRA address. See backend/app/modules/etls/templates/facility_letter.txt.
 - [ ] **File reference format:** what is the Ministry's real format? Placeholder `MOTIE/ETLS/FL/{year}/{case_id:05d}` (`FACILITY_LETTER_REFERENCE_FORMAT`).
 - [ ] **Issued letters:** storing at signing is decided (step 6f). Still open: may the importer download it? And if a signed letter has a mistake, how does the Ministry correct it: cancel it and sign a new one, or a separate amendment letter? Right now a case can have only one.
-- [ ] **The cement receipt:** which receipt is it (e.g. a payment receipt for a cement levy)? And should cement be recognised from a product list rather than the word "cement" in free text? See backend/alembic/versions/0017_documents.py.
+- [ ] **The cement receipt:** which receipt is it (e.g. a payment receipt for a cement levy)? Is "HS heading 2523" the right trigger, or only some subheadings (e.g. 2523.29 Portland cement, not 2523.10 clinker)? Are other headings subject to receipts too? See backend/alembic/versions/0020_facility_letter_hs_code.py.
+- [ ] **HS code on the form:** do importers know their HS code when they apply (it's required on the form now)? Which officer confirms it: the ETLS desk (placeholder) or someone else? How many digits does GRA use (we accept 6, 8 or 10)?
 - [ ] **Document type names:** are "Business registration certificate", "Annual returns certificate", "Certificate of origin", "Invoice" (commercial invoice?) and "Export declaration" the official names?
 - [ ] **Who may upload, and until when:** right now the applicant and any staff member, until the case is closed.
 - [ ] **Security to-do before going live (not a Ministry question):** scan uploads for viruses (e.g. ClamAV), back up the `documents` volume together with the database, and add a clean-up job for files left behind if the server crashes mid-upload.
@@ -885,6 +913,16 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 6g
+1. An importer declares `7210.49` (steel) but the goods are really cement. Where in the process is that caught, and what stops the file going to the PS without the receipt?
+2. Why does `facility_letter_facts()` leave out `hs_heading` entirely for a case with no HS code, rather than returning an empty string?
+3. The Ministry says the receipt is also needed for heading 6810 (cement blocks). What do you change?
+
+#### Show answers
+1. When the desk confirms the code as `2523.29` (`confirm_hs_code()`). From then on `hs_heading` is `2523`, the receipt applies, and the desk's Verify move fails its `documents_complete` check until it's uploaded. Verify also needs `hs_code_confirmed`, so the desk can't skip confirming.
+2. A missing fact makes `holds()` fail closed and require the document. An empty string would compare as "not 2523" and quietly drop the receipt.
+3. Only data: a new migration. The condition language has one condition per requirement and only `equals`/`contains`, so either add a second requirement row with its own document type, or add an `in` operator to `conditions.py` and to the `document_requirements_condition_shape` constraint, then change the row to `{"field": "hs_heading", "op": "in", "value": ["2523", "6810"]}`. No change to the ETLS module.
 
 ### Step 6f
 1. The PS signs a letter, then the Ministry rewords the template. What does GRA get when the desk downloads the letter next week, and how could you prove it?

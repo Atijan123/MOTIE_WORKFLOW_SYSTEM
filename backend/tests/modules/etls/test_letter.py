@@ -15,7 +15,7 @@ from app.core.documents.models import IssuedDocument
 from app.core.workflow import effects
 from app.core.workflow.delegation import today
 from app.modules.etls import letter
-from tests.support import facility_letter_form, move, ready_for_records
+from tests.support import confirm_hs_code, facility_letter_form, move, ready_for_records
 
 pytestmark = pytest.mark.anyio
 
@@ -24,9 +24,10 @@ async def _verified_case(act, people, **form) -> int:
     response = await act(people["applicant"], "post", "/etls/facility-letters", json=facility_letter_form(**form))
     case_id = response.json()["case_id"]
     await ready_for_records(act, people, case_id)
-    for who, to_status in [("records_officer", "originals_received"), ("desk", "verified")]:
-        response = await move(act, people[who], case_id, to_status)
-        assert response.status_code == 200, f"{who}: {response.text}"
+    assert (await move(act, people["records_officer"], case_id, "originals_received")).status_code == 200
+    assert (await confirm_hs_code(act, people, case_id)).status_code == 200
+    response = await move(act, people["desk"], case_id, "verified")
+    assert response.status_code == 200, response.text
     return case_id
 
 
@@ -82,6 +83,7 @@ async def test_the_letter_has_every_field(act, people, db_session):
     assert fields.date == f"{today().day} {today():%B %Y}"
     assert fields.importer_name == "Kombo Building Supplies Ltd"
     assert fields.product == "Roofing sheets"
+    assert fields.hs_code == "7210.49"  # the officer-confirmed code
     assert fields.quantity == "1200.5 tonnes"
     assert (fields.exporter_name, fields.exporter_country) == ("Dakar Steel SA", "Senegal")
     assert fields.exporter_approval_number == "SN-ETLS-0091"

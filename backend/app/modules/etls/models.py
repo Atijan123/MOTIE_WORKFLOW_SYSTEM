@@ -3,9 +3,10 @@
 They point at core.cases; core code never reads them.
 """
 
+from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, CheckConstraint, ForeignKey, Index, Numeric, Text
+from sqlalchemy import BigInteger, CheckConstraint, DateTime, ForeignKey, Index, Numeric, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -43,6 +44,16 @@ class FacilityLetter(Base):
     __tablename__ = "facility_letters"
     __table_args__ = (
         CheckConstraint("quantity > 0", name="facility_letters_quantity_positive"),
+        # Added in 0020; see the migration for the HS code shape.
+        CheckConstraint(r"hs_code ~ '^[0-9]{6}([0-9]{2}){0,2}$'", name="facility_letters_hs_code_shape"),
+        CheckConstraint(
+            r"hs_code_confirmed ~ '^[0-9]{6}([0-9]{2}){0,2}$'", name="facility_letters_hs_code_confirmed_shape"
+        ),
+        CheckConstraint(
+            "(hs_code_confirmed IS NULL) = (hs_code_confirmed_by IS NULL) "
+            "AND (hs_code_confirmed IS NULL) = (hs_code_confirmed_at IS NULL)",
+            name="facility_letters_hs_code_confirmed_complete",
+        ),
         {"schema": "etls"},
     )
 
@@ -55,6 +66,12 @@ class FacilityLetter(Base):
     exporter_name: Mapped[str] = mapped_column(Text)
     exporter_country: Mapped[str] = mapped_column(Text)
     exporter_etls_approval_number: Mapped[str] = mapped_column(Text)
+    # The HS code as the applicant declared it, and as an officer confirmed it
+    # (digits only). Empty on cases submitted before 0020.
+    hs_code: Mapped[str | None] = mapped_column(Text)
+    hs_code_confirmed: Mapped[str | None] = mapped_column(Text)
+    hs_code_confirmed_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("core.users.id"))
+    hs_code_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     product_approvals: Mapped[list[FacilityLetterProductApproval]] = relationship(
         lazy="selectin", order_by=FacilityLetterProductApproval.number

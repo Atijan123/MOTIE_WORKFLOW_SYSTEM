@@ -2,7 +2,7 @@
 
 Requirements are data (core.document_requirements). A conditional one is tested
 against the facts its module supplies (facts.py), e.g. "a receipt when the
-product is cement".
+HS heading is 2523 (cement)".
 """
 
 import re

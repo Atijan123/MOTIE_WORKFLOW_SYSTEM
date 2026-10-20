@@ -71,6 +71,8 @@ async def test_app_user_cannot_skip_triggers_with_replication_mode(db_session):
         "UPDATE core.issued_documents SET sha256 = 'x'",
         "DELETE FROM core.issued_documents",
         "INSERT INTO core.transition_effects (transition_id, effect_code) VALUES (1, 'x')",
+        # An officer may confirm the HS code, but never rewrite what the applicant declared.
+        "UPDATE etls.facility_letters SET hs_code = '252329'",
     ],
     ids=[
         "create-table",
@@ -87,6 +89,7 @@ async def test_app_user_cannot_skip_triggers_with_replication_mode(db_session):
         "edit-issued-document",
         "delete-issued-document",
         "add-transition-effect",
+        "rewrite-declared-hs-code",
     ],
 )
 async def test_app_user_cannot_do_what_it_was_never_granted(db_session, statement):

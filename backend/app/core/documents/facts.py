@@ -1,7 +1,7 @@
 """Facts about a case that document conditions can test, supplied by modules.
 
 The core can't read module tables, so each module registers a function that
-returns plain facts for its workflow, e.g. {"product": "Portland cement"}:
+returns plain facts for its workflow, e.g. {"hs_heading": "2523"}:
 
     register("etls_facility_letter", facility_letter_facts)
 """

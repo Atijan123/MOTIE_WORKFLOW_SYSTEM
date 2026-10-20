@@ -34,7 +34,7 @@ class DocumentOut(BaseModel):
 class RequirementOut(BaseModel):
     type: str
     name: str
-    applies: bool  # False when a condition (e.g. "product is cement") doesn't hold
+    applies: bool  # False when a condition (e.g. "HS heading is 2523") doesn't hold
     missing: bool
     original_required: bool  # the paper original must be seen in person
     original_pending: bool  # ...and the newest upload's original hasn't been seen yet

@@ -8,7 +8,7 @@ from app.db.session import get_session
 from app.modules.etls import letter as facility_letter
 from app.modules.etls import service
 from app.modules.etls.models import FacilityLetter
-from app.modules.etls.schemas import FacilityLetterForm, FacilityLetterOut
+from app.modules.etls.schemas import FacilityLetterForm, FacilityLetterOut, HsCodeConfirmation
 
 # Engine errors (WorkflowError) are turned into HTTP statuses by the handler in main.py.
 router = APIRouter(prefix="/etls", tags=["etls"])
@@ -22,6 +22,8 @@ async def _out(session: AsyncSession, letter: FacilityLetter, user: User) -> Fac
         importer_name=letter.importer_name,
         importer_address=letter.importer_address,
         product=letter.product,
+        hs_code=letter.hs_code,
+        hs_code_confirmed=letter.hs_code_confirmed,
         quantity=letter.quantity,
         unit=letter.unit,
         exporter_name=letter.exporter_name,
@@ -49,6 +51,18 @@ async def get_facility_letter(
     session: AsyncSession = Depends(get_session),
 ):
     return await _out(session, await service.get_facility_letter(session, case_id, user), user)
+
+
+@router.post("/facility-letters/{case_id}/hs-code", response_model=FacilityLetterOut)
+async def confirm_hs_code(
+    case_id: int,
+    body: HsCodeConfirmation,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """The verifying officer confirms (or corrects) the HS code. Dots and spaces are ignored."""
+    letter = await service.confirm_hs_code(session, case_id, user, body.hs_code)
+    return await _out(session, letter, user)
 
 
 @router.get(

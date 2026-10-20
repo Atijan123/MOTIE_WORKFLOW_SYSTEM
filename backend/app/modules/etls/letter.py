@@ -48,6 +48,7 @@ class LetterFields:
     importer_name: str
     importer_address: str
     product: str
+    hs_code: str  # as confirmed by the officer, e.g. 2523.29
     quantity: str
     exporter_name: str
     exporter_country: str
@@ -101,6 +102,11 @@ def _quantity(letter: FacilityLetter) -> str:
     return f"{amount} {letter.unit}"
 
 
+def _hs_code(digits: str) -> str:
+    # Stored as digits; printed the usual way: heading.subheading[.national].
+    return ".".join([digits[:4], *(digits[i : i + 2] for i in range(4, len(digits), 2))]) if digits else ""
+
+
 async def _position_title(session: AsyncSession, code: str) -> str:
     return await session.scalar(select(Position.title).where(Position.code == code)) or code
 
@@ -120,6 +126,7 @@ async def build_fields(session: AsyncSession, case_id: int, signing: AuditEvent)
         importer_name=letter.importer_name,
         importer_address=letter.importer_address,
         product=letter.product,
+        hs_code=_hs_code(letter.hs_code_confirmed or letter.hs_code or ""),
         quantity=_quantity(letter),
         exporter_name=letter.exporter_name,
         exporter_country=letter.exporter_country,

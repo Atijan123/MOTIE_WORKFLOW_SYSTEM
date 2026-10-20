@@ -1,12 +1,14 @@
-"""ETLS facility letters: opening a case together with its form."""
+"""ETLS facility letters: opening a case together with its form, and the HS code."""
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.audit.service import record_event
 from app.core.documents import facts
 from app.core.identity.models import User
-from app.core.workflow import flags
+from app.core.workflow import checks, flags
 from app.core.workflow import service as workflow
+from app.core.workflow.models import Case
 from app.modules.etls.models import (
     FacilityLetter,
     FacilityLetterCertificate,
@@ -18,6 +20,7 @@ MODULE = "etls"
 FACILITY_LETTER = "etls_facility_letter"
 DUPLICATE_CERTIFICATE = "etls.duplicate_certificate_of_origin"
 DESK = "etls_desk_officer"
+HS_CODE_CONFIRMED = "hs_code_confirmed"  # transition check, on the desk's "Verify" move
 
 
 async def _earlier_uses(session: AsyncSession, case_id: int, numbers: list[str]) -> dict[str, list[int]]:
@@ -60,6 +63,7 @@ async def submit_facility_letter(
         importer_name=form.importer_name,
         importer_address=form.importer_address,
         product=form.product,
+        hs_code=form.hs_code,
         quantity=form.quantity,
         unit=form.unit,
         exporter_name=form.exporter_name,
@@ -112,17 +116,66 @@ async def get_facility_letter(session: AsyncSession, case_id: int, user: User) -
     return letter
 
 
+async def confirm_hs_code(session: AsyncSession, case_id: int, actor: User, hs_code: str) -> FacilityLetter:
+    """An officer confirms the HS code, or corrects the applicant's.
+
+    Allowed for whoever may make the move that needs it (the desk's "Verify",
+    or someone acting for the desk), so no post is named here. It can be
+    changed again until the case is verified; each change is audited.
+    """
+    letter = await get_facility_letter(session, case_id, actor)
+    case = await workflow.get_case(session, case_id, actor, for_update=True)
+    if not await workflow.may_make_move_with_check(session, case, actor, HS_CODE_CONFIRMED):
+        raise workflow.NotPermitted("Only the officer verifying this file can confirm its HS code.")
+
+    previous = letter.hs_code_confirmed
+    letter.hs_code_confirmed = hs_code
+    letter.hs_code_confirmed_by = actor.id
+    letter.hs_code_confirmed_at = func.now()
+    record_event(
+        session,
+        actor=actor,
+        action="case.hs_code_confirmed",
+        entity_type=workflow.AUDIT_ENTITY,
+        entity_id=case.id,
+        details={"declared": letter.hs_code, "confirmed": hs_code, "previously_confirmed": previous},
+    )
+    await session.commit()
+    await session.refresh(letter)
+    return letter
+
+
+async def _check_hs_code_confirmed(session: AsyncSession, case: Case) -> list[str]:
+    letter = await session.get(FacilityLetter, case.id)
+    if letter is None or letter.hs_code_confirmed is None:
+        return ["the HS code hasn't been confirmed by an officer"]
+    return []
+
+
+def hs_heading(letter: FacilityLetter) -> str | None:
+    """The 4-digit HS heading (2523 = cement): the officer's code once confirmed,
+    the applicant's until then."""
+    code = letter.hs_code_confirmed or letter.hs_code
+    return code[:4] if code else None
+
+
 async def facility_letter_facts(session: AsyncSession, case_id: int) -> dict:
     """What document conditions may test on a facility letter case (see core documents/facts.py)."""
     letter = await session.get(FacilityLetter, case_id)
     if letter is None:
         return {}
-    return {
+    found = {
         "product": letter.product,
         "unit": letter.unit,
         "exporter_country": letter.exporter_country,
     }
+    # Left out when unknown (a case from before 0020), so a rule on it fails
+    # closed: the document counts as required.
+    if heading := hs_heading(letter):
+        found["hs_heading"] = heading
+    return found
 
 
 # Registered when the module is imported (main.py imports its router).
 facts.register(FACILITY_LETTER, facility_letter_facts)
+checks.register(HS_CODE_CONFIRMED, _check_hs_code_confirmed)
