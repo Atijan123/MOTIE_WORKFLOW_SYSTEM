@@ -211,6 +211,7 @@ Everything is **Missing** (S9 comparison table and flags; S10 box 10 certificati
 Each chunk is a few small steps, each with tests, a LEARNING.md entry and its own commit. Chunks 1 and 2 finish the facility letter screens end to end.
 
 ### Chunk 1: shared foundations (backend)
+**Done** (steps 7a–7f, 2026-10-20). See the build log in LEARNING.md.
 1. **Applicant status labels**: `applicant_label` and `applicant_explanation` on every status (required), plus an optional applicant wording per move, and moves the applicant never sees (the letter cancel). Applicants get labels, never internal codes or names.
 2. **Case reference at submission**: a per-workflow prefix and a counter per workflow per year; `MOTIE/ETLS/FL/2026/0001`. The letter keeps printing the registry reference setting.
 3. **Lists and queues**: `GET /cases` (my cases, for applicants) and `GET /cases/queue` (staff: cases where I can make a move now, by own post, delegation or succession), oldest first, with days waiting, service, applicant and a module-supplied "goods" line; filter by status (for Records' Outgoing tab).

@@ -22,7 +22,7 @@ AUDIT_ENTITY = "absence"
 RECORDER_ROLE = "absence_recorder"
 
 
-def _may_record_for_others(user: User) -> bool:
+def may_record_for_others(user: User) -> bool:
     return RECORDER_ROLE in user.role_codes
 
 
@@ -36,7 +36,7 @@ async def record_absence(
     reason: str | None = None,
 ) -> Absence:
     on_behalf = absent_user_id != actor.id
-    if on_behalf and not _may_record_for_others(actor):
+    if on_behalf and not may_record_for_others(actor):
         raise NotPermitted("You can only record your own absence.")
 
     absent = actor if not on_behalf else await session.get(User, absent_user_id)
@@ -89,7 +89,7 @@ async def cancel_absence(session: AsyncSession, *, absence_id: int, actor: User)
         .with_for_update()
         .execution_options(populate_existing=True)
     )
-    if absence is None or not (absence.user_id == actor.id or _may_record_for_others(actor)):
+    if absence is None or not (absence.user_id == actor.id or may_record_for_others(actor)):
         # Same answer for "doesn't exist" and "not yours" (see get_case()).
         raise NotFound("Absence not found.")
     if absence.cancelled_at is not None:
@@ -113,7 +113,7 @@ async def cancel_absence(session: AsyncSession, *, absence_id: int, actor: User)
 async def list_absences(session: AsyncSession, user: User) -> list[Absence]:
     """Current and upcoming absences: your own, or everyone's for a recorder."""
     query = select(Absence).where(Absence.cancelled_at.is_(None), Absence.ends_on >= delegation.today())
-    if not _may_record_for_others(user):
+    if not may_record_for_others(user):
         query = query.where(or_(Absence.user_id == user.id, Absence.recorded_by == user.id))
     return list(await session.scalars(query.order_by(Absence.starts_on, Absence.id)))
 

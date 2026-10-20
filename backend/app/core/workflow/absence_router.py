@@ -4,8 +4,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.identity.deps import get_current_user
 from app.core.identity.models import User
 from app.core.workflow import absence as absences
+from app.core.workflow import acting, service
 from app.core.workflow.models import Absence
-from app.core.workflow.schemas import AbsenceOut, RecordAbsenceRequest
+from app.core.workflow.schemas import AbsenceOut, AbsenceViewOut, RecordAbsenceRequest
 from app.db.session import get_session
 
 # Errors are the engine's WorkflowError subclasses, so the handler registered in
@@ -50,6 +51,17 @@ async def list_absences(
 ):
     """Current and upcoming absences: your own (and ones you recorded), or all for a recorder."""
     return [_out(a) for a in await absences.list_absences(session, user)]
+
+
+@router.get("/current", response_model=list[AbsenceViewOut])
+async def current_absences(
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Everyone away now or soon (S11), soonest first. Staff only."""
+    if not service.is_staff(user):
+        raise service.NotPermitted("Only Ministry staff can see who is away.")
+    return [AbsenceViewOut.model_validate(a, from_attributes=True) for a in await acting.current_absences(session, user)]
 
 
 @router.post("/{absence_id}/cancel", response_model=AbsenceOut)

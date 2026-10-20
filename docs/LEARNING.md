@@ -16,6 +16,26 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 7f — The acting banner and the absences screen views (2026-10-20)
+Chunk 1, step 6 (the last).
+
+**Built** (backend/app/core/workflow/acting.py):
+- **`GET /acting`**, the banner on every staff screen: the posts I'm acting for *today*. Each entry has the post and title, the basis (`delegation` or `succession`), the workflows it covers (`null` = all), and either the absences it rests on (whose, from when to when) or the delegation's dates. Empty when I'm acting for nobody. It asks the engine's own rules per workflow (`acting_successor()`, `is_delegated_away()`), so the banner and the buttons agree. E.g. the DPS covers an absent Director for ETLS approvals only.
+- **`GET /acting/for-me`** (S11, "who acts for me"): for each of my posts, my current and upcoming delegations (with their ids, for "revoke") and the succession line per workflow, with the names of the people holding each post.
+- **`GET /absences/current`** (S11, the list): everyone away now or later, with their posts, soonest first, for all staff. The **reason** is shown only to the person themselves, whoever recorded it, and recorders: reasons can be personal. Applicants get 403.
+
+Recording, cancelling, delegating and revoking already existed (steps 4d and 5c). `_may_record_for_others()` in backend/app/core/workflow/absence.py became public (`may_record_for_others()`), because the new list uses it too.
+
+**Files:** backend/app/core/workflow/acting.py, backend/app/core/workflow/acting_router.py, backend/app/core/workflow/absence_router.py (`/absences/current`), backend/app/core/workflow/absence.py, backend/app/core/workflow/schemas.py, backend/app/main.py, backend/tests/core/test_acting_views.py
+**Try it:**
+- As `ps@motie.test`, `POST /absences` for today; then as `dps@motie.test`, `GET /acting` shows the Permanent Secretary, by succession, with the PS's dates.
+- As `director@motie.test`, `GET /acting/for-me`: one line, for `etls_application`, with the DPS.
+- As `desk@motie.test`, `GET /absences/current`: the PS's absence, without the reason.
+- `docker compose run --rm tools pytest tests/core/test_acting_views.py -v`
+**New concepts:** none.
+
+**Chunk 1 is done.** Next is chunk 2 in docs/GAPS.md: the facility letter screens end to end.
+
 ### Step 7e — History for screens, and the applicant's timeline (2026-10-20)
 Chunk 1, step 5.
 
@@ -1120,6 +1140,9 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-20 | The signature line is the signing post's title, "For: ..." when acting; no name printed | print the signer's name and title too | Follows the Ministry's wording, which shows only "Permanent Secretary". Who actually signed is in the audit log and `issued_by`. `[CONFIRM]` |
 | 2026-10-20 | A ` >> ` mark for the reference and date line | a tab character; two template files | A tab is invisible and editors often turn it into spaces. ` >> ` is visible and explained in the template's notes. |
 | 2026-10-20 | Template version `2`, with a date and a short label | a date only; a number only | Numbers sort and compare easily; the label says what changed. |
+| 2026-10-20 | The banner works out "acting for" with the engine's own functions, per workflow | a separate query of absences and succession rows | One set of rules. A line can differ per workflow (the Director's), and a delegation blocks succession; only the engine knows both. |
+| 2026-10-20 | Absence reasons are hidden from other staff | show them to all staff | Reasons like sick leave are personal. Who and when is all a colleague needs. `[CONFIRM]` |
+| 2026-10-20 | New routes `/acting` and `/acting/for-me` in the workflow package | `/auth/me/acting` | The identity module mustn't depend on the workflow module (workflow already imports identity). |
 | 2026-10-20 | History and timeline are computed from the audit log on each request | store a separate timeline table | One source of truth (as in step 3c). A case has tens of rows, so it's cheap. |
 | 2026-10-20 | The timeline finds each move by its from-status, to-status and name, as recorded in the audit row | store the transition id in the audit row | Old rows don't have an id; the three together identify the move. New rows could also record the id, if moves are ever renamed. |
 | 2026-10-20 | Repeated labels on the timeline are shown once | show every move | To the applicant, three internal minutes are one step. |
@@ -1194,6 +1217,7 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 - [ ] **The cement receipt:** which receipt is it (e.g. a payment receipt for a cement levy)? Is "HS heading 2523" the right trigger, or only some subheadings (e.g. 2523.29 Portland cement, not 2523.10 clinker)? Are other headings subject to receipts too? See backend/alembic/versions/0020_facility_letter_hs_code.py.
 - [ ] **HS code:** it's optional for applicants now (step 6k). Which officer enters or confirms it: the ETLS desk (placeholder) or someone else? How many digits does GRA use (we accept 6, 8 or 10)?
 - [ ] **Document type names:** are "Business registration certificate", "Annual returns certificate", "Certificate of origin", "Invoice" (commercial invoice?) and "Export declaration" the official names?
+- [ ] **Absence reasons:** who may see why someone is away? Now only the person, whoever recorded it, and recorders.
 - [ ] **Applicant explanations:** the one-line explanation under each facility letter label (e.g. "The ETLS desk is checking your application.") is my wording. See backend/alembic/versions/0023_applicant_labels.py.
 - [ ] **Who may upload, and until when:** right now the applicant and any staff member, until the case is closed.
 - [ ] **Security to-do before going live (not a Ministry question):** scan uploads for viruses (e.g. ClamAV), back up the `documents` volume together with the database, and add a clean-up job for files left behind if the server crashes mid-upload.
@@ -1205,6 +1229,14 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 7f
+1. The Director is on leave. The DPS opens any screen. What does the banner say, and why does it mention ETLS approvals only?
+2. Why does `GET /absences/current` hide the reason from a desk officer but show it to the absent person?
+
+#### Show answers
+1. "Acting for the Director of Industry and Investment" by succession, with `workflows: ["etls_application"]` and the Director's absence dates. The Director's succession row exists only for that workflow (migration 0013), and `acting_now()` asks `acting_successor()` per workflow.
+2. Reasons can be personal (e.g. medical). `current_absences()` in backend/app/core/workflow/acting.py returns the reason only to the person, whoever recorded it, and `absence_recorder`s.
 
 ### Step 7e
 1. The DPS signs while the PS is on leave. Where in the history response is the PS's absence, and where does that come from?

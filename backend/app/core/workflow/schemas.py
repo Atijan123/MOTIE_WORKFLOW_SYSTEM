@@ -167,3 +167,61 @@ class AbsenceOut(BaseModel):
     recorded_by: int
     created_at: datetime
     cancelled_at: datetime | None
+
+
+class AwayPeriodOut(BaseModel):
+    person: str
+    starts_on: date
+    ends_on: date
+
+
+class ActingNowOut(BaseModel):
+    """A post I'm acting for today: "You are acting for the Permanent Secretary (absent ...)"."""
+
+    position: str
+    title: str
+    basis: str  # "delegation" or "succession"
+    workflows: list[str] | None  # null = every workflow
+    absences: list[AwayPeriodOut]  # succession: whose absence, from when to when
+    delegation_starts_on: date | None  # delegation: its dates
+    delegation_ends_on: date | None
+
+
+class StandInOut(BaseModel):
+    position: str
+    title: str
+    holders: list[str]
+
+
+class SuccessionLineOut(BaseModel):
+    workflow: str
+    line: list[StandInOut]  # first in line first
+
+
+class MyDelegationOut(BaseModel):
+    id: int  # for POST /delegations/{id}/revoke
+    to_position: str
+    to_title: str
+    workflow: str | None
+    starts_on: date
+    ends_on: date
+
+
+class CoverForPostOut(BaseModel):
+    """Who acts for one of my posts when I'm away: a delegation first, otherwise the succession line."""
+
+    position: str
+    title: str
+    delegations: list[MyDelegationOut]
+    succession: list[SuccessionLineOut]
+
+
+class AbsenceViewOut(BaseModel):
+    """An absence as all staff see it (S11). `reason` only for the person and for recorders."""
+
+    id: int
+    person: str
+    posts: list[str]
+    starts_on: date
+    ends_on: date
+    reason: str | None
