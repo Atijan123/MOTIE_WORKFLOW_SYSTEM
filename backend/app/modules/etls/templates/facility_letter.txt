@@ -1,33 +1,33 @@
 ## Lines starting with ## are notes, never printed.
 ## Change "version" whenever you change the wording: every issued letter records it.
-## version: 1 (placeholder wording, before the Ministry's)
-Ministry of Trade, Industry, Regional Integration and Employment
-The Quadrangle, Banjul, The Gambia
-
-Our ref: $file_reference
-Date: $date
+## Layout: a line wrapped in ** is bold. In a line with " >> ", the part after it
+## is printed at the right margin, on the same line.
+## Fields: $file_reference $date $importer_name $importer_name_upper $importer_address
+##   $product $hs_code $quantity $unit $exporter_name $exporter_country
+##   $exporter_approval_number $product_approval_numbers $certificate_numbers
+##   $signature_title $signer_name $signer_title $acting_for
+## version: 2 (Ministry wording, 2026-10-20)
+$file_reference >> $date
 
 The Commissioner General
 Gambia Revenue Authority
 Banjul
 
-**Subject: Request for ETLS facility: $importer_name**
+**REQUEST FOR ETLS FACILITY: $importer_name_upper**
 
-The Ministry confirms that the goods described below, imported by $importer_name, originate from an ECOWAS Member State and qualify for treatment under the ECOWAS Trade Liberalisation Scheme (ETLS). You are kindly requested to grant the importer the ETLS facility for this consignment.
+This Ministry is in receipt of an application for the clearance of goods ($product) from the above-mentioned company.
 
-Product: $product
-Quantity: $quantity
-Exporter: $exporter_name, $exporter_country
-Exporter's ETLS approval number: $exporter_approval_number
-Product approval number(s): $product_approval_numbers
-Certificate(s) of origin: $certificate_numbers
+Please be informed that $importer_name is importing $quantity $unit of $product into The Gambia from $exporter_name of $exporter_country under the approved list of products benefitting from the ECOWAS Trade Liberalization Scheme. $exporter_name is an ETLS-certified company with approval number $exporter_approval_number and product approval number $product_approval_numbers.
 
-Yours faithfully,
+We hereby write to your good office to kindly exempt these products from paying duties as specified in the ETLS protocol.
 
+Attached herewith are copies of the supporting documents, i.e. Certificate of Origin (No. $certificate_numbers), for your kind consideration.
+
+Sincerely,
 
 
-$signer_name
-$signer_title
-$acting_for
 
-cc: $importer_name, $importer_address
+$signature_title
+
+Cc: $importer_name
+    $importer_address

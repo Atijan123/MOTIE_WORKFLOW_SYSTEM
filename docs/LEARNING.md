@@ -16,6 +16,35 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 6i — The Ministry's wording for the facility letter (2026-10-20)
+**Built:** backend/app/modules/etls/templates/facility_letter.txt now holds the Ministry's wording, word for word (including "benefitting" and "Liberalization"), as template version `2`. Each `[placeholder]` became a `$field`:
+
+| Ministry's placeholder | Field |
+| --- | --- |
+| [File reference], [Date] | `$file_reference`, `$date` |
+| [IMPORTER NAME] in the subject | `$importer_name_upper` (new) |
+| [IMPORTER NAME] / [Importer name] elsewhere | `$importer_name` |
+| [quantity] [unit] | `$quantity` (now the number only) and `$unit` (new) |
+| [product], [exporter], [exporter country] | `$product`, `$exporter_name`, `$exporter_country` |
+| [approval number], [product approval numbers] | `$exporter_approval_number`, `$product_approval_numbers` |
+| [certificate numbers] | `$certificate_numbers` |
+| [Importer address] | `$importer_address` |
+| "Permanent Secretary" under "Sincerely," | `$signature_title` (new): "Permanent Secretary", or "For: Permanent Secretary" when someone acted for the PS `[CONFIRM]` |
+
+Two small additions to the template's layout rules, in `render_pdf()` in backend/app/modules/etls/letter.py:
+- **` >> ` puts the rest of a line at the right margin.** The first line is `$file_reference >> $date`, so the reference sits on the left and the date on the right, as in the Ministry's layout.
+- **Layout marks are read from the template, not from the data.** The template is now filled line by line, after `**` and ` >> ` have been read. An importer called "A >> B" or "\*\*X\*\*" is printed exactly as typed.
+
+The subject line is bold. The Ministry's text didn't say; I chose bold because the old template had it and it matches the capitals `[CONFIRM]`. The old Ministry address line at the top is gone, because the Ministry's wording doesn't have it (letterhead `[CONFIRM]`). Letters already issued keep version 1: they're stored files (step 6f).
+
+**Files:** backend/app/modules/etls/templates/facility_letter.txt, backend/app/modules/etls/letter.py (`LetterFields`, `build_fields()`, `render_pdf()`), backend/tests/modules/etls/test_letter.py
+**Try it:**
+- `bash scripts/reset-dev.sh`, then walk a facility letter to "Signed by the PS" as the seeded users (step 6h) and download it as `desk@motie.test`.
+- `docker compose exec db psql -U motie -d motie -c "SELECT case_id, template_version FROM core.issued_documents"` shows `2 (Ministry wording, 2026-10-20)`.
+- To change a word, edit the template and change its `## version:` line. The `## Fields:` note at the top lists every field you can use. A misspelt field stops the signing with an error rather than printing it, and `test_the_template_only_uses_fields_the_letter_has` catches it first.
+- `docker compose run --rm tools pytest tests/modules/etls/test_letter.py -v`
+**New concepts:** none. See Generating documents from a template.
+
 ### Step 6h — Resetting the dev database (2026-10-20)
 **Built:** `scripts/reset-dev.sh` gives you a clean dev environment in one command:
 1. stops the API;
@@ -712,7 +741,7 @@ Since step 6f, the same pattern also covers **effects**: things a move sets off 
 
 ### Generating documents from a template
 **What:** keep *what* a letter says (a text file with placeholders) apart from *how* it's printed (code that lays text out on a page), and apart from *where the facts come from* (database queries). Each part can then change without the others: the Ministry rewords the letter, ICT changes the layout, or a field moves to another table. Testing is easier too. The fields are a plain object you can check, and the PDF can be written uncompressed so tests can find the printed text in its bytes.
-**Here:** `build_fields()` (facts), templates/facility_letter.txt (words) and `render_pdf()` (layout) in backend/app/modules/etls/. `string.Template` only replaces `$names`; unlike `str.format()` it can't reach into objects, which is why we use it for text people may edit.
+**Here:** `build_fields()` (facts), templates/facility_letter.txt (words) and `render_pdf()` (layout) in backend/app/modules/etls/. `string.Template` only replaces `$names`; unlike `str.format()` it can't reach into objects, which is why we use it for text people may edit. Since step 6i the template is filled one line at a time, *after* its layout marks (`**` bold, ` >> ` right-aligned) are read, so data can never change the layout. That's the same idea as keeping SQL and its parameters apart.
 **Learn more:** [Python docs: Template strings](https://docs.python.org/3/library/string.html#template-strings), [fpdf2 tutorial](https://py-pdf.github.io/fpdf2/Tutorial.html)
 
 ### Disposable dev environments (reset and seed)
@@ -889,6 +918,12 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-20 | Issued documents are a core table (`core.issued_documents`) with a `kind` | an `etls.issued_letters` table; reuse `core.case_documents` | Other modules will issue certificates too. Uploads are what applicants *gave*; issued documents are what the Ministry *produced*. Mixing them would apply the upload rules (applicants may download uploads) to signed letters. |
 | 2026-10-20 | Template version = a `## version:` label in the file, plus the file's own SHA-256 | only a label; only the hash; a version table | The label is readable; the hash catches an edit where someone forgot to change the label. |
 | 2026-10-20 | Re-hash the stored file on every download | trust the disk | The letter is small, so it costs nothing, and a damaged or edited file is caught before it reaches GRA. |
+| 2026-10-20 | The Ministry's wording is kept word for word, spelling included | correct "benefitting"/"Liberalization" | It's the Ministry's official text. Spelling is theirs to change. |
+| 2026-10-20 | `[IMPORTER NAME]` in capitals only in the subject line; normal case in the body | capitals wherever the placeholder was in capitals | The subject line is all capitals; in the body, a name in capitals mid-sentence would look odd. Easy to change in the template. |
+| 2026-10-20 | Quantity and unit are separate fields | keep "1200.5 tonnes" as one field | The Ministry's wording names them separately. |
+| 2026-10-20 | The signature line is the signing post's title, "For: ..." when acting; no name printed | print the signer's name and title too | Follows the Ministry's wording, which shows only "Permanent Secretary". Who actually signed is in the audit log and `issued_by`. `[CONFIRM]` |
+| 2026-10-20 | A ` >> ` mark for the reference and date line | a tab character; two template files | A tab is invisible and editors often turn it into spaces. ` >> ` is visible and explained in the template's notes. |
+| 2026-10-20 | Template version `2`, with a date and a short label | a date only; a number only | Numbers sort and compare easily; the label says what changed. |
 | 2026-10-20 | The reset script is bash, run from the host with `docker compose` | a Python script; a Makefile | It drives Docker from outside the containers, which is what shell is for, and Git Bash is already how you run the other commands. No new tool. |
 | 2026-10-20 | Reset drops the database rather than downgrading every migration | `alembic downgrade base` | Faster, and it also clears anything a migration doesn't know about. The test suite already proves the downgrades work. |
 | 2026-10-20 | The seed is Python using the normal `create_user()`/`assign_position()` | SQL inserts | Passwords get hashed the same way as real ones, and the seed breaks loudly if those rules change. |
@@ -929,7 +964,7 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 - [ ] **Facility letter form lists:** are there fixed lists for exporter country (ECOWAS members), unit and product? They would make checks such as the cement rule exact.
 - [ ] **Duplicate certificates:** does a number from a *rejected* case count as used? (Right now every earlier use counts.) May anyone besides the ETLS desk clear the flag?
 - [ ] **Originals:** besides the certificate of origin, must any other paper original be seen in person (e.g. the invoice)? It's one column per document (`original_required`).
-- [ ] **Facility letter text:** the exact wording, the Ministry's address line and letterhead, and the GRA address. See backend/app/modules/etls/templates/facility_letter.txt.
+- [ ] **Facility letter layout:** the wording is in (step 6i). Still to check: the letterhead (printed paper, or a logo and address we should add?); whether the subject line is bold; the date format ("20 October 2026"); and what the signature line says when someone acts for the PS (now "For: Permanent Secretary", no name). See backend/app/modules/etls/templates/facility_letter.txt.
 - [ ] **File reference format:** what is the Ministry's real format? Placeholder `MOTIE/ETLS/FL/{year}/{case_id:05d}` (`FACILITY_LETTER_REFERENCE_FORMAT`).
 - [ ] **Issued letters:** storing at signing is decided (step 6f). Still open: may the importer download it? And if a signed letter has a mistake, how does the Ministry correct it: cancel it and sign a new one, or a separate amendment letter? Right now a case can have only one.
 - [ ] **The cement receipt:** which receipt is it (e.g. a payment receipt for a cement levy)? Is "HS heading 2523" the right trigger, or only some subheadings (e.g. 2523.29 Portland cement, not 2523.10 clinker)? Are other headings subject to receipts too? See backend/alembic/versions/0020_facility_letter_hs_code.py.
@@ -945,6 +980,16 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 6i
+1. The Ministry wants "Kindly" instead of "We hereby write to your good office to kindly". What do you change, and what happens to letters already issued?
+2. An importer registers as "ACME >> Trading". Where does the date end up on their letter, and why?
+3. The DPS signs while the PS is on leave. What does the line under "Sincerely," say, and where does that come from?
+
+#### Show answers
+1. Edit the sentence in templates/facility_letter.txt and change the `## version:` line (e.g. to `3`). Letters already issued don't change: they're the stored files from step 6f, and they keep `template_version` 2.
+2. At the right of the first line, as usual. `render_pdf()` looks for ` >> ` in the template line *before* filling in fields, so the importer's name is just text.
+3. "For: Permanent Secretary". `build_fields()` reads the signing audit row: `on_behalf_of` is `permanent_secretary`, so `signature_title` is "For: " plus that post's title.
 
 ### Step 6h
 1. Someone copies `.env.example` to `.env` on the Ministry server and runs `scripts/reset-dev.sh`. What happens?

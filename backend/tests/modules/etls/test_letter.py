@@ -82,9 +82,10 @@ async def test_the_letter_has_every_field(act, people, db_session):
     assert fields.file_reference == f"MOTIE/ETLS/FL/{year}/{case_id:05d}"
     assert fields.date == f"{today().day} {today():%B %Y}"
     assert fields.importer_name == "Kombo Building Supplies Ltd"
+    assert fields.importer_name_upper == "KOMBO BUILDING SUPPLIES LTD"
     assert fields.product == "Roofing sheets"
     assert fields.hs_code == "7210.49"  # the officer-confirmed code
-    assert fields.quantity == "1200.5 tonnes"
+    assert (fields.quantity, fields.unit) == ("1200.5", "tonnes")
     assert (fields.exporter_name, fields.exporter_country) == ("Dakar Steel SA", "Senegal")
     assert fields.exporter_approval_number == "SN-ETLS-0091"
     assert fields.product_approval_numbers == "PA-1, PA-2"
@@ -93,6 +94,7 @@ async def test_the_letter_has_every_field(act, people, db_session):
     assert fields.signer_name == people["permanent_secretary"].full_name
     assert fields.signer_title == "Permanent Secretary"
     assert fields.acting_for == ""
+    assert fields.signature_title == "Permanent Secretary"
 
 
 async def test_the_pdf_shows_the_fields_on_the_page(act, people, db_session):
@@ -100,22 +102,52 @@ async def test_the_pdf_shows_the_fields_on_the_page(act, people, db_session):
     pdf = letter.render_pdf(fields, compress=False).decode("latin-1")
 
     assert pdf.startswith("%PDF-")
+    # Long paragraphs wrap over several lines, so check phrases short enough to
+    # stay on one line. (Inside a PDF string, "(" and ")" are written "\\(" and "\\)".)
     for expected in [
-        f"Our ref: {fields.file_reference}",
+        fields.file_reference,
+        fields.date,
         "The Commissioner General",
         "Gambia Revenue Authority",
-        "Subject: Request for ETLS facility: Kombo Building Supplies Ltd",
-        "Product: Roofing sheets",
-        "Quantity: 1200.5 tonnes",
-        "Exporter: Dakar Steel SA, Senegal",
-        "Certificate",  # the certificate line ("(s)" is escaped inside a PDF string)
-        "SN-CO-2026-0042",
+        "REQUEST FOR ETLS FACILITY: KOMBO BUILDING SUPPLIES LTD",
+        "clearance of goods \\(Roofing sheets\\)",
+        "1200.5 tonnes of Roofing",
+        "Dakar Steel SA of Senegal",
+        "approval number SN-ETLS-0091",
         "SN-PA-2025-011",
-        fields.signer_name,
-        "cc: Kombo Building Supplies Ltd, 12 Kairaba Avenue, Serrekunda",
+        "SN-CO-2026-0042\\)",  # "Certificate of Origin (No. ...)": wraps before the number
+        "Sincerely,",
+        "Permanent Secretary",
+        "Cc: Kombo Building Supplies Ltd",
+        "12 Kairaba Avenue, Serrekunda",
     ]:
         assert expected in pdf, expected
     assert "version:" not in pdf  # the ## notes are never printed
+    assert "For: " not in pdf  # the PS signed in their own right
+    assert "$" not in pdf  # every placeholder was filled
+
+
+async def test_the_reference_and_date_share_the_top_line(act, people, db_session):
+    fields = await _fields(db_session, await _signed_case(act, people))
+    pdf = letter.render_pdf(fields, compress=False).decode("latin-1")
+    # fpdf2 writes each piece of text after its position: "<x> <y> Td (text) Tj".
+    positions = {}
+    for text in (fields.file_reference, fields.date):
+        before = pdf[: pdf.index(f"({text}) Tj")].split()
+        positions[text] = (float(before[-3]), float(before[-2]))
+    (ref_x, ref_y), (date_x, date_y) = positions[fields.file_reference], positions[fields.date]
+    assert ref_y == date_y  # same line
+    assert date_x > ref_x + 200  # the date is over at the right margin
+
+
+def test_layout_marks_come_from_the_template_not_the_data(tmp_path):
+    template = tmp_path / "t.txt"
+    template.write_text("## version: t\n$importer_name\n", encoding="utf-8")
+    names = letter.LetterFields.__dataclass_fields__
+    fields = letter.LetterFields(**{name: "x" for name in names})
+    fields.importer_name = "**Bold >> Right**"
+    pdf = letter.render_pdf(fields, letter.load_template(template), compress=False).decode("latin-1")
+    assert "(**Bold >> Right**) Tj" in pdf  # printed as typed: not bold, not split
 
 
 async def test_when_the_ps_is_away_the_signature_block_says_who_acted(act, people, db_session):
@@ -129,6 +161,8 @@ async def test_when_the_ps_is_away_the_signature_block_says_who_acted(act, peopl
     assert fields.signer_name == people["dps"].full_name
     assert fields.signer_title == "Deputy Permanent Secretary, Administration and Finance"
     assert fields.acting_for == "for the Permanent Secretary"
+    assert fields.signature_title == "For: Permanent Secretary"
+    assert "For: Permanent Secretary" in letter.render_pdf(fields, compress=False).decode("latin-1")
     # ...and the stored letter records who issued it.
     assert (await issued.get_issued(db_session, case_id, letter.KIND)).issued_by == people["dps"].id
 

@@ -46,10 +46,12 @@ class LetterFields:
     file_reference: str
     date: str
     importer_name: str
+    importer_name_upper: str  # for the subject line, which is in capitals
     importer_address: str
     product: str
     hs_code: str  # as confirmed by the officer, e.g. 2523.29
-    quantity: str
+    quantity: str  # the number only, e.g. 1200.5
+    unit: str
     exporter_name: str
     exporter_country: str
     exporter_approval_number: str
@@ -58,6 +60,10 @@ class LetterFields:
     signer_name: str
     signer_title: str
     acting_for: str  # e.g. "for the Permanent Secretary", or "" when the PS signed
+    # Under "Sincerely,": the post whose signature it is, "For: ..." when someone
+    # acted for it. [CONFIRM] Whether the acting officer's name and title should
+    # also be printed (the Ministry's wording shows the title only).
+    signature_title: str
 
 
 @dataclass(frozen=True)
@@ -98,8 +104,7 @@ def _long_date(day: date) -> str:
 
 def _quantity(letter: FacilityLetter) -> str:
     # NUMERIC keeps trailing zeros (1200.500); a letter reads better without them.
-    amount = format(letter.quantity.normalize(), "f")
-    return f"{amount} {letter.unit}"
+    return format(letter.quantity.normalize(), "f")
 
 
 def _hs_code(digits: str) -> str:
@@ -119,15 +124,19 @@ async def build_fields(session: AsyncSession, case_id: int, signing: AuditEvent)
     signer = await session.get(User, signing.actor_user_id)
     acting_for = signing.details.get("on_behalf_of")
     signed_on = signing.occurred_at.date()
+    # Whose signature the letter carries: the post whose step it was.
+    signing_post = await _position_title(session, acting_for or signing.details["as_position"])
 
     return LetterFields(
         file_reference=file_reference(case_id, signed_on.year),
         date=_long_date(signed_on),
         importer_name=letter.importer_name,
+        importer_name_upper=letter.importer_name.upper(),
         importer_address=letter.importer_address,
         product=letter.product,
         hs_code=_hs_code(letter.hs_code_confirmed or letter.hs_code or ""),
         quantity=_quantity(letter),
+        unit=letter.unit,
         exporter_name=letter.exporter_name,
         exporter_country=letter.exporter_country,
         exporter_approval_number=letter.exporter_etls_approval_number,
@@ -135,7 +144,8 @@ async def build_fields(session: AsyncSession, case_id: int, signing: AuditEvent)
         certificate_numbers=", ".join(c.number for c in letter.certificates),
         signer_name=signer.full_name,
         signer_title=await _position_title(session, signing.details["as_position"]),
-        acting_for=f"for the {await _position_title(session, acting_for)}" if acting_for else "",
+        acting_for=f"for the {signing_post}" if acting_for else "",
+        signature_title=f"For: {signing_post}" if acting_for else signing_post,
     )
 
 
@@ -150,21 +160,31 @@ def render_pdf(fields: LetterFields, template: LetterTemplate | None = None, *, 
     """Lay the letter out on an A4 page. compress=False keeps the text readable
     in the raw PDF bytes, which tests use to check what was printed."""
     template = template or load_template()
-    # substitute() (not safe_substitute) fails on a placeholder we don't fill,
-    # so a typo in the template stops the signing instead of printing "$imprter".
-    text = Template(template.body).substitute(asdict(fields))
+    values = asdict(fields)
+
+    def fill(text: str) -> str:
+        # substitute() (not safe_substitute) fails on a placeholder we don't fill,
+        # so a typo in the template stops the signing instead of printing "$imprter".
+        return _latin1(Template(text).substitute(values))
 
     pdf = FPDF(format="A4")
     pdf.set_compression(compress)
     pdf.set_title(f"ETLS facility letter {fields.file_reference}")
     pdf.set_margins(left=25, top=25, right=25)
     pdf.add_page()
-    for line in text.splitlines():
+    # The layout marks (** and " >> ") are read from the template line *before*
+    # the fields are filled in, so an importer called "A >> B" can't move text.
+    for line in template.body.splitlines():
         bold = line.startswith("**") and line.endswith("**") and len(line) > 4
         pdf.set_font("Helvetica", style="B" if bold else "", size=11)
-        content = line[2:-2] if bold else line
-        # multi_cell wraps long lines inside the margins; an empty line is a gap.
-        pdf.multi_cell(w=0, h=6, text=_latin1(content) or " ", new_x="LMARGIN", new_y="NEXT")
+        line = line[2:-2] if bold else line
+        if " >> " in line:
+            left, right = line.split(" >> ", 1)
+            pdf.cell(w=pdf.epw / 2, h=6, text=fill(left))
+            pdf.cell(w=0, h=6, text=fill(right), align="R", new_x="LMARGIN", new_y="NEXT")
+        else:
+            # multi_cell wraps long lines inside the margins; an empty line is a gap.
+            pdf.multi_cell(w=0, h=6, text=fill(line) or " ", new_x="LMARGIN", new_y="NEXT")
     return bytes(pdf.output())
 
 
