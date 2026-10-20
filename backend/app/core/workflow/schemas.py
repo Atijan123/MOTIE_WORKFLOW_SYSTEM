@@ -26,6 +26,8 @@ class ActionOut(BaseModel):
     # delegation or because that post's holders are absent, e.g. "minister".
     # The frontend can label the button "(for the Minister)".
     on_behalf_of: str | None
+    # The move needs a written reason in the comment (e.g. cancelling a letter).
+    requires_comment: bool
 
 
 class CaseOut(BaseModel):

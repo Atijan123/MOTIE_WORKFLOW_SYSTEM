@@ -164,7 +164,7 @@ async def test_when_the_ps_is_away_the_signature_block_says_who_acted(act, peopl
     assert fields.signature_title == "For: Permanent Secretary"
     assert "For: Permanent Secretary" in letter.render_pdf(fields, compress=False).decode("latin-1")
     # ...and the stored letter records who issued it.
-    assert (await issued.get_issued(db_session, case_id, letter.KIND)).issued_by == people["dps"].id
+    assert (await issued.get_current(db_session, case_id, letter.KIND)).issued_by == people["dps"].id
 
 
 async def test_download_through_the_api(act, people):
@@ -183,7 +183,7 @@ async def test_download_through_the_api(act, people):
 async def test_no_letter_before_it_is_signed(act, people, db_session):
     case_id = await _verified_case(act, people)
     assert (await act(people["desk"], "get", f"/etls/facility-letters/{case_id}/letter.pdf")).status_code == 409
-    assert await issued.get_issued(db_session, case_id, letter.KIND) is None
+    assert await issued.get_current(db_session, case_id, letter.KIND) is None
 
 
 async def test_applicants_cannot_download_it(act, people):
@@ -216,7 +216,7 @@ async def test_names_outside_latin1_do_not_break_the_pdf(act, people, db_session
 async def test_signing_stores_the_letter_with_its_checksum_and_template_version(act, people, db_session):
     case_id = await _signed_case(act, people)
 
-    document = await issued.get_issued(db_session, case_id, letter.KIND)
+    document = await issued.get_current(db_session, case_id, letter.KIND)
     content = storage.path_for(document.storage_key).read_bytes()
     assert content.startswith(b"%PDF-")
     assert document.sha256 == hashlib.sha256(content).hexdigest()
@@ -259,7 +259,7 @@ async def test_a_new_template_does_not_change_a_letter_already_issued(act, peopl
     assert (await act(people["desk"], "get", url)).content == before
     # A letter signed from now on uses the new template, and records which one.
     later = await _signed_case(act, people, certificate_of_origin_numbers=["CO-LATER"])
-    assert (await issued.get_issued(db_session, later, letter.KIND)).template_version == "99"
+    assert (await issued.get_current(db_session, later, letter.KIND)).template_version == "99"
 
 
 async def test_if_issuing_fails_the_signing_fails_and_leaves_no_file(
@@ -282,7 +282,7 @@ async def test_if_issuing_fails_the_signing_fails_and_leaves_no_file(
 
 async def test_a_letter_changed_on_disk_is_refused(act, people, db_session):
     case_id = await _signed_case(act, people)
-    document = await issued.get_issued(db_session, case_id, letter.KIND)
+    document = await issued.get_current(db_session, case_id, letter.KIND)
     storage.path_for(document.storage_key).write_bytes(b"%PDF-1.7 something else")
 
     # Never served as the letter. (The test client re-raises; a real client gets 500.)

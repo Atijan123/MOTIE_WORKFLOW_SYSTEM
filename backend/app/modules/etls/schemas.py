@@ -1,4 +1,6 @@
+from datetime import datetime
 from decimal import Decimal
+from typing import Literal
 from typing import Annotated
 
 from pydantic import AfterValidator, BaseModel, Field, StringConstraints, field_validator
@@ -70,3 +72,18 @@ class FacilityLetterOut(FacilityLetterForm):
 
 class HsCodeConfirmation(BaseModel):
     hs_code: HsCode
+
+
+class IssuedLetterOut(BaseModel):
+    id: int
+    filename: str
+    status: Literal["current", "cancelled"]
+    issued_at: datetime
+    issued_by: int
+    sha256: str
+    template_version: str
+    replaces_id: int | None  # the cancelled letter this one corrects
+    cancelled_at: datetime | None
+    cancelled_by: int | None
+    cancellation_reason: str | None
+    download_url: str

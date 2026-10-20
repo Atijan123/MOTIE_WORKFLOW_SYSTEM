@@ -63,7 +63,7 @@ async def test_minister_absent_ps_does_the_ministers_step(act, people):
     absence_id = await _away(act, people["minister"])
 
     assert await _actions(act, people["permanent_secretary"], case_id) == [
-        {"to_status": "with_ps", "name": "Minute to the Permanent Secretary", "on_behalf_of": "minister"}
+        {"to_status": "with_ps", "name": "Minute to the Permanent Secretary", "on_behalf_of": "minister", "requires_comment": False}
     ]
     # Only the first one in line who is present: the PS is, so the DPS may not.
     assert (await move(act, people["dps"], case_id, "with_ps")).status_code == 403

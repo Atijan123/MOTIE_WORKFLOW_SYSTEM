@@ -8,7 +8,8 @@ from app.db.session import get_session
 from app.modules.etls import letter as facility_letter
 from app.modules.etls import service
 from app.modules.etls.models import FacilityLetter
-from app.modules.etls.schemas import FacilityLetterForm, FacilityLetterOut, HsCodeConfirmation
+from app.core.documents.models import IssuedDocument
+from app.modules.etls.schemas import FacilityLetterForm, FacilityLetterOut, HsCodeConfirmation, IssuedLetterOut
 
 # Engine errors (WorkflowError) are turned into HTTP statuses by the handler in main.py.
 router = APIRouter(prefix="/etls", tags=["etls"])
@@ -75,11 +76,43 @@ async def download_facility_letter(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    """The signed letter to GRA: the file stored when it was signed, never re-made.
+    """The letter in force: the file stored when it was signed, never re-made.
 
-    The X-Checksum-SHA256 header matches the checksum in the audit log, so
-    anyone holding a copy can check it's the one issued."""
-    document, content = await facility_letter.issued_letter(session, case_id, user)
+    If a letter was cancelled and corrected, this is the corrected one; the
+    earlier ones are listed at /letters. The X-Checksum-SHA256 header matches
+    the checksum in the audit log, so anyone holding a copy can check it's
+    the one issued."""
+    document, content = await facility_letter.current_letter(session, case_id, user)
+    return _pdf(document, content)
+
+
+@router.get("/facility-letters/{case_id}/letters", response_model=list[IssuedLetterOut])
+async def list_letters(
+    case_id: int,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Every letter issued on this case, oldest first, with cancelled ones marked."""
+    return [_letter_out(case_id, d) for d in await facility_letter.letters(session, case_id, user)]
+
+
+@router.get(
+    "/facility-letters/{case_id}/letters/{letter_id}/file",
+    response_class=Response,
+    responses={200: {"content": {"application/pdf": {}}}},
+)
+async def download_one_letter(
+    case_id: int,
+    letter_id: int,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """One letter, current or cancelled. X-Letter-Status says which."""
+    document, content = await facility_letter.letter_by_id(session, case_id, letter_id, user)
+    return _pdf(document, content)
+
+
+def _pdf(document: IssuedDocument, content: bytes) -> Response:
     return Response(
         content=content,
         media_type=document.content_type,
@@ -87,5 +120,25 @@ async def download_facility_letter(
             "Content-Disposition": f'attachment; filename="{document.filename}"',
             "X-Content-Type-Options": "nosniff",
             "X-Checksum-SHA256": document.sha256,
+            # The bytes of a cancelled letter can't be marked (that would break
+            # its checksum), so the response says it instead.
+            "X-Letter-Status": "cancelled" if document.cancelled_at else "current",
         },
+    )
+
+
+def _letter_out(case_id: int, d: IssuedDocument) -> IssuedLetterOut:
+    return IssuedLetterOut(
+        id=d.id,
+        filename=d.filename,
+        status="cancelled" if d.cancelled_at else "current",
+        issued_at=d.issued_at,
+        issued_by=d.issued_by,
+        sha256=d.sha256,
+        template_version=d.template_version,
+        replaces_id=d.replaces_id,
+        cancelled_at=d.cancelled_at,
+        cancelled_by=d.cancelled_by,
+        cancellation_reason=d.cancellation_reason,
+        download_url=f"/etls/facility-letters/{case_id}/letters/{d.id}/file",
     )

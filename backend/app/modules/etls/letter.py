@@ -9,6 +9,11 @@ runs the effect issue_letter() below, in the same transaction:
 - the PDF is stored once (core/documents/issued.py) with its checksum and the
   template version. Downloads serve that stored file. It is never rendered again.
 
+To correct a signed letter, the PS (or someone acting) makes the move "Cancel
+the signed letter" with a reason; its effect cancel_letter() marks the letter
+cancelled (the file is kept). The case goes back to the desk, and the next
+signing issues a corrected letter that records the one it replaces.
+
 [CONFIRM] The wording of the letter, the Ministry's address line, and the
 file reference format (settings.facility_letter_reference_format).
 """
@@ -37,6 +42,7 @@ from app.modules.etls.service import FACILITY_LETTER
 TEMPLATE = Path(__file__).parent / "templates" / "facility_letter.txt"
 KIND = "etls_facility_letter"  # core.issued_documents.kind
 ISSUE_EFFECT = "issue_facility_letter"  # core.transition_effects.effect_code
+CANCEL_EFFECT = "cancel_facility_letter"
 # The letter exists once the PS (or someone acting for them) has signed.
 SIGNED_STATUSES = {"signed", "sent_to_gra", "closed"}
 
@@ -94,8 +100,10 @@ def file_reference(case_id: int, year: int) -> str:
     return settings.facility_letter_reference_format.format(year=year, case_id=case_id)
 
 
-def download_name(reference: str) -> str:
-    return "facility-letter-" + re.sub(r"[^A-Za-z0-9-]+", "-", reference).strip("-") + ".pdf"
+def download_name(reference: str, number: int = 1) -> str:
+    """facility-letter-MOTIE-ETLS-FL-2026-00042.pdf; a correction ends -2, -3, ..."""
+    name = "facility-letter-" + re.sub(r"[^A-Za-z0-9-]+", "-", reference).strip("-")
+    return f"{name}-{number}.pdf" if number > 1 else f"{name}.pdf"
 
 
 def _ordinal(n: int) -> str:
@@ -163,7 +171,9 @@ def _latin1(text: str) -> str:
     return text.encode("latin-1", "replace").decode("latin-1")
 
 
-def render_pdf(fields: LetterFields, template: LetterTemplate | None = None, *, compress: bool = True) -> bytes:
+def render_pdf(
+    fields: LetterFields, template: LetterTemplate | None = None, *, issue: int = 1, compress: bool = True
+) -> bytes:
     """Lay the letter out on an A4 page. compress=False keeps the text readable
     in the raw PDF bytes, which tests use to check what was printed."""
     template = template or load_template()
@@ -177,6 +187,10 @@ def render_pdf(fields: LetterFields, template: LetterTemplate | None = None, *, 
     pdf = FPDF(format="A4")
     pdf.set_compression(compress)
     pdf.set_title(f"ETLS facility letter {fields.file_reference}")
+    # Which issue this is (2 = the first correction). Not printed, but part of
+    # the file, so a correction never has the same checksum as the letter it
+    # replaces, even when nothing printed changed.
+    pdf.set_subject(f"Issue {issue}")
     pdf.set_margins(left=25, top=25, right=25)
     pdf.add_page()
     # The layout marks (** and " >> ") are read from the template line *before*
@@ -200,12 +214,14 @@ async def issue_letter(session: AsyncSession, move: effects.Move) -> effects.Und
     await session.flush()  # gives the signing audit row its time, which dates the letter
     fields = await build_fields(session, move.case.id, move.event)
     template = load_template()
+    # [CONFIRM] A corrected letter keeps the same file reference, with a new date.
+    number = len(await issued.all_issued(session, move.case.id, KIND)) + 1
     _, undo = await issued.issue(
         session,
         case=move.case,
         kind=KIND,
-        content=render_pdf(fields, template),
-        filename=download_name(fields.file_reference),
+        content=render_pdf(fields, template, issue=number),
+        filename=download_name(fields.file_reference, number),
         template_version=template.version,
         template_sha256=template.sha256,
         actor=move.actor,
@@ -213,22 +229,57 @@ async def issue_letter(session: AsyncSession, move: effects.Move) -> effects.Und
     return undo
 
 
+async def cancel_letter(session: AsyncSession, move: effects.Move) -> None:
+    """The effect of "Cancel the signed letter": the current letter is marked
+    cancelled, with the move's comment as the reason. Its file is kept."""
+    current = await issued.get_current(session, move.case.id, KIND)
+    if current is None:
+        # Only a case signed before letters were stored (step 6f) gets here.
+        raise workflow.NotReady("There is no issued letter on file to cancel.")
+    # The engine has already made sure the move has a reason (requires_comment).
+    await issued.cancel(session, document=current, actor=move.actor, reason=move.event.details["comment"])
+
+
 effects.register(ISSUE_EFFECT, issue_letter)
+effects.register(CANCEL_EFFECT, cancel_letter)
 
 
-async def issued_letter(session: AsyncSession, case_id: int, user: User) -> tuple[IssuedDocument, bytes]:
-    """The stored letter and its bytes (checked against the recorded checksum)."""
+async def _staff_case(session: AsyncSession, case_id: int, user: User):
     case = await workflow.get_case(session, case_id, user)
     if not workflow.is_staff(user):
         # [CONFIRM] Whether the importer (who is copied) may download it here.
         raise workflow.NotPermitted("Only Ministry staff can download the facility letter.")
     if case.workflow.code != FACILITY_LETTER:
         raise workflow.NotFound("Facility letter not found.")
-    document = await issued.get_issued(session, case.id, KIND)
+    return case
+
+
+async def letters(session: AsyncSession, case_id: int, user: User) -> list[IssuedDocument]:
+    """Every letter issued on the case, oldest first, cancelled ones included."""
+    case = await _staff_case(session, case_id, user)
+    return await issued.all_issued(session, case.id, KIND)
+
+
+async def current_letter(session: AsyncSession, case_id: int, user: User) -> tuple[IssuedDocument, bytes]:
+    """The letter in force and its bytes (checked against the recorded checksum)."""
+    case = await _staff_case(session, case_id, user)
+    document = await issued.get_current(session, case.id, KIND)
     if document is None:
+        if await issued.all_issued(session, case.id, KIND):
+            raise workflow.NotReady("The letter was cancelled and a corrected one hasn't been signed yet.")
         if case.current_status.code in SIGNED_STATUSES:
             # Only cases signed before letters were stored (step 6f). We don't
             # make one now: that would be a letter nobody signed.
             raise workflow.NotFound("No issued letter is on file for this case.")
         raise workflow.NotReady("The facility letter isn't signed yet.")
+    return document, issued.read(document)
+
+
+async def letter_by_id(
+    session: AsyncSession, case_id: int, letter_id: int, user: User
+) -> tuple[IssuedDocument, bytes]:
+    """Any one of the case's letters, current or cancelled."""
+    document = next((d for d in await letters(session, case_id, user) if d.id == letter_id), None)
+    if document is None:
+        raise workflow.NotFound("Letter not found.")
     return document, issued.read(document)

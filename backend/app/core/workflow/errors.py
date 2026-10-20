@@ -57,5 +57,9 @@ class UnsupportedFileType(WorkflowError):
     pass
 
 
+class CommentRequired(WorkflowError):
+    """The move needs a written reason, and none was given."""
+
+
 class NotReady(WorkflowError):
     """The move is allowed, but one of its checks (e.g. documents complete) fails."""

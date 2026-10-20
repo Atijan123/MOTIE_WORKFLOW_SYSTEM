@@ -19,6 +19,7 @@ from app.core.workflow.errors import (  # noqa: F401  (re-exported: callers use 
     AlreadyResolved,
     AlreadyRevoked,
     CaseBlocked,
+    CommentRequired,
     InvalidAbsence,
     InvalidDelegation,
     InvalidDocument,
@@ -249,6 +250,9 @@ async def change_status(
         )
     chosen = permitted[0]
     move, delegation, succession = chosen
+    comment = (comment or "").strip() or None
+    if move.requires_comment and comment is None:
+        raise CommentRequired(f"'{move.name}' needs a written reason in the comment.")
     # The move's own checks (e.g. documents complete), named in core.transition_checks.
     issues = await checks.problems(session, case, move.id)
     if issues:

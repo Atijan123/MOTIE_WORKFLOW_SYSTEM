@@ -100,6 +100,8 @@ class WorkflowTransition(Base):
     # The post whose holders may make this move (or anyone acting for that post).
     required_position_id: Mapped[int] = mapped_column(SmallInteger, ForeignKey("core.positions.id"))
     name: Mapped[str] = mapped_column(Text)
+    # The move needs a written reason (the comment), e.g. cancelling a signed letter (0022).
+    requires_comment: Mapped[bool] = mapped_column(Boolean, server_default=false())
 
     # Two links to the same table (from and to), so each says which column it uses.
     from_status: Mapped[WorkflowStatus] = relationship(

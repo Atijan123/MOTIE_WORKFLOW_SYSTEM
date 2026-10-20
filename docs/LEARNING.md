@@ -16,6 +16,36 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 6l — Correcting a signed letter (2026-10-20)
+**Built:** the PS, or someone acting for the PS, can cancel a signed letter with a written reason, and a corrected letter is then issued. Both files stay stored (migration `0022`).
+
+**Cancelling is a workflow move**, "Cancel the signed letter", from "Signed" or "Sent to GRA" back to "Originals received" `[CONFIRM]`:
+- **Who:** it needs the PS post, so delegation and succession (steps 4d and 5d) work as for signing. The desk, Records and the Minister get 403.
+- **Reason:** a new column `core.workflow_transitions.requires_comment` makes the engine refuse the move (422) without a written reason in the comment. `available_actions` now shows `requires_comment`, so the frontend can ask for one.
+- **What it does:** its effect `cancel_facility_letter` marks the current letter cancelled (`cancelled_at`, `cancelled_by`, `cancellation_reason`) and writes an audit row `case.document_cancelled` with the letter's checksum and the reason. The move's own audit row also has the reason as its comment.
+- **Then:** the case is back with the desk, who can correct the HS code, verify again, and send it to the PS. Signing again issues the corrected letter through the existing effect. It records `replaces_id` (the cancelled letter), its audit row says `replaces_issued_document_id`, and its file name ends `-2.pdf` (`-3` for a second correction).
+
+**Downloads:**
+- `GET /etls/facility-letters/{id}/letter.pdf` serves the **current** letter. Between cancelling and re-signing it gives 409 "The letter was cancelled and a corrected one hasn't been signed yet."
+- `GET /etls/facility-letters/{id}/letters` lists every letter, oldest first: status (`current`/`cancelled`), who issued it and when, the checksum, template version, `replaces_id`, the cancellation details and a `download_url`.
+- `GET /etls/facility-letters/{id}/letters/{letter_id}/file` downloads any one of them, byte for byte as issued. The header `X-Letter-Status` says `current` or `cancelled`. The PDF itself can't be stamped "cancelled": that would change its checksum.
+
+**The database enforces it too:**
+- **One current letter:** "one per case" became "one *current* per case", a partial unique index (`issued_documents_one_current`).
+- **A trigger** (`core.issued_documents_guard`) refuses deleting any row, changing anything but the cancellation columns, and changing a row once it's cancelled. It applies even to the table owner, like the audit log's triggers.
+
+**Found while testing:** a corrected letter can be **byte-identical** to the cancelled one, when what changed isn't printed (the HS code) and both are signed within the same second. Two letters with one checksum would make "which copy is this?" unanswerable. So each PDF now carries its issue number ("Issue 1", "Issue 2") in its information block, and no two issues are ever the same file.
+
+**Files:** backend/alembic/versions/0022_letter_corrections.py, backend/app/core/workflow/models.py (`requires_comment`), backend/app/core/workflow/service.py (the reason check in `change_status()`), backend/app/core/workflow/errors.py (`CommentRequired`), backend/app/core/workflow/router.py, backend/app/core/workflow/schemas.py, backend/app/core/documents/models.py, backend/app/core/documents/issued.py (`all_issued()`, `get_current()`, `cancel()`), backend/app/modules/etls/letter.py (`cancel_letter()`, `current_letter()`, `letters()`, `letter_by_id()`, `render_pdf(issue=...)`), backend/app/modules/etls/router.py, backend/app/modules/etls/schemas.py (`IssuedLetterOut`), backend/tests/modules/etls/test_letter_corrections.py
+**Try it:**
+- `docker compose run --rm tools alembic upgrade head`
+- Sign a letter. As `ps@motie.test`, `POST /cases/{id}/status` with `{"to_status": "originals_received"}` gives 422. Add `"comment": "Wrong HS code"` and it works.
+- `GET /etls/facility-letters/{id}/letters`: one letter, `cancelled`, with your reason. `letter.pdf` gives 409.
+- As the desk, re-confirm the HS code and verify; as the PS, sign. The listing now shows two, and `letter.pdf` serves the new one.
+- Try to undo it: `docker compose exec db psql -U motie -d motie -c "UPDATE core.issued_documents SET cancelled_at = NULL"` fails with "a cancelled document can't be changed", even as the superuser.
+- `docker compose run --rm tools pytest tests/modules/etls/test_letter_corrections.py -v`
+**New concepts:** Cancel and replace (never delete)
+
 ### Step 6k — The HS code is optional for the applicant (2026-10-20)
 **Built:** an applicant may now leave `hs_code` out of the form. The ETLS desk must still enter or confirm it before "Verify", exactly as in step 6g: `POST /etls/facility-letters/{id}/hs-code`.
 
@@ -125,7 +155,7 @@ The subject line is bold. The Ministry's text didn't say; I chose bold because t
   - an audit row `case.document_issued` records the same checksum and template version.
 - **All or nothing:** if rendering or storing fails, the signing fails too and the case stays "Verified". If the file was already written, it's deleted again (the effect hands the engine an "undo").
 - **Served, not re-made:** `GET /etls/facility-letters/{case_id}/letter.pdf` reads the stored file, checks it against the recorded checksum (a file changed on disk gives a 500 and a log line, never the letter), and sends it with an `X-Checksum-SHA256` header.
-- **Once per case:** a unique constraint on (case, kind), and the app may only `SELECT` and `INSERT` the table.
+- **Once per case:** a unique constraint on (case, kind), and the app may only `SELECT` and `INSERT` the table. (Since step 6l: one *current* letter per case, and a cancelled one is kept.)
 - **Template version:** the template file now starts with `## version: 1 (...)`. Lines starting with `##` are notes, never printed. A template without a version line can't issue letters.
 - An unknown effect name in the database blocks the move (409), like an unknown check.
 
@@ -782,6 +812,16 @@ Since step 6f, the same pattern also covers **effects**: things a move sets off 
 **Here:** scripts/reset-dev.sh, `seed()` and `main()` in backend/app/dev_seed.py, `app_env` in backend/app/core/config.py.
 **Learn more:** [The Twelve-Factor App: Dev/prod parity](https://12factor.net/dev-prod-parity) and [Config](https://12factor.net/config)
 
+### Cancel and replace (never delete)
+**What:** an official record that turns out to be wrong isn't edited or deleted; it's *cancelled*, with who, when and why, and a new record *replaces* it, pointing back at the old one. Anyone can then answer "what did GRA receive on the 3rd?" and "why is there a second letter?". It's how paper registries already work (a cancelled letter stays on file, stamped). Three pieces make it safe here:
+- a status on the row, not a delete;
+- a link from the new record to the old one (`replaces_id`);
+- a database rule saying only one record is current at a time (a *partial* unique index: unique only among rows where `cancelled_at IS NULL`).
+
+A trigger stops anyone from quietly un-cancelling or deleting.
+**Here:** `cancel()` and `issue()` in backend/app/core/documents/issued.py, `cancel_letter()` in backend/app/modules/etls/letter.py, the index and trigger in backend/alembic/versions/0022_letter_corrections.py.
+**Learn more:** [PostgreSQL docs: Partial indexes](https://www.postgresql.org/docs/16/indexes-partial.html). Example 11.3 there is exactly "only one current row".
+
 ### Three answers: yes, no, not known yet
 **What:** "does this case need a cement receipt?" can't always be answered yet. Squeezing "don't know" into yes or no is a classic bug: say *yes* and you ask honest applicants for papers they don't need; say *no* and the requirement quietly disappears. So the answer has a third value, `None`, and each place that uses it decides what "not known yet" means *for it*. The early check (Records) lets it wait; the late check (Verify) refuses to go on until it's known. SQL works the same way: `NULL = 'x'` is neither true nor false but unknown, which is why `WHERE` needs `IS NULL`.
 **Here:** `holds()` in backend/app/core/documents/conditions.py, `RequirementStatus.undecided` and the checks `known_documents_complete`/`documents_complete` in backend/app/core/documents/service.py.
@@ -962,6 +1002,14 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-20 | The signature line is the signing post's title, "For: ..." when acting; no name printed | print the signer's name and title too | Follows the Ministry's wording, which shows only "Permanent Secretary". Who actually signed is in the audit log and `issued_by`. `[CONFIRM]` |
 | 2026-10-20 | A ` >> ` mark for the reference and date line | a tab character; two template files | A tab is invisible and editors often turn it into spaces. ` >> ` is visible and explained in the template's notes. |
 | 2026-10-20 | Template version `2`, with a date and a short label | a date only; a number only | Numbers sort and compare easily; the label says what changed. |
+| 2026-10-20 | Cancelling a letter is a workflow move with an effect | a separate `POST .../cancel` endpoint | Who may cancel then follows the post rules for free, delegation and succession included, and it's a status change in the audit log like every other. Which statuses it's allowed from is data. |
+| 2026-10-20 | Cancel goes back to "Originals received" (the desk), not to "Verified" (the PS) | straight back to the PS to re-sign | Most corrections need the desk: the HS code can only be changed before Verify. Going back to the PS would only allow re-signing the same data. `[CONFIRM]` |
+| 2026-10-20 | Allowed from "Signed" and "Sent to GRA", not from "Closed" | from "Signed" only; from any status | A mistake is often found after the letter reached GRA. A closed file stays closed. `[CONFIRM]` |
+| 2026-10-20 | `requires_comment` is a column on transitions, checked by the engine | check the comment inside the cancel effect | It's a property of the move, useful elsewhere (e.g. rejecting), and the frontend can see it in `available_actions` before the click. |
+| 2026-10-20 | A cancelled letter's PDF isn't stamped; the response header and listing say "cancelled" | re-render it with a "CANCELLED" watermark | The stored bytes must keep matching the checksum in the audit log. A watermarked copy could be added later as a separate, derived file. |
+| 2026-10-20 | Each PDF carries its issue number in its metadata | accept identical files; print "Issue 2" on the letter | Two issues with the same checksum couldn't be told apart. Printing it would change the Ministry's wording. |
+| 2026-10-20 | A corrected letter keeps the file reference, with a new date and file name `-2` | a new reference (e.g. `/R1`) | We don't know the Ministry's practice; changing the reference format is one line. `[CONFIRM]` |
+| 2026-10-20 | A trigger guards `core.issued_documents` against deletes and edits, even by the owner | rely on the app's grants only | Same reasoning as the audit log (step 3a): an issued letter is evidence. |
 | 2026-10-20 | A condition can answer "not known yet" (`None`) when a supplied fact has no value | keep failing closed (receipt required); treat unknown as "not needed" | Failing closed would ask every applicant without a code for a cement receipt; "not needed" would let the receipt vanish. A fact the module doesn't supply at all still fails closed, so a typo in a rule is still caught. |
 | 2026-10-20 | Records gets a lenient check (`known_documents_complete`); `documents_complete` became strict | one check that's lenient everywhere; make the applicant answer before submitting | The desk decides the code after Records, so Records can't wait for it. The strict check plus `hs_code_confirmed` on Verify guarantees it's settled before signing. The default (`documents_complete`) is the safe one. |
 | 2026-10-20 | The date change in step 6j didn't bump the template version | bump it anyway | You asked to bump it only when the template file changes. `template_version` describes the wording; the commit describes the code. |
@@ -1007,7 +1055,7 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 - [ ] **Originals:** besides the certificate of origin, must any other paper original be seen in person (e.g. the invoice)? It's one column per document (`original_required`).
 - [ ] **Facility letter layout:** the wording is in (step 6i). Still to check: the letterhead (printed paper, or a logo and address we should add?); whether the subject line is bold; and what the signature line says when someone acts for the PS (now "For: Permanent Secretary", no name). See backend/app/modules/etls/templates/facility_letter.txt.
 - [ ] **File reference format:** what is the Ministry's real format? Placeholder `MOTIE/ETLS/FL/{year}/{case_id:05d}` (`FACILITY_LETTER_REFERENCE_FORMAT`).
-- [ ] **Issued letters:** storing at signing is decided (step 6f). Still open: may the importer download it? And if a signed letter has a mistake, how does the Ministry correct it: cancel it and sign a new one, or a separate amendment letter? Right now a case can have only one.
+- [ ] **Issued letters:** storing (step 6f) and cancel-and-correct (step 6l) are built. Still open: may the importer download it? Does a corrected letter get a new file reference? Should the case go back to the desk (now) or straight to the PS? Is cancelling allowed after "Sent to GRA" (now yes), and must GRA be told in writing when a letter they hold is cancelled?
 - [ ] **The cement receipt:** which receipt is it (e.g. a payment receipt for a cement levy)? Is "HS heading 2523" the right trigger, or only some subheadings (e.g. 2523.29 Portland cement, not 2523.10 clinker)? Are other headings subject to receipts too? See backend/alembic/versions/0020_facility_letter_hs_code.py.
 - [ ] **HS code:** it's optional for applicants now (step 6k). Which officer enters or confirms it: the ETLS desk (placeholder) or someone else? How many digits does GRA use (we accept 6, 8 or 10)?
 - [ ] **Document type names:** are "Business registration certificate", "Annual returns certificate", "Certificate of origin", "Invoice" (commercial invoice?) and "Export declaration" the official names?
@@ -1021,6 +1069,16 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 6l
+1. The PS is away and the DPS cancels a letter. Which records show that, and what do they say?
+2. Why can't the desk download "the letter" between the cancellation and the new signature, and how would they get the old one?
+3. Someone with psql access runs `DELETE FROM core.issued_documents WHERE id = 7`. What stops them, and would it stop the superuser?
+
+#### Show answers
+1. The status-change audit row (`basis: succession`, `on_behalf_of: permanent_secretary`, the reason as `comment`); the `case.document_cancelled` audit row (the letter's id, checksum and the reason); and the letter's own row (`cancelled_by` = the DPS, `cancellation_reason`).
+2. `letter.pdf` serves only the *current* letter, and there's none until the PS signs again, so it answers 409. The old one is in `GET .../letters`; its `download_url` serves it with `X-Letter-Status: cancelled`.
+3. The `issued_documents_guard` trigger raises "issued documents are never deleted". The app user has no `DELETE` grant either. Triggers also fire for the owner and the superuser; only someone who deliberately drops or disables the trigger could get past it, and that takes the owner's rights.
 
 ### Step 6k
 1. An applicant gives no HS code. What does the checklist say about the cement receipt, and can Records confirm the originals?

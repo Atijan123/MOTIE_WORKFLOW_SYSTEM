@@ -33,6 +33,7 @@ _ERROR_STATUS = {
     service.InvalidDelegation: status.HTTP_422_UNPROCESSABLE_ENTITY,  # breaks a rule, don't retry
     service.InvalidAbsence: status.HTTP_422_UNPROCESSABLE_ENTITY,
     service.InvalidDocument: status.HTTP_422_UNPROCESSABLE_ENTITY,
+    service.CommentRequired: status.HTTP_422_UNPROCESSABLE_ENTITY,
     service.UploadTooLarge: status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
     service.UnsupportedFileType: status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
 }
@@ -61,6 +62,7 @@ async def _case_out(session: AsyncSession, case: Case, user: User) -> CaseOut:
                 to_status=m.transition.to_status.code,
                 name=m.transition.name,
                 on_behalf_of=m.on_behalf_of,
+                requires_comment=m.transition.requires_comment,
             )
             for m in moves
         ],

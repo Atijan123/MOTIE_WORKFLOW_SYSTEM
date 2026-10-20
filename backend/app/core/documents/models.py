@@ -16,6 +16,7 @@ from sqlalchemy import (
     UniqueConstraint,
     false,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -94,13 +95,27 @@ class IssuedDocument(Base):
     """A document the Ministry issued on a case (e.g. a signed letter), stored once.
 
     Created by alembic/versions/0019_issued_documents.py. The app may only add
-    rows, never change them, and there is at most one of each kind per case.
+    rows and record a cancellation; there is at most one current (not
+    cancelled) document of each kind per case.
     """
 
     __tablename__ = "issued_documents"
     __table_args__ = (
-        UniqueConstraint("case_id", "kind", name="issued_documents_once_per_case"),
+        # One *current* document of a kind per case; cancelled ones stay (0022).
+        Index(
+            "issued_documents_one_current",
+            "case_id",
+            "kind",
+            unique=True,
+            postgresql_where=text("cancelled_at IS NULL"),
+        ),
         CheckConstraint("size_bytes > 0", name="issued_documents_not_empty"),
+        CheckConstraint(
+            "(cancelled_at IS NULL) = (cancelled_by IS NULL) "
+            "AND (cancelled_at IS NULL) = (cancellation_reason IS NULL) "
+            "AND (cancellation_reason IS NULL OR btrim(cancellation_reason) <> '')",
+            name="issued_documents_cancellation_complete",
+        ),
         {"schema": "core"},
     )
     __mapper_args__ = {"eager_defaults": True}
@@ -117,3 +132,9 @@ class IssuedDocument(Base):
     template_sha256: Mapped[str] = mapped_column(Text)
     issued_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("core.users.id"))
     issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # The earlier, cancelled document this one corrects.
+    replaces_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("core.issued_documents.id"))
+    # Set once, when it's cancelled; a database trigger refuses any later change.
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancelled_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("core.users.id"))
+    cancellation_reason: Mapped[str | None] = mapped_column(Text)
