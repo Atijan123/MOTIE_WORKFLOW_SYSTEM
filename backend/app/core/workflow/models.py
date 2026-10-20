@@ -68,6 +68,9 @@ class WorkflowStatus(Base):
     name: Mapped[str] = mapped_column(Text)
     is_initial: Mapped[bool] = mapped_column(Boolean, server_default=false())
     is_final: Mapped[bool] = mapped_column(Boolean, server_default=false())
+    # What applicants see instead of `code` and `name` (0023).
+    applicant_label: Mapped[str] = mapped_column(Text)
+    applicant_explanation: Mapped[str | None] = mapped_column(Text)
 
 
 class WorkflowTransition(Base):
@@ -102,6 +105,10 @@ class WorkflowTransition(Base):
     name: Mapped[str] = mapped_column(Text)
     # The move needs a written reason (the comment), e.g. cancelling a signed letter (0022).
     requires_comment: Mapped[bool] = mapped_column(Boolean, server_default=false())
+    # How the applicant's timeline describes this move (0023): its own wording,
+    # or the new status's label when empty; hidden entirely when not visible.
+    applicant_event: Mapped[str | None] = mapped_column(Text)
+    applicant_visible: Mapped[bool] = mapped_column(Boolean, server_default=true())
 
     # Two links to the same table (from and to), so each says which column it uses.
     from_status: Mapped[WorkflowStatus] = relationship(

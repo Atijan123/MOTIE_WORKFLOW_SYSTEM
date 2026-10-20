@@ -64,7 +64,8 @@ class FacilityLetterForm(BaseModel):
 
 class FacilityLetterOut(FacilityLetterForm):
     case_id: int
-    status: str  # status code; GET /cases/{id} has the full case and the next actions
+    status: str | None  # internal status code, for staff only; GET /cases/{id} has the full case
+    status_label: str  # what the applicant sees, e.g. "Being verified"
     # Cases from before step 6g have no declared code.
     hs_code: str | None
     hs_code_confirmed: str | None

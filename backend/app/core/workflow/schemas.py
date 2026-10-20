@@ -14,8 +14,12 @@ class ChangeStatusRequest(BaseModel):
 
 
 class StatusOut(BaseModel):
-    code: str
-    name: str
+    # Internal step code and staff wording: null for applicants, who never see them.
+    code: str | None
+    name: str | None
+    # What the applicant sees, e.g. "Being verified" and a one-line explanation.
+    label: str
+    explanation: str | None
     is_final: bool
 
 

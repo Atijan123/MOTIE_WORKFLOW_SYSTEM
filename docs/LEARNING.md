@@ -16,6 +16,25 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 7a — Applicant status labels (2026-10-20)
+Chunk 1 of docs/GAPS.md (shared foundations), step 1.
+
+**Built:** applicants now see plain labels, never the internal step code or staff wording (migration `0023`):
+- every status has a required `applicant_label` and an optional `applicant_explanation`, e.g. "Submitted" / "Bring the original certificate of origin to Records.";
+- a move can have its own timeline wording, `applicant_event`: Records' accept reads "Originals checked", although the case then shows "Being verified";
+- a move can be hidden from applicants, `applicant_visible = false`: the PS's "Cancel the signed letter", so the case simply shows "Being verified" again.
+
+In the API, `status` in `GET /cases/{id}` now has `label` and `explanation`. For applicants, `code` and `name` are `null` (`status_view()` in backend/app/core/workflow/service.py). `GET /etls/facility-letters/{id}` gains `status_label`, and its `status` (the code) is `null` for applicants.
+
+The facility letter labels are SCREENS.md A2's. "Draft" and "Returned: action needed" come with those statuses in chunk 2. The explanations are my placeholders `[CONFIRM]`. The retiring `etls_application` got labels from A5 as far as its steps go.
+
+**Files:** backend/alembic/versions/0023_applicant_labels.py, backend/app/core/workflow/models.py, backend/app/core/workflow/schemas.py (`StatusOut`), backend/app/core/workflow/service.py (`status_view()`), backend/app/core/workflow/router.py, backend/app/modules/etls/router.py, backend/app/modules/etls/schemas.py, backend/tests/core/test_applicant_labels.py, and four older tests that read the applicant's status code
+**Try it:**
+- `docker compose run --rm tools alembic upgrade head`
+- As `applicant@motie.test`, `GET /cases/{id}`: `"status": {"code": null, "name": null, "label": "Submitted", ...}`. As `desk@motie.test`, the same case shows the code too.
+- `docker compose run --rm tools pytest tests/core/test_applicant_labels.py -v`
+**New concepts:** none. It's the same separation as the letter template: *what* people see is data, not code.
+
 ### Audit — The backend against the screen spec (2026-10-20)
 **Built:** nothing; this is a review step. docs/SCREENS.md is now the agreed spec, and docs/GAPS.md lists, for every global rule and screen (A1–A6, S1–S10), what the backend already supports (with the file or endpoint), what's partial and what's missing. It also covers the conflicts with what's built, a check of the stand-in rules and of "acting for" in the history, and a proposed build order that finishes the facility letter screens first.
 **Files:** docs/SCREENS.md, docs/GAPS.md
@@ -1008,6 +1027,9 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-20 | The signature line is the signing post's title, "For: ..." when acting; no name printed | print the signer's name and title too | Follows the Ministry's wording, which shows only "Permanent Secretary". Who actually signed is in the audit log and `issued_by`. `[CONFIRM]` |
 | 2026-10-20 | A ` >> ` mark for the reference and date line | a tab character; two template files | A tab is invisible and editors often turn it into spaces. ` >> ` is visible and explained in the template's notes. |
 | 2026-10-20 | Template version `2`, with a date and a short label | a date only; a number only | Numbers sort and compare easily; the label says what changed. |
+| 2026-10-20 | Applicant labels live on statuses (required), with optional timeline wording and a "hidden" flag on moves | a label per move only; a mapping in the frontend | Labels are data, like the rest of the workflow, and the database refuses a status without one. "Originals checked" vs "Being verified" needs both: one for what happened, one for where the case is. |
+| 2026-10-20 | Applicants get `null` for the internal code and name, rather than those fields being removed | separate response models for applicants and staff | One shape for the frontend; the rule is in one function, `status_view()`. |
+| 2026-10-20 | The cancel move is hidden, but earlier "Letter signed" timeline entries stay | rewrite the applicant's timeline to drop everything about the cancelled letter | The applicant may already have seen "Letter signed"; hiding history they saw would be confusing and dishonest. `[CONFIRM]` |
 | 2026-10-20 | Cancelling a letter is a workflow move with an effect | a separate `POST .../cancel` endpoint | Who may cancel then follows the post rules for free, delegation and succession included, and it's a status change in the audit log like every other. Which statuses it's allowed from is data. |
 | 2026-10-20 | Cancel goes back to "Originals received" (the desk), not to "Verified" (the PS) | straight back to the PS to re-sign | Most corrections need the desk: the HS code can only be changed before Verify. Going back to the PS would only allow re-signing the same data. `[CONFIRM]` |
 | 2026-10-20 | Allowed from "Signed" and "Sent to GRA", not from "Closed" | from "Signed" only; from any status | A mistake is often found after the letter reached GRA. A closed file stays closed. `[CONFIRM]` |
@@ -1065,6 +1087,7 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 - [ ] **The cement receipt:** which receipt is it (e.g. a payment receipt for a cement levy)? Is "HS heading 2523" the right trigger, or only some subheadings (e.g. 2523.29 Portland cement, not 2523.10 clinker)? Are other headings subject to receipts too? See backend/alembic/versions/0020_facility_letter_hs_code.py.
 - [ ] **HS code:** it's optional for applicants now (step 6k). Which officer enters or confirms it: the ETLS desk (placeholder) or someone else? How many digits does GRA use (we accept 6, 8 or 10)?
 - [ ] **Document type names:** are "Business registration certificate", "Annual returns certificate", "Certificate of origin", "Invoice" (commercial invoice?) and "Export declaration" the official names?
+- [ ] **Applicant explanations:** the one-line explanation under each facility letter label (e.g. "The ETLS desk is checking your application.") is my wording. See backend/alembic/versions/0023_applicant_labels.py.
 - [ ] **Who may upload, and until when:** right now the applicant and any staff member, until the case is closed.
 - [ ] **Security to-do before going live (not a Ministry question):** scan uploads for viruses (e.g. ClamAV), back up the `documents` volume together with the database, and add a clean-up job for files left behind if the server crashes mid-upload.
 - [ ] **Who may open an ETLS case:** only the applicant online, or can Records register walk-in applications too?
@@ -1075,6 +1098,14 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 7a
+1. Where does the applicant's "Being verified" come from, and why don't they see "originals_received"?
+2. Records accepts a case. What does the applicant's timeline say happened, and what does the case page say it is now?
+
+#### Show answers
+1. From `workflow_statuses.applicant_label` of the `originals_received` status (migration 0023). `status_view()` in backend/app/core/workflow/service.py returns `null` for `code` and `name` when the user isn't staff.
+2. "Originals checked" (the move's `applicant_event`) on the timeline, and "Being verified" (the new status's label) as the current status.
 
 ### Step 6l
 1. The PS is away and the DPS cancels a letter. Which records show that, and what do they say?

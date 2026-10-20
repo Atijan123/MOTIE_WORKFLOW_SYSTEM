@@ -52,7 +52,8 @@ async def test_applicant_submits_the_form_and_a_case_opens(act, people):
     response = await _submit(act, people["applicant"], product_approval_numbers=["PA-1", "PA-2"])
     assert response.status_code == 201, response.text
     body = response.json()
-    assert body["status"] == "submitted"
+    # The applicant sees the plain label, never the internal step code.
+    assert (body["status"], body["status_label"]) == (None, "Submitted")
     assert body["quantity"] == "1200.500"  # NUMERIC(14, 3): exact, never 1200.4999...
     assert body["product_approval_numbers"] == ["PA-1", "PA-2"]
     assert body["certificate_of_origin_numbers"] == ["SN-CO-2026-0042"]
@@ -60,7 +61,7 @@ async def test_applicant_submits_the_form_and_a_case_opens(act, people):
     case = (await act(people["applicant"], "get", f"/cases/{body['case_id']}")).json()
     assert case["workflow"] == "etls_facility_letter"
     again = await act(people["desk"], "get", f"/etls/facility-letters/{body['case_id']}")
-    assert again.json() == body
+    assert again.json() == {**body, "status": "submitted"}  # staff also get the code
 
 
 async def test_the_case_walks_the_whole_route(act, people):

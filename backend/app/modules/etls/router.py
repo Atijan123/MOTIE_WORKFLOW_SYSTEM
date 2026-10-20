@@ -19,7 +19,9 @@ async def _out(session: AsyncSession, letter: FacilityLetter, user: User) -> Fac
     case = await workflow.get_case(session, letter.case_id, user)
     return FacilityLetterOut(
         case_id=letter.case_id,
-        status=case.current_status.code,
+        # Applicants get the plain label only (core service.status_view()).
+        status=case.current_status.code if workflow.is_staff(user) else None,
+        status_label=case.current_status.applicant_label,
         importer_name=letter.importer_name,
         importer_address=letter.importer_address,
         product=letter.product,

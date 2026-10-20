@@ -69,6 +69,19 @@ def is_staff(user: User) -> bool:
     return bool(user.role_codes - {"applicant"})
 
 
+def status_view(status: WorkflowStatus, user: User) -> dict:
+    """A status as this user may see it. Applicants get the plain label and
+    explanation only, never the internal code or the staff wording."""
+    staff = is_staff(user)
+    return {
+        "code": status.code if staff else None,
+        "name": status.name if staff else None,
+        "label": status.applicant_label,
+        "explanation": status.applicant_explanation,
+        "is_final": status.is_final,
+    }
+
+
 def can_view(case: Case, user: User) -> bool:
     # [CONFIRM] Placeholder rule: the applicant who opened the case, or any
     # Ministry staff member. The Ministry may want staff limited to their own

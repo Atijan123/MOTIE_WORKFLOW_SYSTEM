@@ -16,7 +16,7 @@ pytestmark = pytest.mark.anyio
 
 async def test_case_walks_the_whole_chain_and_every_step_is_audited(act, people):
     case = await _open_case(act, people["applicant"])
-    assert case["status"]["code"] == "submitted"
+    assert case["status"]["label"] == "Submitted"  # the applicant sees the label only
     assert case["available_actions"] == []  # applicants can't move their own case
 
     steps = [

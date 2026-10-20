@@ -107,12 +107,12 @@ async def _add_test_workflow(session) -> int:
 async def test_database_refuses_a_second_initial_status(owner_session):
     wf = await _add_test_workflow(owner_session)
     await owner_session.execute(
-        text("INSERT INTO core.workflow_statuses (workflow_id, code, name, is_initial) VALUES (:wf, 'a', 'A', true)"),
+        text("INSERT INTO core.workflow_statuses (workflow_id, code, name, applicant_label, is_initial) VALUES (:wf, 'a', 'A', 'A', true)"),
         {"wf": wf},
     )
     with pytest.raises(IntegrityError):
         await owner_session.execute(
-            text("INSERT INTO core.workflow_statuses (workflow_id, code, name, is_initial) VALUES (:wf, 'b', 'B', true)"),
+            text("INSERT INTO core.workflow_statuses (workflow_id, code, name, applicant_label, is_initial) VALUES (:wf, 'b', 'B', 'B', true)"),
             {"wf": wf},
         )
 
@@ -121,7 +121,7 @@ async def test_database_refuses_a_move_into_another_workflows_status(owner_sessi
     wf = await _add_test_workflow(owner_session)
     own = (
         await owner_session.execute(
-            text("INSERT INTO core.workflow_statuses (workflow_id, code, name) VALUES (:wf, 'a', 'A') RETURNING id"),
+            text("INSERT INTO core.workflow_statuses (workflow_id, code, name, applicant_label) VALUES (:wf, 'a', 'A', 'A') RETURNING id"),
             {"wf": wf},
         )
     ).scalar_one()

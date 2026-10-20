@@ -157,7 +157,7 @@ async def test_no_uploads_to_a_closed_case(act, people):
     await ready_for_records(act, people, case_id)
     for who, to_status in [("records_officer", "originals_received"), ("desk", "rejected")]:
         await move(act, people[who], case_id, to_status)
-    assert (await act(people["applicant"], "get", f"/cases/{case_id}")).json()["status"]["code"] == "rejected"
+    assert (await act(people["applicant"], "get", f"/cases/{case_id}")).json()["status"]["label"] == "Rejected"
 
     assert (await upload(act, people["applicant"], case_id, "invoice")).status_code == 422
 

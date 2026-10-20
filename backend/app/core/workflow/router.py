@@ -49,11 +49,7 @@ async def _case_out(session: AsyncSession, case: Case, user: User) -> CaseOut:
     return CaseOut(
         id=case.id,
         workflow=case.workflow.code,
-        status=StatusOut(
-            code=case.current_status.code,
-            name=case.current_status.name,
-            is_final=case.current_status.is_final,
-        ),
+        status=StatusOut(**service.status_view(case.current_status, user)),
         created_by=case.created_by,
         created_at=case.created_at,
         updated_at=case.updated_at,
