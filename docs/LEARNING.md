@@ -16,6 +16,28 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 6h — Resetting the dev database (2026-10-20)
+**Built:** `scripts/reset-dev.sh` gives you a clean dev environment in one command:
+1. stops the API;
+2. drops and recreates the dev database (`POSTGRES_DB` from `.env`), and re-runs db/init/10-db-users.sh;
+3. deletes the `documents` volume (uploads and issued letters);
+4. runs the migrations, then the new seed, backend/app/dev_seed.py: one user per post in the ETLS chain, plus an applicant, a recorder and an admin, all `...@motie.test`;
+5. starts the API again.
+
+**Safety:**
+- It only runs when `.env` says `APP_ENV=development`, and asks you to type `reset` (unless `--yes`). The seed refuses too unless `APP_ENV=development`, because its accounts share a known password.
+- `APP_ENV` is a new setting (backend/app/core/config.py). It defaults to `production`, and `.env.example` says `production`, so a server that copies it, or forgets it, is safe. I added `APP_ENV=development` to your local `.env`.
+- CLAUDE.md now says: smoke tests run only against dev, never a shared or production database.
+
+**How I tested the script:** the guard (no `.env`, `APP_ENV` missing, `APP_ENV=production`) from a scratch copy; then two full runs in a throwaway Compose project (`COMPOSE_PROJECT_NAME=motie_resettest`), with a stray user and file left in between to check both were wiped, the 10 seed users created, migrations at `0020`, and `/health/db` ok. Then I deleted that project. **I did not run it on your dev database**: it still has the smoke-test data from step 6c and the pre-6f/6g cases. Run it when you're ready.
+
+**Files:** scripts/reset-dev.sh, backend/app/dev_seed.py, backend/app/core/config.py (`app_env`), .env.example, CLAUDE.md, backend/tests/test_dev_seed.py
+**Try it:**
+- `bash scripts/reset-dev.sh` from the repo root (Git Bash). Then log in at `localhost:8000/docs` as `desk@motie.test` with `dev password 123`.
+- A different password for the seeded users: add `DEV_SEED_PASSWORD=...` to `.env` (at least 12 characters).
+- `docker compose run --rm tools pytest tests/test_dev_seed.py -v`
+**New concepts:** Disposable dev environments (reset and seed)
+
 ### Step 6g — The HS code decides the receipt rule (2026-10-20)
 **Built:** the placeholder rule "product text contains *cement*" is gone. The receipt now depends on the **HS code** (migration `0020`):
 - **The applicant declares it** on the form: new required field `hs_code`. Dots and spaces are ignored (`2523.29`, `2523 29` and `252329` are the same), and it's stored as 6, 8 or 10 digits. Anything else gives 422.
@@ -119,7 +141,7 @@ The addressee (Commissioner General, GRA), the subject "Request for ETLS facilit
 - Submit a facility letter with `"product": "Portland cement"`, then `GET /cases/{id}/documents`: `cement_receipt` has `applies: true`. (Since step 6g the HS code decides, not the product text: use `"hs_code": "2523.29"`.)
 - Upload with curl: `curl -X POST "localhost:8000/cases/1/documents/invoice?filename=invoice.pdf" -H "Authorization: Bearer <token>" --data-binary @invoice.pdf`. Then try a `.txt` file renamed to `.pdf`: 415.
 - `docker compose run --rm tools pytest tests/modules/etls/test_documents.py -v`
-- **Note:** while testing this step I made a real user (`smoke-applicant@test.gm`), case 1 and one file in your *dev* database. They can't be deleted cleanly because the case has audit rows, so they'll stay in dev.
+- **Note:** while testing this step I made a real user (`smoke-applicant@test.gm`), case 1 and one file in your *dev* database. They can't be deleted cleanly because the case has audit rows. `scripts/reset-dev.sh` (step 6h) clears them.
 **New concepts:** Rules as data (a small condition language), Safe file uploads
 
 ### Step 6b — Case flags and the duplicate certificate check (2026-10-19)
@@ -693,6 +715,11 @@ Since step 6f, the same pattern also covers **effects**: things a move sets off 
 **Here:** `build_fields()` (facts), templates/facility_letter.txt (words) and `render_pdf()` (layout) in backend/app/modules/etls/. `string.Template` only replaces `$names`; unlike `str.format()` it can't reach into objects, which is why we use it for text people may edit.
 **Learn more:** [Python docs: Template strings](https://docs.python.org/3/library/string.html#template-strings), [fpdf2 tutorial](https://py-pdf.github.io/fpdf2/Tutorial.html)
 
+### Disposable dev environments (reset and seed)
+**What:** your dev database should be something you can throw away and rebuild in a minute: migrations make the tables and reference data, a *seed* adds the fake people you need to click through the app. Then trying something by hand ("smoke testing") never leaves you with a database you're afraid to touch, and nobody is tempted to try things on the real one. The danger is the reverse: a reset script run against real data. So it checks a setting that says "this is a dev machine" (`APP_ENV`), defaults to the safe answer when it's missing, and asks before deleting.
+**Here:** scripts/reset-dev.sh, `seed()` and `main()` in backend/app/dev_seed.py, `app_env` in backend/app/core/config.py.
+**Learn more:** [The Twelve-Factor App: Dev/prod parity](https://12factor.net/dev-prod-parity) and [Config](https://12factor.net/config)
+
 ### HS codes
 **What:** the Harmonized System is the world's shared numbering of goods, kept by the World Customs Organization and used by GRA and ECOWAS tariffs. The first 2 digits are the chapter (25: salt, earths and stone, cement), the first 4 the *heading* (2523: cement), the first 6 the subheading (2523.29: other Portland cement). Countries add digits for their own tariff lines (8 or 10). Because everyone uses the same numbers, "is this cement?" becomes "does the code start with 2523?", which free text like "cement mixer" can't fool.
 **Here:** `normalize_hs_code()` in backend/app/modules/etls/schemas.py, `hs_heading()` and `facility_letter_facts()` in backend/app/modules/etls/service.py, the rule row in backend/alembic/versions/0020_facility_letter_hs_code.py.
@@ -862,6 +889,11 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-20 | Issued documents are a core table (`core.issued_documents`) with a `kind` | an `etls.issued_letters` table; reuse `core.case_documents` | Other modules will issue certificates too. Uploads are what applicants *gave*; issued documents are what the Ministry *produced*. Mixing them would apply the upload rules (applicants may download uploads) to signed letters. |
 | 2026-10-20 | Template version = a `## version:` label in the file, plus the file's own SHA-256 | only a label; only the hash; a version table | The label is readable; the hash catches an edit where someone forgot to change the label. |
 | 2026-10-20 | Re-hash the stored file on every download | trust the disk | The letter is small, so it costs nothing, and a damaged or edited file is caught before it reaches GRA. |
+| 2026-10-20 | The reset script is bash, run from the host with `docker compose` | a Python script; a Makefile | It drives Docker from outside the containers, which is what shell is for, and Git Bash is already how you run the other commands. No new tool. |
+| 2026-10-20 | Reset drops the database rather than downgrading every migration | `alembic downgrade base` | Faster, and it also clears anything a migration doesn't know about. The test suite already proves the downgrades work. |
+| 2026-10-20 | The seed is Python using the normal `create_user()`/`assign_position()` | SQL inserts | Passwords get hashed the same way as real ones, and the seed breaks loudly if those rules change. |
+| 2026-10-20 | `APP_ENV` defaults to `production`; `.env.example` says `production` | default `development` | Fail safe: forgetting the setting on a server must not enable a delete-everything script. |
+| 2026-10-20 | Seed users share one known password, overridable with `DEV_SEED_PASSWORD` | random passwords printed once | You need to log in as several people quickly. The `APP_ENV` guard keeps these accounts off real servers. |
 | 2026-10-20 | The applicant declares the HS code; an officer confirms or corrects it; both are kept | only the officer enters it; the officer overwrites the applicant's | Records' documents check comes before the desk, so it needs a code to work with. Keeping both shows when, and by whom, a declared code was corrected. |
 | 2026-10-20 | The receipt fact is the *heading* (4 digits) tested with `equals` | a new `starts_with` operator on the full code | No change to the condition language or its database constraint. Headings are how tariff rules are usually written. |
 | 2026-10-20 | Facts use the confirmed code once there is one, the declared code before | only the confirmed code | Records can then ask for the receipt early. The desk's Verify move re-checks documents with the confirmed code, so a correction can't slip through. |
@@ -913,6 +945,16 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 6h
+1. Someone copies `.env.example` to `.env` on the Ministry server and runs `scripts/reset-dev.sh`. What happens?
+2. Why does the script stop the API before dropping the database?
+3. Why does `app_env` default to `production` instead of `development`?
+
+#### Show answers
+1. Nothing is deleted: `.env.example` says `APP_ENV=production`, so the script prints "Refusing: APP_ENV in .env is 'production'..." and exits before touching Docker.
+2. The API holds open database connections and has the documents volume mounted. Docker won't delete a volume a container is using, and while `WITH (FORCE)` would close the connections, the API could open new ones and write to the half-built database during the migration.
+3. To fail safe. If someone forgets to set it, the dangerous tools (reset, seed with a known password) stay off. Forgetting it on your own machine only means the script refuses until you add `APP_ENV=development`.
 
 ### Step 6g
 1. An importer declares `7210.49` (steel) but the goods are really cement. Where in the process is that caught, and what stops the file going to the PS without the receipt?

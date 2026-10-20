@@ -1,4 +1,5 @@
 from string import Formatter
+from typing import Literal
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
@@ -12,6 +13,11 @@ class Settings(BaseSettings):
     # (case-insensitive). If a required one is missing, the app refuses to start
     # with a clear error instead of failing later.
     database_url: str  # the API's own user (motie_app)
+
+    # "development" only on a developer's machine. Tools that delete or invent
+    # data (scripts/reset-dev.sh, app/dev_seed.py) refuse to run otherwise.
+    # The default is "production", so a server that forgets to set it is safe.
+    app_env: Literal["development", "production"] = "production"
 
     # The schema owner (motie_owner), used by Alembic and tests only. The API
     # container doesn't get it, so a compromised API can't alter tables.

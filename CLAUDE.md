@@ -37,6 +37,7 @@ Quality bar for every step:
 - Prefer simple, readable code over clever code. Comment the *why*, not the *what*.
 - Commit after each step with a clear message.
 - Point out and fix security issues (auth, permissions, file uploads, injection) as you go.
+- Smoke tests (trying things against the running app or database by hand) run only against the dev database, never a shared or production database. Clean up afterwards with `scripts/reset-dev.sh`.
 
 ## The learning doc: docs/LEARNING.md
 
@@ -60,5 +61,6 @@ Write for me, not for a reviewer: plain words, short paragraphs, real file paths
 - Run the API: `uvicorn app.main:app --reload`
 - Run migrations: `docker compose run --rm tools alembic upgrade head` (runs as `motie_owner`)
 - Run tests: `docker compose run --rm tools pytest -v`
+- Reset the dev database and documents volume, migrate and seed dev users: `bash scripts/reset-dev.sh` (only runs with `APP_ENV=development` in `.env`; `--yes` skips the prompt). Seeded users are `<post>@motie.test` with the password in `backend/app/dev_seed.py`.
 - Database users: `motie_app` (the API), `motie_owner` (migrations), `motie` superuser (setup only). Created by `db/init/10-db-users.sh`; rerun it with `docker compose exec db bash /docker-entrypoint-initdb.d/10-db-users.sh` after changing a password in `.env`.
 - Postgres from the host: `localhost:5433` (5432 is taken by a local Windows Postgres)
