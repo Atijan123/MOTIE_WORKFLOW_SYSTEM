@@ -16,6 +16,12 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Audit — The backend against the screen spec (2026-10-20)
+**Built:** nothing; this is a review step. docs/SCREENS.md is now the agreed spec, and docs/GAPS.md lists, for every global rule and screen (A1–A6, S1–S10), what the backend already supports (with the file or endpoint), what's partial and what's missing. It also covers the conflicts with what's built, a check of the stand-in rules and of "acting for" in the history, and a proposed build order that finishes the facility letter screens first.
+**Files:** docs/SCREENS.md, docs/GAPS.md
+**Try it:** read docs/GAPS.md, sections 7 (conflicts) and 8 (build order) first, then the questions at the end.
+**New concepts:** none.
+
 ### Step 6l — Correcting a signed letter (2026-10-20)
 **Built:** the PS, or someone acting for the PS, can cancel a signed letter with a written reason, and a corrected letter is then issued. Both files stay stored (migration `0022`).
 
