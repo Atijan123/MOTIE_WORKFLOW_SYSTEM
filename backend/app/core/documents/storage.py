@@ -82,5 +82,26 @@ async def save(chunks: AsyncIterator[bytes]) -> StoredFile:
     return StoredFile(key, size, hasher.hexdigest(), content_type)
 
 
+async def save_bytes(content: bytes) -> StoredFile:
+    """Store a file the system made itself (e.g. a signed letter), with the same checks as an upload."""
+
+    async def one_chunk():
+        yield content
+
+    return await save(one_chunk())
+
+
+class StoredFileChanged(Exception):
+    """A stored file no longer matches the checksum recorded when it was saved."""
+
+
+def read_verified(storage_key: str, sha256: str) -> bytes:
+    """Read a stored file back, refusing it if it changed on disk since it was saved."""
+    content = path_for(storage_key).read_bytes()
+    if hashlib.sha256(content).hexdigest() != sha256:
+        raise StoredFileChanged(f"Stored file {storage_key} doesn't match its recorded checksum.")
+    return content
+
+
 def delete(storage_key: str) -> None:
     path_for(storage_key).unlink(missing_ok=True)

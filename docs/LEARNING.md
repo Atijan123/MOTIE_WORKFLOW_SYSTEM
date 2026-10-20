@@ -16,6 +16,29 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 6f — Issued letters are stored, never re-rendered (2026-10-20)
+**Built:** the facility letter is now made **once**, at the moment it's signed, and stored. Every download serves that stored file.
+- **Transition effects (core, migration `0019`):** the twin of step 6d's checks. A check runs *before* a move and can stop it; an *effect* runs *after* the status change, in the same transaction. Which move sets off which effect is a row in `core.transition_effects`; the code is registered by name in backend/app/core/workflow/effects.py. The PS's "Sign" move has the effect `issue_facility_letter`.
+- **What the effect does** (`issue_letter()` in backend/app/modules/etls/letter.py): builds the fields from the signing audit row, renders the PDF, and stores it through the new core service backend/app/core/documents/issued.py:
+  - the file goes in the `documents` volume, under a random name, like uploads;
+  - a row in `core.issued_documents` records its SHA-256 checksum, size, the **template version** and the template file's own checksum, who issued it and when;
+  - an audit row `case.document_issued` records the same checksum and template version.
+- **All or nothing:** if rendering or storing fails, the signing fails too and the case stays "Verified". If the file was already written, it's deleted again (the effect hands the engine an "undo").
+- **Served, not re-made:** `GET /etls/facility-letters/{case_id}/letter.pdf` reads the stored file, checks it against the recorded checksum (a file changed on disk gives a 500 and a log line, never the letter), and sends it with an `X-Checksum-SHA256` header.
+- **Once per case:** a unique constraint on (case, kind), and the app may only `SELECT` and `INSERT` the table.
+- **Template version:** the template file now starts with `## version: 1 (...)`. Lines starting with `##` are notes, never printed. A template without a version line can't issue letters.
+- An unknown effect name in the database blocks the move (409), like an unknown check.
+
+**Files:** backend/alembic/versions/0019_issued_documents.py, backend/app/core/workflow/effects.py, backend/app/core/workflow/models.py (`TransitionEffect`), backend/app/core/workflow/service.py (`change_status()` runs effects and undoes them if the commit fails), backend/app/core/documents/issued.py, backend/app/core/documents/models.py (`IssuedDocument`), backend/app/core/documents/storage.py (`save_bytes()`, `read_verified()`), backend/app/modules/etls/letter.py (`load_template()`, `build_fields()`, `issue_letter()`, `issued_letter()`), backend/app/modules/etls/router.py, backend/app/modules/etls/templates/facility_letter.txt, backend/tests/modules/etls/test_letter.py, backend/tests/core/test_db_privileges.py
+**Try it:**
+- `docker compose run --rm tools alembic upgrade head`
+- Walk a facility letter to "Signed by the PS", then: `docker compose exec db psql -U motie -d motie -c "SELECT case_id, sha256, template_version, issued_at FROM core.issued_documents"` and `... -c "SELECT details FROM core.audit_log WHERE action = 'case.document_issued'"`. Same checksum in both.
+- Download the letter twice: identical bytes, and the `X-Checksum-SHA256` header matches. Edit the template wording and download again: still the same file.
+- Check a downloaded copy yourself: `sha256sum facility-letter-....pdf` (Git Bash) or `Get-FileHash` (PowerShell) gives the checksum in the audit log.
+- **Your dev database:** cases signed before this step have no stored letter, so their download gives 404. We don't make one now, because nobody signed it.
+- `docker compose run --rm tools pytest tests/modules/etls/test_letter.py -v`
+**New concepts:** Issue once, store with a checksum. (Effects reuse the idea in A registry of named checks.)
+
 ### Step 6e — The facility letter PDF (2026-10-19)
 **Built:** `GET /etls/facility-letters/{case_id}/letter.pdf` returns the letter to GRA once the case is signed (409 before that; staff only). It's built in two halves, in backend/app/modules/etls/letter.py:
 - `letter_fields()` gathers the fields from the database:
@@ -32,6 +55,7 @@ The addressee (Commissioner General, GRA), the subject "Request for ETLS facilit
 - To change the reference format, add `FACILITY_LETTER_REFERENCE_FORMAT: "MOTIE/ETLS/{year}/{case_id}"` under the `api` service's `environment` in docker-compose.yml. A bad placeholder stops the API at startup with a clear message.
 - To change the wording, edit the template file; no Python changes.
 - `docker compose run --rm tools pytest tests/modules/etls/test_letter.py -v`
+- **Changed in step 6f:** the letter is no longer made on each download; it's made once at signing and stored. `letter_fields()` became `build_fields()`.
 **New concepts:** Generating documents from a template
 
 ### Step 6d — Transition checks, and originals seen in person (2026-10-19)
@@ -642,14 +666,24 @@ One short explanation per concept, where it lives in this codebase, and one free
 **Learn more:** [OWASP File Upload Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/File_Upload_Cheat_Sheet.html)
 
 ### A registry of named checks (plug-ins)
+Since step 6f, the same pattern also covers **effects**: things a move sets off once it's made (backend/app/core/workflow/effects.py, table `core.transition_effects`).
+
 **What:** the engine shouldn't know about documents, payments or GRA, but some moves must wait for them. So the engine only knows *names*: "this move needs `documents_complete`". Each part of the system registers a function under a name it owns, and the engine calls whatever is registered. It's the same idea as `facts.register()` in step 6c. Two safety rules: a name with nothing registered blocks the move instead of being skipped, and a test compares the names in the database with the registered functions.
 **Here:** backend/app/core/workflow/checks.py `register()` and `problems()`, called from `change_status()`. Registrations at the bottom of backend/app/core/documents/service.py.
 **Learn more:** [Python Packaging Guide: creating and discovering plugins](https://packaging.python.org/en/latest/guides/creating-and-discovering-plugins/), the same idea at package scale.
 
 ### Generating documents from a template
 **What:** keep *what* a letter says (a text file with placeholders) apart from *how* it's printed (code that lays text out on a page), and apart from *where the facts come from* (database queries). Each part can then change without the others: the Ministry rewords the letter, ICT changes the layout, or a field moves to another table. Testing is easier too. The fields are a plain object you can check, and the PDF can be written uncompressed so tests can find the printed text in its bytes.
-**Here:** `letter_fields()` (facts), templates/facility_letter.txt (words) and `render_pdf()` (layout) in backend/app/modules/etls/. `string.Template` only replaces `$names`; unlike `str.format()` it can't reach into objects, which is why we use it for text people may edit.
+**Here:** `build_fields()` (facts), templates/facility_letter.txt (words) and `render_pdf()` (layout) in backend/app/modules/etls/. `string.Template` only replaces `$names`; unlike `str.format()` it can't reach into objects, which is why we use it for text people may edit.
 **Learn more:** [Python docs: Template strings](https://docs.python.org/3/library/string.html#template-strings), [fpdf2 tutorial](https://py-pdf.github.io/fpdf2/Tutorial.html)
+
+### Issue once, store with a checksum
+**What:** a signed letter is a record, not a report. A report is made fresh from the data each time you ask; a record must say tomorrow exactly what it said when it was signed. So the letter is rendered once, at signing, and the bytes are kept. A *checksum* (SHA-256) is a 64-character fingerprint of those bytes: change one byte and it's completely different. Writing it in the append-only audit log means anyone can later prove a copy is the one issued, by hashing it again and comparing. We also record the *template version*, so you can tell which wording a letter used without opening it.
+Two more ideas here:
+- **The database can't roll back a file.** So the effect returns an "undo" (delete the file), and the engine calls it if the commit fails.
+- **Verify on read.** Each download re-hashes the stored file before sending it. A file damaged or edited on disk is refused, never served as the letter.
+**Here:** `issue()` and `read()` in backend/app/core/documents/issued.py; `run()` and `undo_all()` in backend/app/core/workflow/effects.py, called from `change_status()`; `issue_letter()` in backend/app/modules/etls/letter.py.
+**Learn more:** [Wikipedia: Cryptographic hash function](https://en.wikipedia.org/wiki/Cryptographic_hash_function) (the "Verifying the integrity of messages and files" section)
 
 ## 3. Decisions
 
@@ -796,12 +830,18 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-19 | "Seen" belongs to one upload; a newer scan must be seen again | mark the document *type* as seen | The audit row records which scan (by checksum) was compared with the original. A later scan could differ. |
 | 2026-10-19 | Moves that aren't ready still appear in `available_actions` | hide them | The officer sees the button and gets a clear list of what's missing. Hiding it would leave them guessing. `GET /cases/{id}/documents` shows the checklist beforehand. |
 | 2026-10-19 | fpdf2 with a plain-text template | WeasyPrint + HTML; ReportLab | Chosen by you. Pure Python, no system libraries, small. |
-| 2026-10-19 | The letter is made fresh from the case's data on each download | store the PDF as a document when it's signed | The data it's made from can't change (the form is insert-only, the signature is an audit row). The catch: a later template change would also change old letters. Storing the issued PDF is an open question. |
+| 2026-10-19 | The letter is made fresh from the case's data on each download | store the PDF as a document when it's signed | The data it's made from can't change (the form is insert-only, the signature is an audit row). The catch: a later template change would also change old letters. **Replaced in step 6f: you asked for it to be stored at signing.** |
 | 2026-10-19 | The signature block comes from the audit row of the "Sign" move | a separate "signed_by" column | One source of truth for who acted and for whom (step 5d). The letter can never disagree with the history. |
 | 2026-10-19 | The letter date is the day it was signed, not the day it's downloaded | today | A reprint next month must say the same thing. |
 | 2026-10-19 | The reference format allows only `{year}` and `{case_id}`, checked at startup | any `str.format()` string | `str.format()` can read object attributes (`{case_id.__class__}`). A bad setting should stop the server at startup, not break the first letter. |
 | 2026-10-19 | Built-in PDF fonts (Latin-1); other characters print as "?" | ship a Unicode font file | Covers English and French names. A font file (e.g. DejaVu Sans) can be added later without other changes. |
 | 2026-10-19 | Only staff can download the letter | the applicant too (they're copied) | The importer gets the copy the Ministry sends. Opening it to applicants is one line, once confirmed. |
+| 2026-10-20 | The letter is issued by a *transition effect* (a named row plus registered code) | call the letter code from the ETLS router after the move; a database trigger | The engine stays generic, and which move issues what is data. Calling it from an ETLS endpoint would let the generic `POST /cases/{id}/status` sign without a letter. |
+| 2026-10-20 | Effects run inside the move's transaction, before the commit | after the commit; in a background job | If the letter can't be made, the case shouldn't say "Signed". A background job would leave a window where it's signed with no letter. Rendering one page takes milliseconds. |
+| 2026-10-20 | Issued documents are a core table (`core.issued_documents`) with a `kind` | an `etls.issued_letters` table; reuse `core.case_documents` | Other modules will issue certificates too. Uploads are what applicants *gave*; issued documents are what the Ministry *produced*. Mixing them would apply the upload rules (applicants may download uploads) to signed letters. |
+| 2026-10-20 | Template version = a `## version:` label in the file, plus the file's own SHA-256 | only a label; only the hash; a version table | The label is readable; the hash catches an edit where someone forgot to change the label. |
+| 2026-10-20 | Re-hash the stored file on every download | trust the disk | The letter is small, so it costs nothing, and a damaged or edited file is caught before it reaches GRA. |
+| 2026-10-20 | Cases signed before step 6f get 404, not a freshly made letter | render one now for old cases | A letter made today isn't the one that was signed. Only your dev database has such cases. |
 
 ## 4. Open questions
 
@@ -832,7 +872,7 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 - [ ] **Originals:** besides the certificate of origin, must any other paper original be seen in person (e.g. the invoice)? It's one column per document (`original_required`).
 - [ ] **Facility letter text:** the exact wording, the Ministry's address line and letterhead, and the GRA address. See backend/app/modules/etls/templates/facility_letter.txt.
 - [ ] **File reference format:** what is the Ministry's real format? Placeholder `MOTIE/ETLS/FL/{year}/{case_id:05d}` (`FACILITY_LETTER_REFERENCE_FORMAT`).
-- [ ] **Issued letters:** should the PDF be stored when it's signed or sent to GRA, so later template changes never alter an issued letter? May the importer download it?
+- [ ] **Issued letters:** storing at signing is decided (step 6f). Still open: may the importer download it? And if a signed letter has a mistake, how does the Ministry correct it: cancel it and sign a new one, or a separate amendment letter? Right now a case can have only one.
 - [ ] **The cement receipt:** which receipt is it (e.g. a payment receipt for a cement levy)? And should cement be recognised from a product list rather than the word "cement" in free text? See backend/alembic/versions/0017_documents.py.
 - [ ] **Document type names:** are "Business registration certificate", "Annual returns certificate", "Certificate of origin", "Invoice" (commercial invoice?) and "Export declaration" the official names?
 - [ ] **Who may upload, and until when:** right now the applicant and any staff member, until the case is closed.
@@ -846,13 +886,23 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 
 Questions per step. Try to answer before reading the answers.
 
+### Step 6f
+1. The PS signs a letter, then the Ministry rewords the template. What does GRA get when the desk downloads the letter next week, and how could you prove it?
+2. Rendering works but writing the audit row fails during signing. What state are the case and the documents folder in afterwards, and which code makes that so?
+3. Someone deletes the `issue_facility_letter` function but leaves the row in `core.transition_effects`. What happens when the PS tries to sign?
+
+#### Show answers
+1. The same bytes that were stored at signing: downloads read the stored file and never call `render_pdf()` again. Hash the download (`sha256sum`) and compare it with `sha256` in `core.issued_documents` and in the `case.document_issued` audit row. `template_version` says which wording it used.
+2. The case is still "Verified" (nothing was committed) and no new file is left behind. `issue()` in backend/app/core/documents/issued.py deletes the file if anything after the write fails; if the commit itself fails, `change_status()` calls the undo the effect returned.
+3. The move is refused with 409 ("The step 'issue_facility_letter' isn't available...") and the server log says why: `run()` in backend/app/core/workflow/effects.py fails closed. `test_every_effect_named_in_the_database_has_code_behind_it` would fail too.
+
 ### Step 6e
 1. The PS is on leave and the DPS signs. What does the signature block say, and where does that information come from?
 2. Someone sets `FACILITY_LETTER_REFERENCE_FORMAT` to `MOTIE/{case_id.__class__}`. What happens, and when?
 3. Why does the test call `render_pdf(fields, compress=False)` before searching the PDF for text?
 
 #### Show answers
-1. The DPS's name, "Deputy Permanent Secretary, Administration and Finance", then "for the Permanent Secretary". `letter_fields()` reads the audit row of the move to `signed`: the actor, `as_position` and `on_behalf_of` (recorded by the engine in step 5d).
+1. The DPS's name, "Deputy Permanent Secretary, Administration and Finance", then "for the Permanent Secretary". `letter_fields()` (`build_fields()` since step 6f) reads the audit row of the move to `signed`: the actor, `as_position` and `on_behalf_of` (recorded by the engine in step 5d).
 2. The API refuses to start: `_only_known_placeholders()` in backend/app/core/config.py finds the placeholder `case_id.__class__`, which isn't `year` or `case_id`, and pydantic raises a validation error. Better at startup than on the day a letter is needed.
 3. PDFs normally compress each page's contents, so the words aren't readable in the raw bytes. Without compression, every printed line appears as text in the file, so the test can check what the letter actually says.
 

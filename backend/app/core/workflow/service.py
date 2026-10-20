@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.audit.service import record_event
 from app.core.identity.models import User
 from app.core.workflow.delegation import active_delegations_to, is_delegated_away
-from app.core.workflow import checks
+from app.core.workflow import checks, effects
 from app.core.workflow.flags import open_flags
 from app.core.workflow.errors import (  # noqa: F401  (re-exported: callers use service.NotFound etc.)
     AlreadyCancelled,
@@ -262,7 +262,7 @@ async def change_status(
 
     case.current_status_id = move.to_status_id
     case.updated_at = func.now()
-    record_event(
+    event = record_event(
         session,
         actor=actor,
         action="case.status_changed",
@@ -283,7 +283,13 @@ async def change_status(
             "comment": comment,
         },
     )
-    # Status change and audit row are committed together, or not at all.
-    await session.commit()
+    # What the move sets off (e.g. issuing the signed letter), named in core.transition_effects.
+    undos = await effects.run(session, effects.Move(case, actor, event), move.id)
+    # Status change, audit row and effects are committed together, or not at all.
+    try:
+        await session.commit()
+    except BaseException:
+        effects.undo_all(undos)
+        raise
     await session.refresh(case, ["current_status", "updated_at"])
     return case

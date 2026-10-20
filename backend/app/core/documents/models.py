@@ -88,3 +88,32 @@ class CaseDocument(Base):
     original_seen_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("core.users.id"))
 
     document_type: Mapped[DocumentType] = relationship(lazy="selectin", viewonly=True)
+
+
+class IssuedDocument(Base):
+    """A document the Ministry issued on a case (e.g. a signed letter), stored once.
+
+    Created by alembic/versions/0019_issued_documents.py. The app may only add
+    rows, never change them, and there is at most one of each kind per case.
+    """
+
+    __tablename__ = "issued_documents"
+    __table_args__ = (
+        UniqueConstraint("case_id", "kind", name="issued_documents_once_per_case"),
+        CheckConstraint("size_bytes > 0", name="issued_documents_not_empty"),
+        {"schema": "core"},
+    )
+    __mapper_args__ = {"eager_defaults": True}
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    case_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("core.cases.id"))
+    kind: Mapped[str] = mapped_column(Text)
+    filename: Mapped[str] = mapped_column(Text)
+    content_type: Mapped[str] = mapped_column(Text)
+    size_bytes: Mapped[int] = mapped_column(BigInteger)
+    sha256: Mapped[str] = mapped_column(Text)
+    storage_key: Mapped[str] = mapped_column(Text, unique=True)
+    template_version: Mapped[str] = mapped_column(Text)
+    template_sha256: Mapped[str] = mapped_column(Text)
+    issued_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("core.users.id"))
+    issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

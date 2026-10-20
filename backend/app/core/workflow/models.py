@@ -306,3 +306,18 @@ class TransitionCheck(Base):
         Integer, ForeignKey("core.workflow_transitions.id"), primary_key=True
     )
     check_code: Mapped[str] = mapped_column(Text, primary_key=True)
+
+
+class TransitionEffect(Base):
+    """A named effect a move sets off. Created by alembic/versions/0019_issued_documents.py.
+
+    The name is data; the function behind it is registered in workflow/effects.py.
+    """
+
+    __tablename__ = "transition_effects"
+    __table_args__ = {"schema": "core"}
+
+    transition_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("core.workflow_transitions.id"), primary_key=True
+    )
+    effect_code: Mapped[str] = mapped_column(Text, primary_key=True)

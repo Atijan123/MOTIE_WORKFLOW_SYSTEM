@@ -1,3 +1,6 @@
+## Lines starting with ## are notes, never printed.
+## Change "version" whenever you change the wording: every issued letter records it.
+## version: 1 (placeholder wording, before the Ministry's)
 Ministry of Trade, Industry, Regional Integration and Employment
 The Quadrangle, Banjul, The Gambia
 

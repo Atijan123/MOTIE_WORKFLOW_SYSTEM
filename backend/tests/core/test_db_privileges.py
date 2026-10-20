@@ -67,6 +67,10 @@ async def test_app_user_cannot_skip_triggers_with_replication_mode(db_session):
         "UPDATE core.absences SET ends_on = ends_on + 30",
         "DELETE FROM core.absences",
         "INSERT INTO core.succession_orders (position_id, rank, successor_position_id) VALUES (1, 9, 2)",
+        # An issued letter is never changed or removed, and the app can't add effects to moves.
+        "UPDATE core.issued_documents SET sha256 = 'x'",
+        "DELETE FROM core.issued_documents",
+        "INSERT INTO core.transition_effects (transition_id, effect_code) VALUES (1, 'x')",
     ],
     ids=[
         "create-table",
@@ -80,6 +84,9 @@ async def test_app_user_cannot_skip_triggers_with_replication_mode(db_session):
         "stretch-absence",
         "delete-absence",
         "add-succession-rule",
+        "edit-issued-document",
+        "delete-issued-document",
+        "add-transition-effect",
     ],
 )
 async def test_app_user_cannot_do_what_it_was_never_granted(db_session, statement):

@@ -1,5 +1,3 @@
-import re
-
 from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -63,14 +61,17 @@ async def download_facility_letter(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    """The signed letter to GRA, made fresh from the case's data each time."""
-    fields = await facility_letter.letter_fields(session, case_id, user)
-    name = re.sub(r"[^A-Za-z0-9-]+", "-", fields.file_reference).strip("-")
+    """The signed letter to GRA: the file stored when it was signed, never re-made.
+
+    The X-Checksum-SHA256 header matches the checksum in the audit log, so
+    anyone holding a copy can check it's the one issued."""
+    document, content = await facility_letter.issued_letter(session, case_id, user)
     return Response(
-        content=facility_letter.render_pdf(fields),
-        media_type="application/pdf",
+        content=content,
+        media_type=document.content_type,
         headers={
-            "Content-Disposition": f'attachment; filename="facility-letter-{name}.pdf"',
+            "Content-Disposition": f'attachment; filename="{document.filename}"',
             "X-Content-Type-Options": "nosniff",
+            "X-Checksum-SHA256": document.sha256,
         },
     )
