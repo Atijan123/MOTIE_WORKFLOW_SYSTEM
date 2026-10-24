@@ -122,6 +122,25 @@ async def _load(session: AsyncSession, model, ids: set[int]) -> list:
 class TimelineEntry:
     occurred_at: datetime
     label: str
+    message: str | None = None  # the message to the applicant, on a return or rejection
+
+
+async def current_message(session: AsyncSession, case: Case) -> str | None:
+    """The message to the applicant on the move that put the case where it is
+    now, e.g. why it was returned. None when that move sent none."""
+    event = await session.scalar(
+        select(AuditEvent)
+        .where(
+            AuditEvent.entity_type == service.AUDIT_ENTITY,
+            AuditEvent.entity_id == str(case.id),
+            AuditEvent.action == "case.status_changed",
+        )
+        .order_by(AuditEvent.occurred_at.desc(), AuditEvent.id.desc())
+        .limit(1)
+    )
+    if event is None or event.details.get("to") != case.current_status.code:
+        return None
+    return event.details.get("applicant_message")
 
 
 async def applicant_timeline(session: AsyncSession, case: Case) -> list[TimelineEntry]:
@@ -169,7 +188,8 @@ async def applicant_timeline(session: AsyncSession, case: Case) -> list[Timeline
             label = (move.applicant_event if move else None) or target.applicant_label
         else:
             continue  # uploads, flags, letters: not part of the applicant's timeline
-        if entries and entries[-1].label == label:
+        message = event.details.get("applicant_message")
+        if entries and entries[-1].label == label and not message:
             continue
-        entries.append(TimelineEntry(event.occurred_at, label))
+        entries.append(TimelineEntry(event.occurred_at, label, message))
     return entries

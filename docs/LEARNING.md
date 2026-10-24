@@ -16,6 +16,31 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 8b — Returning an application, and resubmitting it (2026-10-24)
+Chunk 2, step 2.
+
+**Built:**
+- **Two texts on a move.** `POST /cases/{id}/status` takes `applicant_message` (what the applicant is told) next to `comment` (the internal minute, staff only). Both go in the move's audit row. A move with the new column `requires_applicant_message` refuses to go without the message (422). A message sent on a move that doesn't take one is also refused (422, `MessageNotExpected`), so text written for the applicant can't silently disappear. Each action in `available_actions` says `requires_applicant_message`, so the screen knows to show the message box.
+- **A `returned` status** for facility letters (label "Returned: action needed"), editable by the applicant like a draft.
+- **"Return to applicant"** for Records (from `submitted`) and the ETLS desk (from `originals_received`). The minute is optional, the message required.
+- **The applicant's "Resubmit"** (`returned → submitted`, timeline wording "Resubmitted"). It has the same check and effects as Submit: the reference stays, and the duplicate check runs again for any newly typed numbers. A resubmitted case goes back to Records first, like every application.
+- **"Reject" needs a message too**: the applicant is told why.
+- **The applicant sees the message** in three places:
+  - `applicant_message` on `GET /cases/{id}`;
+  - on their row in `GET /cases` (the "Fix and resubmit" notice);
+  - on the timeline entry, which gained a `message` field.
+
+  It's the message of the move that put the case where it is now (`current_message()` in backend/app/core/workflow/history.py), so the notice goes away once they resubmit. The minute is never in any of these.
+- **Changing the goods after a return clears the desk's confirmed HS code** (recorded as `hs_code_confirmation_cleared` in the form's audit row), because it was confirmed for the goods as they were.
+
+**Files:** backend/alembic/versions/0027_returns.py, backend/app/core/workflow/service.py (`change_status()`), backend/app/core/workflow/errors.py, backend/app/core/workflow/history.py (`current_message()`, `applicant_timeline()`), backend/app/core/workflow/queues.py, backend/app/core/workflow/router.py, backend/app/core/workflow/schemas.py, backend/app/modules/etls/service.py (`update_form()`), backend/tests/modules/etls/test_returns.py, backend/tests/support.py (`move()` takes `applicant_message`)
+**Try it:**
+- Submit a facility letter as the applicant. As `records@motie.test`: `POST /cases/{id}/status` with `{"to_status": "returned", "applicant_message": "The invoice is unreadable.", "comment": "Third time"}`.
+- As the applicant: `GET /cases` shows the message on that row; `GET /cases/{id}/timeline` ends with "Returned: action needed" and the message, but no minute.
+- Fix the form (`PUT /etls/facility-letters/{id}`), then `{"to_status": "submitted"}`: same reference, and it's back in Records' queue.
+- `docker compose run --rm tools pytest tests/modules/etls/test_returns.py -v`
+**New concepts:** none. It's the same "what applicants see is separate data" idea as the labels (step 7a).
+
 ### Step 8a — Drafts, and the applicant's "Submit" (2026-10-24)
 Chunk 2, step 1.
 
@@ -1233,6 +1258,13 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-24 | Submit goes through the generic `POST /cases/{id}/status` | an ETLS `POST .../submit` endpoint | Every move uses one endpoint, so `available_actions` and `blocked_by` work for Submit with no new code. |
 | 2026-10-24 | Staff can still see drafts (`can_view()` unchanged) | hide drafts from staff | It's the existing placeholder rule ("any staff member sees every case"). Drafts are in no queue, so nobody stumbles on them. `[CONFIRM]` with the visibility question. |
 | 2026-10-24 | The applicant's timeline starts with "Draft" | start at "Submitted" | It's true, and shows when they began. Easy to hide with `applicant_visible`-style data if the Ministry prefers. |
+| 2026-10-24 | The applicant's message is a second field on the move (`applicant_message`), next to the internal `comment` | one text with a "show the applicant" tick; a separate messages table | Two fields make it impossible to show the minute by mistake: applicant views only ever read `applicant_message`. Both live in the move's audit row, so nothing is stored twice. |
+| 2026-10-24 | A message on a move that doesn't send one is refused (422) | ignore it | An officer who typed something for the applicant must find out it wouldn't have been sent. |
+| 2026-10-24 | A returned case goes back to `submitted` (Records), even when the desk returned it | back to wherever it was returned from | "Every application goes to Records first" (SCREENS.md). A fixed application may have new papers whose originals Records must see. One move instead of one per returning post. |
+| 2026-10-24 | The notice shows the message of the move into the *current* status | the newest message ever sent | Once resubmitted, an old "please fix" message would be misleading on the list. The timeline keeps every message. |
+| 2026-10-24 | Editing the product or HS code clears the desk's confirmed code | keep it | It was confirmed for different goods. The desk's Verify needs a confirmed code, so it must be looked at again; the cleared value stays in the audit row. |
+| 2026-10-24 | Reject needs a message to the applicant; the minute stays optional | require the minute too | The spec says the applicant sees the reason. A minute can be added when the desk wants one. |
+| 2026-10-24 | Timeline entries with a message are always shown, even if the label repeats | dedupe by label as before | Two returns in a row each carry a different message the applicant must see. |
 
 ## 4. Open questions
 
@@ -1280,6 +1312,16 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 8b
+1. The desk returns a case with a message and a minute. Name every place the applicant could see the minute, and explain why it can't appear in any of them.
+2. After the applicant resubmits, why does the notice on their list disappear, while the timeline still shows the message?
+3. A returned applicant changes the product from "Roofing sheets" to "Cement". What happens to the HS code the desk confirmed, and what stops the desk verifying without looking again?
+
+#### Show answers
+1. `GET /cases/{id}`, `GET /cases` and `GET /cases/{id}/timeline`. All three read only `applicant_message` from the audit row; the minute is `comment`, which only the staff history (`GET /cases/{id}/history`, staff only) returns.
+2. The notice is `current_message()`: the message of the move into the case's *current* status. After resubmitting, that move is "Resubmit", which has none. The timeline lists every move, each with its own message.
+3. `update_form()` clears `hs_code_confirmed` (and records the old value as `hs_code_confirmation_cleared`). The desk's Verify move has the `hs_code_confirmed` check, which fails until someone confirms a code again.
 
 ### Step 8a
 1. Why can't the DPS submit an applicant's draft, even when acting for everyone above them?

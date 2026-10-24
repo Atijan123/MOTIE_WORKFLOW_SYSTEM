@@ -140,6 +140,13 @@ async def update_form(
 
     for column, value in _form_rows(form).items():
         setattr(letter, column, value)
+    details = {"changes": changes}
+    if letter.hs_code_confirmed and ({"product", "hs_code"} & changes.keys()):
+        # The desk confirmed a code for the goods as they were. New goods (after
+        # a return) need it confirmed again, or the receipt rule and the letter
+        # would use a code nobody checked against them.
+        details["hs_code_confirmation_cleared"] = letter.hs_code_confirmed
+        letter.hs_code_confirmed = letter.hs_code_confirmed_by = letter.hs_code_confirmed_at = None
     # Child rows are replaced, not edited: delete them all, then add the new list.
     for table in (FacilityLetterProductApproval, FacilityLetterCertificate):
         await session.execute(delete(table).where(table.case_id == case.id))
@@ -151,7 +158,7 @@ async def update_form(
         action="case.form_updated",
         entity_type=workflow.AUDIT_ENTITY,
         entity_id=case.id,
-        details={"changes": changes},
+        details=details,
     )
     await session.commit()
     return await _reloaded(session, case.id)

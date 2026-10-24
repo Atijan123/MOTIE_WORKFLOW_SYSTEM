@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.identity.models import User
-from app.core.workflow import service, summaries
+from app.core.workflow import history, service, summaries
 from app.core.workflow.delegation import today
 from app.core.workflow.models import Case, Delegation, SuccessionStep, WorkflowStatus, WorkflowTransition
 
@@ -25,6 +25,7 @@ class QueueItem:
     moves: list[service.PermittedMove]  # empty in an applicant's own list
     summary: str | None  # the module's one line, e.g. the goods
     applicant_name: str | None  # staff only
+    applicant_message: str | None = None  # "my cases": why it was returned or rejected
 
     @property
     def days_waiting(self) -> int:
@@ -46,7 +47,8 @@ async def my_cases(session: AsyncSession, user: User) -> list[QueueItem]:
         )
     )
     found = await _summaries(session, cases)
-    return [QueueItem(c, [], found.get(c.id), None) for c in cases]
+    # One query per case: an applicant has a handful of cases, not hundreds.
+    return [QueueItem(c, [], found.get(c.id), None, await history.current_message(session, c)) for c in cases]
 
 
 async def _positions_i_might_act_as(session: AsyncSession, user: User) -> set[int]:

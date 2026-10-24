@@ -131,8 +131,10 @@ async def test_the_applicant_timeline_uses_plain_labels(act, people):
         "Awaiting signature",
         "Letter signed",
     ]
-    # Labels and dates only: no names, posts, comments or internal step names.
-    assert all(set(e) == {"occurred_at", "label"} for e in entries)
+    # Labels, dates and messages to the applicant only: no names, posts,
+    # internal minutes or step names.
+    assert all(set(e) == {"occurred_at", "label", "message"} for e in entries)
+    assert all(e["message"] is None for e in entries)  # nothing was returned
 
 
 async def test_cancelling_a_letter_is_invisible_to_the_applicant(act, people):

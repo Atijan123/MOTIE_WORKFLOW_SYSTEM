@@ -62,6 +62,7 @@ async def test_delegate_can_act_and_the_audit_log_says_on_whose_behalf(act, peop
             "name": "Sign and assign to an officer",
             "on_behalf_of": "director_of_industry",
             "requires_comment": False,
+            "requires_applicant_message": False,
             "blocked_by": [],
         }
     ]

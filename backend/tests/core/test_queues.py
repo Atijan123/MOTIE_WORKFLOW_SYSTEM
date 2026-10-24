@@ -67,7 +67,7 @@ async def test_the_queue_follows_the_case_from_records_to_the_desk(act, people):
 
     records = await _queue(act, people["records_officer"])
     assert case_id in records
-    assert [a["name"] for a in records[case_id]["available_actions"]] == ["Confirm originals received"]
+    assert [a["name"] for a in records[case_id]["available_actions"]] == ["Confirm originals received", "Return to applicant"]
     assert records[case_id]["applicant_name"] == people["applicant"].full_name
     assert records[case_id]["status"]["code"] == "submitted"
     assert case_id not in await _queue(act, people["desk"])
@@ -139,7 +139,7 @@ async def test_the_queue_can_be_narrowed_to_one_status(act, people):
 async def test_finished_cases_leave_every_queue(act, people):
     case_id = await _submit(act, people)
     await _to_desk(act, people, case_id)
-    assert (await move(act, people["desk"], case_id, "rejected")).status_code == 200
+    assert (await move(act, people["desk"], case_id, "rejected", applicant_message="Not eligible")).status_code == 200
     for who in ("records_officer", "desk", "permanent_secretary"):
         assert case_id not in await _queue(act, people[who])
 

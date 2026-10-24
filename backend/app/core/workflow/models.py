@@ -118,6 +118,8 @@ class WorkflowTransition(Base):
     # or the new status's label when empty; hidden entirely when not visible.
     applicant_event: Mapped[str | None] = mapped_column(Text)
     applicant_visible: Mapped[bool] = mapped_column(Boolean, server_default=true())
+    # The move needs a message to the applicant, e.g. a return or a rejection (0027).
+    requires_applicant_message: Mapped[bool] = mapped_column(Boolean, server_default=false())
 
     # Two links to the same table (from and to), so each says which column it uses.
     from_status: Mapped[WorkflowStatus] = relationship(

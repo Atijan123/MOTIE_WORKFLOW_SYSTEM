@@ -23,8 +23,8 @@ Two things apply to every screen and aren't repeated below:
 | Staff case history: newest first, actor's name and post title, "acting for", absence or delegation dates | **Built** | `GET /cases/{id}/history` (core/workflow/history.py `staff_history()`). |
 | Acting banner | **Built** | `GET /acting` (core/workflow/acting.py). |
 | Disabled actions explain why | **Built** | `available_actions[].blocked_by` on `GET /cases/{id}`: a dry run of on-hold flags and the move's checks (`what_blocks()` in core/workflow/service.py). |
-| Returning: a written reason, as a **message to the applicant** plus an optional **internal minute**; rejecting also needs a reason | **Partial** | `workflow_transitions.requires_comment` (0022) forces a written comment. Missing: return moves, a `returned` status, a separate applicant message (today there's one internal `comment`), and the reason requirement on "Reject". |
-| Drafts: every application starts as an editable draft; "Submit" goes to Records; a returned case becomes editable and is resubmitted with the same reference and history | **Partial** | Built (8a): `POST /etls/facility-letters` opens a `draft`; `PUT /etls/facility-letters/{id}` edits it while the status is `applicant_editable`; Submit is the applicant's move `draft → submitted` (`by_applicant`, 0026). Missing: returned and resubmitted cases (8b). |
+| Returning: a written reason, as a **message to the applicant** plus an optional **internal minute**; rejecting also needs a reason | **Built** | 8b (0027): `applicant_message` next to the internal `comment` on `POST /cases/{id}/status`, required by `requires_applicant_message` on the return moves and on Reject. |
+| Drafts: every application starts as an editable draft; "Submit" goes to Records; a returned case becomes editable and is resubmitted with the same reference and history | **Built** | 8a: `POST /etls/facility-letters` opens a `draft`; `PUT /etls/facility-letters/{id}` edits it while the status is `applicant_editable`; Submit is the applicant's move `draft → submitted` (`by_applicant`, 0026). 8b: `returned` is editable too, and "Resubmit" (`returned → submitted`) keeps the reference (0027). |
 | Dates in the Ministry format | **Partial** | `long_date()` in modules/etls/letter.py, used on the letter. The API returns ISO dates elsewhere (right for an API); the frontend needs the same formatter. |
 | Case reference numbers: a sequence per service per year, assigned at submission (`MOTIE/ETLS/FL/2026/0001`, `/AP/`, `/CO/`), shown to applicants and staff | **Built** | `core.reference_counters`, `next_reference()` in core/workflow/service.py (0024); given by the `assign_reference` effect on Submit (8a), kept on resubmission. |
 | The Ministry's **registry file reference** (e.g. `ADM 151/420/01/PART IV`) is separate: printed at the top of the letter; a setting until the desk explains it `[CONFIRM]` | **Partial** | The letter prints a setting (`FACILITY_LETTER_REFERENCE_FORMAT`, core/config.py). Its default (`MOTIE/ETLS/FL/{year}/{case_id:05d}`) looks like the case reference but isn't one; it should become a registry-style value. |
@@ -42,9 +42,9 @@ Two things apply to every screen and aren't repeated below:
 | Item | Status | Backed by / what's missing |
 | --- | --- | --- |
 | Three service cards | **Partial** | Static content. Only the facility letter has an application endpoint. |
-| Notice for a returned case, with the message and "Fix and resubmit" | **Missing** | Needs returns and drafts (global rules). |
+| Notice for a returned case, with the message and "Fix and resubmit" | **Built** | 8b: `applicant_message` on each row of `GET /cases` (and on `GET /cases/{id}`): the message of the move into the current status. |
 | Table of my cases: reference, goods, submitted date, applicant label | **Built** | `GET /cases` (core/workflow/queues.py `my_cases()`), goods from the module's summary. |
-| Selected case: timeline of applicant labels with dates | **Built** | `GET /cases/{id}/timeline` (core/workflow/history.py `applicant_timeline()`). Return messages join it with returns. |
+| Selected case: timeline of applicant labels with dates | **Built** | `GET /cases/{id}/timeline` (core/workflow/history.py `applicant_timeline()`); each entry has the move's `message` to the applicant, if any (8b). |
 
 ### A2. Facility letter application
 
@@ -107,7 +107,7 @@ Built route (0015, 0018, 0020–0022): `submitted` →(Records: Confirm original
 | Documents list with view links | **Built** | `GET /cases/{id}/documents`, `.../documents/{document_id}/file`. |
 | "Original seen in person" | **Built** | `POST /cases/{id}/documents/{document_id}/original-seen`. |
 | Accept, disabled until originals seen | **Built** | Records' move has `known_documents_complete` and `originals_seen`; `blocked_by` says which is missing. |
-| Return to applicant with message (and internal minute) | **Missing** | |
+| Return to applicant with message (and internal minute) | **Built** | 8b: "Return to applicant" (`submitted → returned`). |
 | **Outgoing tab**: signed letters to dispatch; download the stored letter; "Mark sent to GRA" with the dispatch date | **Partial** | Built: the stored letter (`GET /etls/facility-letters/{id}/letter.pdf`) and the queue filter (`GET /cases/queue?status=signed`). Missing: the move belongs to the desk today (C9), so Records' queue never shows signed letters; no dispatch date. |
 
 ### S2. ETLS desk verification
@@ -122,7 +122,7 @@ Built route (0015, 0018, 0020–0022): `submitted` →(Records: Confirm original
 | ECOWAS ETLS list ticks (exporter approval listed; product approval covers the goods), each recorded | **Missing** | Needs a recorded-tick checklist per case and a check on Verify. |
 | **Certificate validity computed** from the form's issue dates; Verify blocked if any certificate is more than six months past its issue date | **Missing** | Decided 2026-10-24 (C10). Needs the issue dates (A2). |
 | Verify, disabled until flag cleared, HS confirmed, ticks done, documents complete, certificates valid | **Partial** | Built: blocking flag, `hs_code_confirmed`, `documents_complete`, and `blocked_by`. Missing: ticks, certificate validity. |
-| Return to applicant | **Missing** | |
+| Return to applicant | **Built** | 8b: "Return to applicant" (`originals_received → returned`). The resubmitted case goes to Records first. |
 | History panel | **Built** | As in global rules. |
 
 ### S3. PS signs the letter
@@ -188,7 +188,7 @@ Everything is **Missing** (S9 comparison table and flags; S10 box 10 certificati
 
 - **C1. ETLS approval route.** *Decided:* new `etls_approval` workflow; `etls_application` retired in chunk 3.
 - **C2. Per-product decisions.** *Decided:* the case status tracks the file (with NAC, with ECOWAS, done); each product carries its own NAC and ECOWAS decisions in the module's tables.
-- **C3. Return to applicant.** *Decided:* a return has a **message to the applicant** (shown to them) and an optional **internal minute** (staff only); the case becomes editable and is resubmitted with the same reference and history. Rejecting needs a reason too. Build: a `returned` status, an applicant-visible message stored apart from the internal comment, return moves from Records and the desk (and later the officer), an applicant "Resubmit".
+- **C3. Return to applicant.** *Decided and built (8b):* a return has a **message to the applicant** (shown to them) and an optional **internal minute** (staff only); the case becomes editable and is resubmitted with the same reference and history. Rejecting needs a reason too. Build: a `returned` status, an applicant-visible message stored apart from the internal comment, return moves from Records and the desk (and later the officer), an applicant "Resubmit".
 - **C4. Documents after submission.** *Decided and built (8a):* every application starts as a draft; "Submit" goes to Records and is disabled until the required documents are uploaded.
 - **C5. Which HS code decides the receipt.** *Decided:* only the desk-confirmed code. A one-line change in `hs_heading()`.
 - **C6. References.** *Decided:* two different numbers. The **case reference** (`MOTIE/ETLS/FL/2026/0001`) is a sequence per service per year, assigned at submission, shown to everyone. The **registry file reference** printed on the letter stays a setting `[CONFIRM]`. So the letter does *not* switch to the case reference; the setting's default should change to a registry-style value.

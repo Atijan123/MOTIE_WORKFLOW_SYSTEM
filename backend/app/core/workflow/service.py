@@ -23,6 +23,7 @@ from app.core.workflow.errors import (  # noqa: F401  (re-exported: callers use 
     InvalidAbsence,
     InvalidDelegation,
     InvalidDocument,
+    MessageNotExpected,
     NotFound,
     NotPermitted,
     NotReady,
@@ -295,7 +296,11 @@ async def change_status(
     to_status_code: str,
     actor: User,
     comment: str | None = None,
+    applicant_message: str | None = None,
 ) -> Case:
+    """Move a case. `comment` is the internal minute (staff only);
+    `applicant_message` is what the applicant is told, on moves that send one
+    (a return, a rejection)."""
     case = await get_case(session, case_id, actor, for_update=True)
     from_status = case.current_status
 
@@ -331,6 +336,13 @@ async def change_status(
     comment = (comment or "").strip() or None
     if move.requires_comment and comment is None:
         raise CommentRequired(f"'{move.name}' needs a written reason in the comment.")
+    applicant_message = (applicant_message or "").strip() or None
+    if move.requires_applicant_message and applicant_message is None:
+        raise CommentRequired(f"'{move.name}' needs a message to the applicant saying why.")
+    if applicant_message is not None and not move.requires_applicant_message:
+        # Refused rather than ignored: text typed for the applicant must never
+        # quietly vanish, or be sent on a move that doesn't expect it.
+        raise MessageNotExpected(f"'{move.name}' doesn't send the applicant a message.")
     # The move's own checks (e.g. documents complete), named in core.transition_checks.
     issues = await checks.problems(session, case, move.id)
     if issues:
@@ -365,7 +377,8 @@ async def change_status(
             "basis": chosen.basis,
             "delegation_id": delegation.id if delegation else None,
             "absence_ids": [a.id for a in succession.absences] if succession else [],
-            "comment": comment,
+            "comment": comment,  # internal: staff only
+            "applicant_message": applicant_message,  # shown to the applicant
         },
     )
     # What the move sets off (e.g. issuing the signed letter), named in core.transition_effects.

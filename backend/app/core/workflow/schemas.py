@@ -10,7 +10,10 @@ class StartCaseRequest(BaseModel):
 
 class ChangeStatusRequest(BaseModel):
     to_status: str  # status code, e.g. "with_minister"
+    # The internal minute: staff only, never shown to the applicant.
     comment: str | None = Field(default=None, max_length=2000)
+    # What the applicant is told, on moves that send it (returns, rejections).
+    applicant_message: str | None = Field(default=None, max_length=2000)
 
 
 class StatusOut(BaseModel):
@@ -33,6 +36,8 @@ class ActionOut(BaseModel):
     on_behalf_of: str | None
     # The move needs a written reason in the comment (e.g. cancelling a letter).
     requires_comment: bool
+    # The move needs a message to the applicant (a return or a rejection).
+    requires_applicant_message: bool = False
     # Why the button is disabled right now, e.g. ["Invoice is missing"]; empty
     # when it can be pressed. Null where it isn't worked out (queues, for speed).
     blocked_by: list[str] | None = None
@@ -47,6 +52,9 @@ class CaseOut(BaseModel):
     created_by: int
     created_at: datetime
     updated_at: datetime
+    # Why the case was returned or rejected, as the applicant was told: the
+    # message of the move that put it in its current status, if it had one.
+    applicant_message: str | None
     # What *this* user may do next; the frontend shows one button per action.
     available_actions: list[ActionOut]
     # True while an open blocking flag holds the case. None for applicants:
@@ -68,6 +76,8 @@ class CaseSummaryOut(BaseModel):
     days_waiting: int
     summary: str | None  # the module's one line, e.g. "Roofing sheets, 1200.5 tonnes"
     applicant_name: str | None  # staff only
+    # "My cases": why it was returned or rejected (the notice with "Fix and resubmit").
+    applicant_message: str | None
     available_actions: list[ActionOut]  # in a queue: what I can do; empty in "my cases"
 
 
@@ -109,6 +119,7 @@ class TimelineEntryOut(BaseModel):
 
     occurred_at: datetime
     label: str
+    message: str | None  # e.g. why it was returned
 
 
 class FlagOut(BaseModel):

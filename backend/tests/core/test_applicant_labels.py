@@ -32,6 +32,7 @@ async def test_facility_letter_labels_are_the_ones_in_the_spec(db_session):
     ).all()
     assert dict(rows) == {
         "draft": "Draft",
+        "returned": "Returned: action needed",
         "submitted": "Submitted",
         "originals_received": "Being verified",
         "verified": "Awaiting signature",
@@ -89,4 +90,5 @@ async def test_the_moves_say_how_the_timeline_describes_them(db_session):
         # Cancelling a signed letter is invisible to the applicant (SCREENS.md A2).
         ("Cancel the signed letter", None, False),
         ("Cancel the signed letter", None, False),
+        ("Resubmit", "Resubmitted", True),  # 0027
     ]

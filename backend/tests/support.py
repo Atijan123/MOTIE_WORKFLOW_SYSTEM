@@ -21,10 +21,13 @@ async def open_case(act, applicant) -> dict:
     return response.json()
 
 
-async def move(act, user, case_id, to_status, comment=None):
+async def move(act, user, case_id, to_status, comment=None, applicant_message=None):
     """Ask the API to move a case; returns the response, whatever its status."""
     return await act(
-        user, "post", f"/cases/{case_id}/status", json={"to_status": to_status, "comment": comment}
+        user,
+        "post",
+        f"/cases/{case_id}/status",
+        json={"to_status": to_status, "comment": comment, "applicant_message": applicant_message},
     )
 
 

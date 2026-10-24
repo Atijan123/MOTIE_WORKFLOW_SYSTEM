@@ -35,6 +35,7 @@ _ERROR_STATUS = {
     service.InvalidAbsence: status.HTTP_422_UNPROCESSABLE_ENTITY,
     service.InvalidDocument: status.HTTP_422_UNPROCESSABLE_ENTITY,
     service.CommentRequired: status.HTTP_422_UNPROCESSABLE_ENTITY,
+    service.MessageNotExpected: status.HTTP_422_UNPROCESSABLE_ENTITY,
     service.UploadTooLarge: status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
     service.UnsupportedFileType: status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
 }
@@ -51,6 +52,7 @@ def _action_out(m: service.PermittedMove, blocked_by: list[str] | None = None) -
         name=m.transition.name,
         on_behalf_of=m.on_behalf_of,
         requires_comment=m.transition.requires_comment,
+        requires_applicant_message=m.transition.requires_applicant_message,
         blocked_by=blocked_by,
     )
 
@@ -68,6 +70,7 @@ def _summary_out(item: queues.QueueItem, user: User) -> CaseSummaryOut:
         days_waiting=item.days_waiting,
         summary=item.summary,
         applicant_name=item.applicant_name,
+        applicant_message=item.applicant_message,
         available_actions=[_action_out(m) for m in item.moves],
     )
 
@@ -83,6 +86,7 @@ async def _case_out(session: AsyncSession, case: Case, user: User) -> CaseOut:
         created_by=case.created_by,
         created_at=case.created_at,
         updated_at=case.updated_at,
+        applicant_message=await history.current_message(session, case),
         # On the case page each action says what (if anything) stops it.
         available_actions=[_action_out(m, await service.what_blocks(session, case, m.transition)) for m in moves],
         on_hold=bool(await flags.open_flags(session, case.id, blocking_only=True))
@@ -142,7 +146,12 @@ async def change_status(
     session: AsyncSession = Depends(get_session),
 ):
     case = await service.change_status(
-        session, case_id=case_id, to_status_code=body.to_status, actor=user, comment=body.comment
+        session,
+        case_id=case_id,
+        to_status_code=body.to_status,
+        actor=user,
+        comment=body.comment,
+        applicant_message=body.applicant_message,
     )
     return await _case_out(session, case, user)
 
@@ -171,7 +180,10 @@ async def case_timeline(
     """The applicant's view of what happened: plain labels and dates, oldest first.
     Staff may look at it too, to see what the applicant sees."""
     case = await service.get_case(session, case_id, user)
-    return [TimelineEntryOut(occurred_at=e.occurred_at, label=e.label) for e in await history.applicant_timeline(session, case)]
+    return [
+        TimelineEntryOut(occurred_at=e.occurred_at, label=e.label, message=e.message)
+        for e in await history.applicant_timeline(session, case)
+    ]
 
 
 def _flag_out(f) -> FlagOut:

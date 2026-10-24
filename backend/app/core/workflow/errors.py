@@ -58,7 +58,11 @@ class UnsupportedFileType(WorkflowError):
 
 
 class CommentRequired(WorkflowError):
-    """The move needs a written reason, and none was given."""
+    """The move needs a written reason (or a message to the applicant), and none was given."""
+
+
+class MessageNotExpected(WorkflowError):
+    """A message to the applicant was given on a move that doesn't send one."""
 
 
 class NotReady(WorkflowError):

@@ -37,6 +37,10 @@ async def test_facility_letter_workflow_is_seeded(db_session):
     ).all()
     assert {tuple(r) for r in rows} == {
         ("draft", "submitted", None),  # the applicant's own move (0026)
+        # Returns and the applicant's resubmission (0027).
+        ("submitted", "returned", "records_officer"),
+        ("originals_received", "returned", "etls_desk_officer"),
+        ("returned", "submitted", None),
         ("submitted", "originals_received", "records_officer"),
         ("originals_received", "verified", "etls_desk_officer"),
         ("originals_received", "rejected", "etls_desk_officer"),
