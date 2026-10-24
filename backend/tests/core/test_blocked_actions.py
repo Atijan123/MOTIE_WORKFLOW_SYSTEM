@@ -8,6 +8,7 @@ from app.core.audit.models import AuditEvent
 from tests.support import (
     confirm_hs_code,
     create_draft,
+    ready_to_verify,
     move,
     ready_for_records,
     submit,
@@ -65,14 +66,22 @@ async def test_the_desk_sees_the_hs_code_is_needed(act, people):
     blocked = (await _action(act, people["desk"], case_id, "verified"))["blocked_by"]
     assert "the HS code hasn't been confirmed by an officer" in blocked
     assert (await confirm_hs_code(act, people, case_id)).status_code == 200
+    blocked = (await _action(act, people["desk"], case_id, "verified"))["blocked_by"]
+    assert "the HS code hasn't been confirmed by an officer" not in blocked
+    # Only the ECOWAS list ticks are left.
+    assert all(reason.endswith("isn't ticked") for reason in blocked) and len(blocked) == 2
+    await ready_to_verify(act, people, case_id)
     assert (await _action(act, people["desk"], case_id, "verified"))["blocked_by"] == []
 
 
-async def test_an_open_duplicate_flag_shows_as_on_hold(act, people):
+async def test_an_open_duplicate_flag_shows_as_on_hold_at_the_desk(act, people):
     await _submit(act, people, "CO-B-DUP")
     second = await _submit(act, people, "CO-B-DUP")
     await ready_for_records(act, people, second)
-    blocked = (await _action(act, people["records_officer"], second, "originals_received"))["blocked_by"]
+    # The flag is for the desk: Records may still receive the originals.
+    assert (await _action(act, people["records_officer"], second, "originals_received"))["blocked_by"] == []
+    assert (await move(act, people["records_officer"], second, "originals_received")).status_code == 200
+    blocked = (await _action(act, people["desk"], second, "verified"))["blocked_by"]
     assert any(reason.startswith("On hold: Certificate of origin number(s) already used") for reason in blocked)
 
 

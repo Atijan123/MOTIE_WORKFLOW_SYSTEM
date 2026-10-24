@@ -14,7 +14,7 @@ from app.core.audit.models import AuditEvent
 from app.core.documents import issued, storage
 from app.core.workflow.delegation import today
 from app.modules.etls import letter
-from tests.support import confirm_hs_code, facility_letter_form, move, ready_for_records
+from tests.support import ready_to_verify, facility_letter_form, move, ready_for_records
 
 pytestmark = pytest.mark.anyio
 
@@ -32,7 +32,7 @@ async def _signed_case(act, people, **form) -> int:
 
 
 async def _verify_and_sign(act, people, case_id, hs_code="7210.49", signer="permanent_secretary"):
-    assert (await confirm_hs_code(act, people, case_id, hs_code)).status_code == 200
+    assert (await ready_to_verify(act, people, case_id, hs_code)).status_code == 200
     assert (await move(act, people["desk"], case_id, "verified")).status_code == 200
     response = await move(act, people[signer], case_id, "signed")
     assert response.status_code == 200, response.text

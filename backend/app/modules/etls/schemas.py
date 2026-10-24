@@ -93,6 +93,20 @@ class FacilityLetterOut(FacilityLetterForm):
     certificates_of_origin: list[CertificateOut]
 
 
+class OtherCaseOut(BaseModel):
+    case_id: int
+    reference: str
+    status: str  # staff wording, e.g. "Rejected"
+    status_code: str
+    submitted_at: datetime
+    importer_name: str
+
+
+class DuplicateNumberOut(BaseModel):
+    number: str  # as typed on this case
+    other_cases: list[OtherCaseOut]  # oldest first
+
+
 class HsCodeConfirmation(BaseModel):
     hs_code: HsCode
 

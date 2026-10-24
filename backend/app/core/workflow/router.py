@@ -4,18 +4,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.identity.deps import get_current_user
 from app.core.identity.models import User
-from app.core.workflow import flags, history, queues, service
+from app.core.workflow import checklist, flags, history, queues, service
 from app.core.workflow.models import Case
 from app.core.workflow.schemas import (
     ActionOut,
     AuditEventOut,
     CaseOut,
+    ChecklistItemOut,
     CaseSummaryOut,
     ChangeStatusRequest,
     FlagOut,
     ResolveFlagRequest,
     StartCaseRequest,
     StatusOut,
+    TickRequest,
     TimelineEntryOut,
 )
 from app.db.session import get_session
@@ -194,6 +196,43 @@ async def case_timeline(
         TimelineEntryOut(occurred_at=e.occurred_at, label=e.label, message=e.message)
         for e in await history.applicant_timeline(session, case)
     ]
+
+
+def _item_out(s: checklist.ItemStatus, case) -> ChecklistItemOut:
+    return ChecklistItemOut(
+        code=s.item.code,
+        label=s.item.label,
+        at_current_step=s.item.status_id == case.current_status_id,
+        ticked=s.ticked,
+        ticked_by=s.ticked_by,
+        ticked_at=s.ticked_at,
+    )
+
+
+@router.get("/{case_id}/checklist", response_model=list[ChecklistItemOut])
+async def case_checklist(
+    case_id: int,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """The things officers tick on this case (e.g. the ECOWAS ETLS list checks)."""
+    case = await service.get_case(session, case_id, user)
+    if not service.is_staff(user):
+        raise service.NotPermitted("Only Ministry staff can see a case's checklist.")
+    return [_item_out(s, case) for s in await checklist.checklist(session, case)]
+
+
+@router.put("/{case_id}/checklist/{code}", response_model=ChecklistItemOut)
+async def tick(
+    case_id: int,
+    code: str,
+    body: TickRequest,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Tick (`{"ticked": true}`) or untick one item. Both are audited."""
+    status = await checklist.set_tick(session, case_id=case_id, code=code, actor=user, ticked=body.ticked)
+    return _item_out(status, await service.get_case(session, case_id, user))
 
 
 def _flag_out(f) -> FlagOut:

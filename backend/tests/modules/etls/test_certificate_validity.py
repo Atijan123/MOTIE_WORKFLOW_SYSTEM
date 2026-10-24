@@ -13,7 +13,7 @@ from app.core.dates import add_months
 from app.core.workflow.delegation import today
 from tests.support import (
     certificate,
-    confirm_hs_code,
+    ready_to_verify,
     create_draft,
     move,
     ready_for_records,
@@ -52,7 +52,7 @@ async def _action(act, user, case_id, to_status) -> dict:
 async def _at_desk(act, people, case_id) -> None:
     await ready_for_records(act, people, case_id)
     assert (await move(act, people["records_officer"], case_id, "originals_received")).status_code == 200
-    assert (await confirm_hs_code(act, people, case_id)).status_code == 200
+    assert (await ready_to_verify(act, people, case_id)).status_code == 200
 
 
 async def test_the_form_shows_when_each_certificate_expires(act, people):

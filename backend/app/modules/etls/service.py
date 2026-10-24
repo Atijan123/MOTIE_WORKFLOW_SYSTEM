@@ -12,7 +12,7 @@ from app.core.identity.models import User
 from app.core.workflow import checks, effects, flags, summaries
 from app.core.workflow import service as workflow
 from app.core.workflow.delegation import today
-from app.core.workflow.models import Case
+from app.core.workflow.models import Case, WorkflowStatus
 from app.modules.etls.models import (
     FacilityLetter,
     FacilityLetterCertificate,
@@ -212,6 +212,36 @@ async def check_duplicates(session: AsyncSession, move: effects.Move) -> None:
         )
 
 
+async def other_uses(session: AsyncSession, case_id: int, user: User) -> dict[str, list]:
+    """For the desk (S2): each of this case's certificate numbers that another
+    submitted case also used (earlier or later), with that case's reference,
+    status and date.
+
+    Read live, so the desk sees where the earlier case is *now* (e.g. since
+    rejected), not where it was when the flag was raised."""
+    letter = await get_facility_letter(session, case_id, user)
+    if not workflow.is_staff(user):
+        raise workflow.NotPermitted("Only Ministry staff can see other applicants' cases.")
+    other = FacilityLetterCertificate.__table__.alias("other")
+    rows = await session.execute(
+        select(FacilityLetterCertificate.number, Case, WorkflowStatus, FacilityLetter.importer_name)
+        .join(other, other.c.number_normalized == FacilityLetterCertificate.number_normalized)
+        .join(Case, Case.id == other.c.case_id)
+        .join(WorkflowStatus, WorkflowStatus.id == Case.current_status_id)
+        .join(FacilityLetter, FacilityLetter.case_id == Case.id)
+        .where(
+            FacilityLetterCertificate.case_id == letter.case_id,
+            Case.id != letter.case_id,
+            Case.reference.is_not(None),  # drafts don't count, as in the check
+        )
+        .order_by(FacilityLetterCertificate.number, Case.submitted_at, Case.id)
+    )
+    found: dict[str, list] = {}
+    for number, case, status, importer in rows:
+        found.setdefault(number, []).append((case, status, importer))
+    return found
+
+
 async def get_facility_letter(session: AsyncSession, case_id: int, user: User) -> FacilityLetter:
     # The core decides who may see the case (and gives the same 404 otherwise).
     case = await workflow.get_case(session, case_id, user)
@@ -298,9 +328,11 @@ async def _check_certificates_expiring(session: AsyncSession, case: Case) -> lis
 
 
 def hs_heading(letter: FacilityLetter) -> str | None:
-    """The 4-digit HS heading (2523 = cement): the officer's code once confirmed,
-    the applicant's until then."""
-    code = letter.hs_code_confirmed or letter.hs_code
+    """The 4-digit HS heading (2523 = cement), from the code the desk confirmed.
+
+    The applicant's declared code never decides it (SCREENS.md A2): until the
+    desk confirms, whether the cement receipt is needed is "not known yet"."""
+    code = letter.hs_code_confirmed
     return code[:4] if code else None
 
 

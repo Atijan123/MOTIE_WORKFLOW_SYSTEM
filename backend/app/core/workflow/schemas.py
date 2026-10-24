@@ -125,6 +125,19 @@ class TimelineEntryOut(BaseModel):
     message: str | None  # e.g. why it was returned
 
 
+class ChecklistItemOut(BaseModel):
+    code: str
+    label: str
+    at_current_step: bool  # can be ticked now (else: ticked at an earlier or later step)
+    ticked: bool
+    ticked_by: int | None
+    ticked_at: datetime | None
+
+
+class TickRequest(BaseModel):
+    ticked: bool
+
+
 class FlagOut(BaseModel):
     id: int
     code: str

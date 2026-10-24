@@ -57,7 +57,8 @@ async def test_a_new_number_raises_no_flag(act, people):
 async def test_a_reused_number_holds_the_case_for_the_desk(act, people, make_user):
     first = await _submit(act, people["applicant"], "SN-CO-2026-0042")
     # Another importer, the same certificate written differently.
-    second = await _submit(act, await make_user("applicant"), "sn-co-2026-0042 ")
+    other = await make_user("applicant")
+    second = await _submit(act, other, "sn-co-2026-0042 ")
 
     [flag] = await _flags(act, people, second)
     assert flag["code"] == "etls.duplicate_certificate_of_origin"
@@ -68,14 +69,19 @@ async def test_a_reused_number_holds_the_case_for_the_desk(act, people, make_use
 
     case = (await act(people["records_officer"], "get", f"/cases/{second}")).json()
     assert case["on_hold"] is True
-    # Records can't confirm the originals while the case is held.
-    response = await move(act, people["records_officer"], second, "originals_received")
+    # The flag holds the case at the desk's step: Records still receives the
+    # originals, but the desk can't verify while it's open.
+    await ready_for_records(act, {**people, "applicant": other}, second)
+    assert (await move(act, people["records_officer"], second, "originals_received")).status_code == 200
+    response = await move(act, people["desk"], second, "verified")
     assert response.status_code == 409
     assert "SN-CO-2026-0042" in response.json()["detail"]
 
     history = (await act(people["desk"], "get", f"/cases/{second}/history")).json()[::-1]  # oldest first
     # Raised by submitting, together with the move.
-    assert [e["action"] for e in history][-3:] == ["case.status_changed", "case.reference_assigned", "case.flag_raised"]
+    actions = [e["action"] for e in history]
+    raised = actions.index("case.flag_raised")
+    assert actions[raised - 2 : raised] == ["case.status_changed", "case.reference_assigned"]
     # The first case is untouched.
     assert await _flags(act, people, first) == []
 

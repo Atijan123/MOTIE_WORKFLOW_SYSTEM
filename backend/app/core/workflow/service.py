@@ -13,7 +13,7 @@ from app.core.audit.service import record_event
 from app.core.identity.models import User
 from app.core.workflow.delegation import active_delegations_to, is_delegated_away, today
 from app.core.workflow import checks, effects
-from app.core.workflow.flags import open_flags
+from app.core.workflow.flags import holding, resolve_by_move
 from app.core.workflow.errors import (  # noqa: F401  (re-exported: callers use service.NotFound etc.)
     AlreadyCancelled,
     AlreadyResolved,
@@ -285,7 +285,9 @@ async def what_blocks(session: AsyncSession, case: Case, transition: WorkflowTra
     blocking flags, then the move's checks. Empty means the button can be
     pressed. Checks only read (see checks.py), so this changes nothing.
     """
-    reasons = [f"On hold: {f.message}" for f in await open_flags(session, case.id, blocking_only=True)]
+    reasons = []
+    if not transition.allowed_on_hold:
+        reasons = [f"On hold: {f.message}" for f in await holding(session, case.id, transition)]
     return reasons + await checks.problems(session, case, transition.id)
 
 
@@ -329,15 +331,16 @@ async def change_status(
     permitted = await _permitted(session, case, actor, list(moves))
     if not permitted:
         raise NotPermitted("None of your positions can make this move.")
+    chosen = permitted[0]
+    move, delegation, succession = chosen
     # Checked after permission, so someone who may not act at all gets 403, not
-    # a peek at why the case is held.
-    blocking = await open_flags(session, case.id, blocking_only=True)
-    if blocking:
+    # a peek at why the case is held. A few moves (rejecting) may be made
+    # while on hold; they resolve the flags below.
+    blocking = await holding(session, case.id, move)
+    if blocking and not move.allowed_on_hold:
         raise CaseBlocked(
             "This case is on hold until these are resolved: " + "; ".join(f.message for f in blocking)
         )
-    chosen = permitted[0]
-    move, delegation, succession = chosen
     comment = (comment or "").strip() or None
     if move.requires_comment and comment is None:
         raise CommentRequired(f"'{move.name}' needs a written reason in the comment.")
@@ -389,6 +392,10 @@ async def change_status(
             **({"warnings": warned} if warned else {}),
         },
     )
+    # A move allowed on hold resolves the flags holding the case, with its reason:
+    # the internal minute if there is one, else what the applicant was told.
+    for flag in blocking:
+        resolve_by_move(session, flag, actor=actor, move_name=move.name, reason=comment or applicant_message or "")
     # What the move sets off (e.g. issuing the signed letter), named in core.transition_effects.
     undos = await effects.run(session, effects.Move(case, actor, event), move.id)
     # Status change, audit row and effects are committed together, or not at all.

@@ -16,6 +16,28 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 8d — The desk's checks: ECOWAS ticks, the confirmed HS code, duplicates, rejecting while held (2026-10-24)
+Chunk 2, step 4.
+
+**Built:**
+- **Recorded ticks** (core, backend/app/core/workflow/checklist.py). `core.checklist_items` lists what an officer ticks at a step. For the facility letter that's the two ECOWAS ETLS list checks at the desk: the exporter's approval is listed, and the product approval covers the goods. `core.case_ticks` records who ticked each one and when.
+  - **`GET /cases/{id}/checklist`** (staff) lists the items with their ticks.
+  - **`PUT /cases/{id}/checklist/{code}`** with `{"ticked": true}` or `false` ticks or unticks. Both are audited (`case.ticked`, `case.unticked`).
+  - Only whoever may make the step's move may tick (the desk, or someone acting for it), and only items of the case's current step.
+  - The desk's Verify has the new check `checklist_complete`; `blocked_by` names any unticked item.
+  - The returns have the effect `clear_checklist`, so a resubmitted application is checked from scratch.
+- **Only the confirmed HS code decides the receipt (C5).** `hs_heading()` ignores the applicant's declared code. Until the desk confirms, the cement receipt is "not known yet" (`applies: null`). So neither Submit nor Records waits for it, and the desk's strict documents check on Verify asks for it once a 2523 code is confirmed.
+- **`GET /etls/facility-letters/{id}/duplicates`** (staff): for each certificate number on this case that another submitted case also used, those cases' reference, current status, submission date and importer. Read live, so the desk sees e.g. that the earlier case was since rejected.
+- **A flag holds the case at its own post's step.** The duplicate flag is for the desk, so it now stops only the desk's moves. Records can still receive the originals, and the case reaches the desk. Before, it blocked every move, so a flagged case could never get to the desk.
+- **Reject while held (C7).** The new column `workflow_transitions.allowed_on_hold` lets a move go ahead despite its post's open flags. The engine then resolves those flags with the move's reason: the internal minute, or else the message to the applicant. The resolution is recorded as "Reject: ..." with `by_move` in the audit row. It's set on the desk's Reject only; Return to applicant is still held.
+
+**Files:** backend/alembic/versions/0029_desk_checks.py, backend/app/core/workflow/checklist.py, backend/app/core/workflow/flags.py (`holding()`, `resolve_by_move()`), backend/app/core/workflow/service.py (`what_blocks()`, `change_status()`), backend/app/core/workflow/models.py (`ChecklistItem`, `CaseTick`), backend/app/core/workflow/router.py, backend/app/core/workflow/schemas.py, backend/app/modules/etls/service.py (`hs_heading()`, `other_uses()`), backend/app/modules/etls/router.py, backend/app/modules/etls/schemas.py, backend/tests/modules/etls/test_desk_checks.py, backend/tests/support.py (`ready_to_verify()`), and the tests that verify a letter
+**Try it:**
+- Take a case to the desk. `GET /cases/{id}/checklist` as `desk@motie.test`: two unticked items. The Verify action's `blocked_by` names them. `PUT /cases/{id}/checklist/ecowas_exporter_listed` with `{"ticked": true}`, and the other one, and they go.
+- Submit two applications with the same certificate number. The second reaches the desk; `GET /etls/facility-letters/{id}/duplicates` shows the first. Reject it with a minute: `GET /cases/{id}/flags` shows the flag resolved as "Reject: ...".
+- `docker compose run --rm tools pytest tests/modules/etls/test_desk_checks.py -v`
+**New concepts:** Recorded ticks (attestations)
+
 ### Step 8c — Certificate issue dates, and the six-month rule (2026-10-24)
 Chunk 2, step 3.
 
@@ -1063,6 +1085,11 @@ Two more ideas here:
 **Here:** `problems()` and `warnings()` in backend/app/core/workflow/checks.py; `what_blocks()` and `what_warns()` in backend/app/core/workflow/service.py; the two certificate checks in backend/app/modules/etls/service.py.
 **Learn more:** [Nielsen Norman Group: Confirmation dialogs](https://www.nngroup.com/articles/confirmation-dialog/) (when to warn and when to prevent)
 
+### Recorded ticks (attestations)
+**What:** some checks can't be done by the computer: here, looking up the exporter on the ECOWAS ETLS list, which isn't connected yet. The officer looks, then *says* they looked, by ticking. A tick that's just a checkbox on the screen proves nothing later. A **recorded tick** is a small statement, "I, this officer, confirmed this, at this time", kept in the database and the audit log, and the move checks it's there. If the item list is data, a new check is a new row, and the same mechanism will serve the certificate of origin desk (S9) and the technical review (S6). When the application changes (a return), the ticks are cleared, because they were statements about the old version.
+**Here:** `checklist()`, `set_tick()`, `_check_complete()` and `_clear()` in backend/app/core/workflow/checklist.py; the items in backend/alembic/versions/0029_desk_checks.py.
+**Learn more:** [Wikipedia: Non-repudiation](https://en.wikipedia.org/wiki/Non-repudiation) (why a record of *who* confirmed something matters later)
+
 ## 3. Decisions
 
 ### Confirmed by the Ministry
@@ -1188,7 +1215,7 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-19 | Form fields are plain checked text (country, unit, product) | fixed lists (ECOWAS countries, units, product codes) | We don't have the lists yet. Lists would make the cement rule (step 6c) much more reliable. |
 | 2026-10-19 | A reused certificate number holds the case for the desk instead of refusing the submission | refuse it with an error; a `UNIQUE` constraint | You asked for "block and flag". It also lets the desk judge real cases (a split shipment) and keeps a record of the attempt, which a refused form wouldn't. |
 | 2026-10-19 | Flags are a core feature; the ETLS module only decides *when* to raise one | an ETLS-only "duplicate" column | Other modules will need "hold this for someone to look at" (missing payment, failed GRA check). Holding a case is the engine's job. |
-| 2026-10-19 | A blocking flag stops *every* move, even rejecting | let some moves through | Simple and safe. The desk records its reason when resolving ("confirmed duplicate, rejecting") and then rejects, so the log explains both. |
+| 2026-10-19 | A blocking flag stops *every* move, even rejecting | let some moves through | Simple and safe. The desk records its reason when resolving ("confirmed duplicate, rejecting") and then rejects, so the log explains both. **Replaced in step 8d: a flag holds only its own post's moves, and Reject may go ahead while held.** |
 | 2026-10-19 | The on-hold check runs after the permission check | before it | Someone who may not act at all gets 403, not a glimpse of why the case is held. |
 | 2026-10-19 | Only a holder of the flag's post may resolve it; no delegation or succession yet | let acting officers resolve too | Keeps the first version strict. Easy to extend with the same `_permitted()` rules if the Ministry wants it. |
 | 2026-10-19 | Numbers compared normalised (upper case, spaces removed) | exact text | "SN-CO 42" and "sn-co42" are the same paper certificate; exact matching would miss the easiest way round the check. |
@@ -1294,6 +1321,15 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-24 | Warnings go in the move's audit row only when there are some | always write `"warnings": []` | Old rows and moves without warnings stay as they were. |
 | 2026-10-24 | Old applications with no issue date can't be verified ("isn't recorded") | treat them as valid | Failing closed, as with other checks. Only dev data is affected. |
 | 2026-10-24 | `long_date()` moved to `app/core/dates.py` | import it from the letter module | Check messages in `service.py` need it, and `letter.py` imports `service.py`: importing back would be circular. The frontend formatter should follow the same rules. |
+| 2026-10-24 | Ticks are a core feature (`checklist_items`, `case_ticks`) with a `checklist_complete` check | ETLS-only boolean columns on the form | The CO desk (S9) and the officer's review (S6) need the same thing. Items are data, like workflows. |
+| 2026-10-24 | Unticking deletes the tick row; the audit log keeps both events | keep every tick with an "unticked at" column | The current state is one row per item, simple to check; the history is already in the audit log. The app got `DELETE` on `case_ticks` only. |
+| 2026-10-24 | A return clears a case's ticks (effect `clear_checklist`) | keep them | They were statements about the application before the applicant changed it. Clearing on the return move (data) rather than on every form edit keeps the rule in one visible place. |
+| 2026-10-24 | Who may tick follows the move that needs the checklist (`may_make_move_with_check()`) | name the desk post | Same pattern as "original seen" and the HS code: no post in code, acting rules for free. |
+| 2026-10-24 | A blocking flag holds only the moves of the post it's for | hold every move, as before | The duplicate flag was raised at Submit and then stopped Records too, so a flagged case could never reach the desk that must judge it, nor be rejected there. Records receiving papers doesn't depend on the duplicate question. A future flag that must stop everything can be given to the first post in line. |
+| 2026-10-24 | A move allowed on hold resolves its post's open flags, with the minute (or else the applicant message) as the reason | leave the flags open; require a separate resolve first | The spec: "the rejection reason also resolves the flag". Leaving a flag open on a rejected case would show it as still needing attention. |
+| 2026-10-24 | Only Reject is allowed on hold; Return is not | allow Return too | The spec names Reject only. The desk can resolve the flag with a finding and then return, which records both. `[CONFIRM]` with C7. |
+| 2026-10-24 | The duplicates endpoint lists every *other* submitted case with the number, earlier or later | earlier cases only; the ids saved in the flag | The desk wants to know where the number was used now; a later case using the same number matters too. Read live, so the status is current. |
+| 2026-10-24 | Tick labels are my wording `[CONFIRM]` | wait for the desk | Placeholders that read sensibly; changing them is an `UPDATE` in a migration. |
 
 ## 4. Open questions
 
@@ -1337,10 +1373,22 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 - [ ] **What applicants see:** only the current status, or also the steps taken (without internal comments)? See `case_history()` in backend/app/core/workflow/router.py.
 - [ ] **Deadlines:** how many days may a file sit at each step before it's overdue? (Needed for deadline tracking, not built yet.)
 - [ ] **Drafts:** may staff see an applicant's unsubmitted draft (now yes, like every case)? Should old drafts be deleted after some time, and how long?
+- [ ] **ECOWAS list checks:** is the wording of the two ticks right ("The exporter's ETLS approval number is on the ECOWAS ETLS list"; "On the ECOWAS ETLS list, the product approval covers these goods")? Any other checks the desk does by hand? See backend/alembic/versions/0029_desk_checks.py.
+- [ ] **Holds:** may the desk also *return* (not only reject) while a duplicate flag is open? Now it must resolve the flag first.
 
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 8d
+1. Two applications use the same certificate number. The second is submitted. Can Records accept its originals? Can the desk verify it? Why the difference?
+2. The desk rejects the flagged case with the minute "exporter confirmed one shipment only" and a message to the applicant. What does the flag's `resolution` say, and why that text and not the message?
+3. An applicant declares HS code 2523.29 (cement). Is the cement receipt required at Submit? When does it become required, and which function decides?
+
+#### Show answers
+1. Records: yes. The flag is for the desk post, and `holding()` in backend/app/core/workflow/flags.py only returns flags for the post whose move it is. The desk: no; Verify is the desk's move, so the flag holds it until resolved (or the case is rejected).
+2. "Reject: exporter confirmed one shipment only". `change_status()` resolves the flags with the minute when there is one, because it's the officer's finding; the message to the applicant is only used when there's no minute.
+3. No: `applies` is null ("not known yet"), because `hs_heading()` in backend/app/modules/etls/service.py uses only `hs_code_confirmed`. It becomes required when the desk confirms a 2523 code, and the desk's Verify (strict `documents_complete`) then waits for the upload.
 
 ### Step 8c
 1. A certificate was issued on 31st August 2026. On which date does Verify start being blocked, and which function decides?

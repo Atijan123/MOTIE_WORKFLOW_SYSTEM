@@ -15,7 +15,7 @@ from app.core.documents.models import IssuedDocument
 from app.core.workflow import effects
 from app.core.workflow.delegation import today
 from app.modules.etls import letter
-from tests.support import confirm_hs_code, facility_letter_form, move, ready_for_records
+from tests.support import ready_to_verify, facility_letter_form, move, ready_for_records
 
 pytestmark = pytest.mark.anyio
 
@@ -25,7 +25,7 @@ async def _verified_case(act, people, **form) -> int:
     case_id = response.json()["case_id"]
     await ready_for_records(act, people, case_id)
     assert (await move(act, people["records_officer"], case_id, "originals_received")).status_code == 200
-    assert (await confirm_hs_code(act, people, case_id)).status_code == 200
+    assert (await ready_to_verify(act, people, case_id)).status_code == 200
     response = await move(act, people["desk"], case_id, "verified")
     assert response.status_code == 200, response.text
     return case_id

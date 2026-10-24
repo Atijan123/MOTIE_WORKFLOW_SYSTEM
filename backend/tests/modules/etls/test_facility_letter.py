@@ -5,7 +5,7 @@ from sqlalchemy import text
 
 from tests.support import (
     certificate,
-    confirm_hs_code,
+    ready_to_verify,
     facility_letter_form,
     move,
     ready_for_records,
@@ -146,7 +146,7 @@ async def test_the_case_walks_the_whole_route(act, people):
     await ready_for_records(act, people, case_id)
     for who, to_status in ROUTE:
         if to_status == "verified":
-            assert (await confirm_hs_code(act, people, case_id)).status_code == 200
+            assert (await ready_to_verify(act, people, case_id)).status_code == 200
         response = await move(act, people[who], case_id, to_status)
         assert response.status_code == 200, f"{who}: {response.text}"
     assert response.json()["status"]["is_final"] is True

@@ -1,11 +1,12 @@
 """The HS code on a facility letter: declared by the applicant, confirmed by an
-officer, and driving the receipt rule (HS heading 2523 = cement)."""
+officer. Only the confirmed code drives the receipt rule (HS heading 2523 =
+cement); until then the receipt is "not known yet"."""
 
 import pytest
 from sqlalchemy import select
 
 from app.core.audit.models import AuditEvent
-from tests.support import confirm_hs_code, facility_letter_form, move, ready_for_records, upload
+from tests.support import ECOWAS_TICKS, confirm_hs_code, facility_letter_form, move, ready_for_records, upload
 
 pytestmark = pytest.mark.anyio
 
@@ -15,11 +16,19 @@ async def _submit(act, people, **form):
 
 
 async def _at_desk(act, people, **form) -> int:
-    """A case past Records, waiting for the desk to verify it."""
+    """A case past Records, waiting for the desk to verify it, with the
+    ECOWAS list ticks done (they're not what these tests are about)."""
     case_id = (await _submit(act, people, **form)).json()["case_id"]
     await ready_for_records(act, people, case_id)
     assert (await move(act, people["records_officer"], case_id, "originals_received")).status_code == 200
+    await _tick_ecowas(act, people, case_id)
     return case_id
+
+
+async def _tick_ecowas(act, people, case_id) -> None:
+    for code in ECOWAS_TICKS:
+        response = await act(people["desk"], "put", f"/cases/{case_id}/checklist/{code}", json={"ticked": True})
+        assert response.status_code == 200, response.text
 
 
 async def _receipt_applies(act, people, case_id) -> bool:
@@ -69,6 +78,7 @@ async def _at_desk_without_code(act, people, **changes) -> int:
     # Records isn't held up by a receipt nobody can decide on yet.
     response = await move(act, people["records_officer"], case_id, "originals_received")
     assert response.status_code == 200, response.text
+    await _tick_ecowas(act, people, case_id)
     return case_id
 
 
@@ -148,9 +158,14 @@ async def test_verify_needs_a_confirmed_code(act, people):
 # --- The receipt rule follows the confirmed code -----------------------------
 
 
+async def test_a_declared_cement_code_decides_nothing_until_confirmed(act, people):
+    case_id = await _at_desk(act, people, hs_code="2523.29")
+    assert await _receipt_applies(act, people, case_id) is None
+
+
 async def test_an_officer_correcting_the_code_to_cement_makes_the_receipt_required(act, people):
     case_id = await _at_desk(act, people, hs_code="7210.49")
-    assert await _receipt_applies(act, people, case_id) is False
+    assert await _receipt_applies(act, people, case_id) is None  # declared codes don't decide
 
     assert (await confirm_hs_code(act, people, case_id, "2523.29")).status_code == 200
     assert await _receipt_applies(act, people, case_id) is True
@@ -163,10 +178,9 @@ async def test_an_officer_correcting_the_code_to_cement_makes_the_receipt_requir
 
 
 async def test_an_officer_correcting_the_code_away_from_cement_drops_the_receipt(act, people):
-    case_id = (await _submit(act, people, hs_code="2523.29")).json()["case_id"]
+    case_id = await _at_desk(act, people, hs_code="2523.29")
+    assert (await confirm_hs_code(act, people, case_id, "2523.29")).status_code == 200
     assert await _receipt_applies(act, people, case_id) is True
-    await ready_for_records(act, people, case_id)  # uploads the receipt too, since it applies
-    assert (await move(act, people["records_officer"], case_id, "originals_received")).status_code == 200
 
     assert (await confirm_hs_code(act, people, case_id, "6810.11")).status_code == 200  # cement blocks, not cement
     assert await _receipt_applies(act, people, case_id) is False

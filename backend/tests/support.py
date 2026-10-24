@@ -124,6 +124,20 @@ async def submitted_case(act, people, **form) -> int:
     return case_id
 
 
+# The ECOWAS ETLS list checks the desk ticks before Verify (0029).
+ECOWAS_TICKS = ["ecowas_exporter_listed", "ecowas_product_covered"]
+
+
+async def ready_to_verify(act, people, case_id, hs_code="7210.49"):
+    """The desk confirms the HS code and ticks the ECOWAS list checks, which
+    its Verify move needs. Returns the HS code response."""
+    response = await confirm_hs_code(act, people, case_id, hs_code)
+    for code in ECOWAS_TICKS:
+        ticked = await act(people["desk"], "put", f"/cases/{case_id}/checklist/{code}", json={"ticked": True})
+        assert ticked.status_code == 200, ticked.text
+    return response
+
+
 async def ready_for_records(act, people, case_id) -> None:
     """Upload every document the case needs and submit it (as the applicant),
     then have Records mark the original certificate of origin as seen, so

@@ -1,8 +1,10 @@
 """Case flags: something about a case needs a named post's attention.
 
-Any code (core or a module) may raise a flag. While a blocking flag is open,
-change_status() refuses to move the case. A holder of the flag's post resolves
-it with a written reason, and both events are audited.
+Any code (core or a module) may raise a flag. A blocking flag holds the case
+at its post's step: while it's open, change_status() refuses that post's
+moves (e.g. the desk's Verify), but earlier steps carry on (Records still
+receives the originals). A holder of the flag's post resolves it with a
+written reason, and both events are audited.
 """
 
 from typing import Any
@@ -65,6 +67,32 @@ async def case_flags(session: AsyncSession, case_id: int) -> list[CaseFlag]:
     """All flags on a case, open and resolved, oldest first."""
     return list(
         await session.scalars(select(CaseFlag).where(CaseFlag.case_id == case_id).order_by(CaseFlag.id))
+    )
+
+
+async def holding(session: AsyncSession, case_id: int, transition) -> list[CaseFlag]:
+    """The open blocking flags that stop this move: those for the post whose move it is."""
+    return [
+        f
+        for f in await open_flags(session, case_id, blocking_only=True)
+        if f.for_position_id == transition.required_position_id
+    ]
+
+
+def resolve_by_move(session: AsyncSession, flag: CaseFlag, *, actor: User, move_name: str, reason: str) -> None:
+    """Resolve an open flag as part of a move allowed on hold (e.g. rejecting
+    a case held for a duplicate certificate). Does NOT commit: it's saved with
+    the move. The move's own permission rules have already been applied."""
+    flag.resolved_at = func.now()
+    flag.resolved_by = actor.id
+    flag.resolution = f"{move_name}: {reason}"
+    record_event(
+        session,
+        actor=actor,
+        action="case.flag_resolved",
+        entity_type=AUDIT_ENTITY,
+        entity_id=flag.case_id,
+        details={"flag_id": flag.id, "code": flag.code, "resolution": flag.resolution, "by_move": move_name},
     )
 
 

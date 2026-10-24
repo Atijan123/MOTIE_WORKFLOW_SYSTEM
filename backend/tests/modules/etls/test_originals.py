@@ -140,16 +140,12 @@ async def test_marking_twice_changes_nothing(act, people):
     assert again["original_seen_at"] == first["original_seen_at"]
 
 
-async def test_a_declared_cement_import_cannot_be_submitted_without_the_receipt(act, people):
-    case_id = await _case(act, people, product="Portland cement", hs_code="2523.29")
-    await _upload_all(act, people, case_id, FACILITY_LETTER_DOCUMENTS)
-
-    response = await submit(act, people["applicant"], case_id)
-    assert response.status_code == 409
-    assert "Receipt (cement imports) is missing" in response.json()["detail"]
-
-    await _upload_all(act, people, case_id, ["cement_receipt"])
-    assert (await submit(act, people["applicant"], case_id)).status_code == 200
+async def test_a_declared_cement_import_passes_records_without_the_receipt(act, people):
+    # Only the desk's confirmed code decides the receipt (SCREENS.md A2), and the
+    # desk comes after Records: neither Submit nor Records waits for it.
+    case_id, _ = await _submitted(act, people, product="Portland cement", hs_code="2523.29")
+    await ready_for_records(act, people, case_id)
+    assert (await _confirm(act, people, case_id)).status_code == 200
 
 
 async def test_the_same_documents_are_enough_for_a_non_cement_import(act, people):

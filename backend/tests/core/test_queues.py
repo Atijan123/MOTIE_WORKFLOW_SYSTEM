@@ -10,7 +10,7 @@ import pytest
 from sqlalchemy import text
 
 from app.core.workflow.delegation import today
-from tests.support import confirm_hs_code, create_draft, move, ready_for_records, submitted_case
+from tests.support import ready_to_verify, create_draft, move, ready_for_records, submitted_case
 
 pytestmark = pytest.mark.anyio
 
@@ -26,7 +26,7 @@ async def _to_desk(act, people, case_id):
 
 async def _to_ps(act, people, case_id):
     await _to_desk(act, people, case_id)
-    assert (await confirm_hs_code(act, people, case_id)).status_code == 200
+    assert (await ready_to_verify(act, people, case_id)).status_code == 200
     assert (await move(act, people["desk"], case_id, "verified")).status_code == 200
 
 

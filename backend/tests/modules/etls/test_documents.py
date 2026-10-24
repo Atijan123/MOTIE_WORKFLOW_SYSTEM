@@ -13,9 +13,11 @@ from tests.support import (
     JPEG,
     PDF,
     PNG,
+    confirm_hs_code,
     facility_letter_form,
     move,
     ready_for_records,
+    submitted_case,
     upload,
 )
 
@@ -25,6 +27,16 @@ async def _case(act, people, **form) -> int:
     response = await act(people["applicant"], "post", "/etls/facility-letters", json=facility_letter_form(**form))
     assert response.status_code == 201, response.text
     return response.json()["case_id"]
+
+
+async def _confirmed(act, people, hs_code, **form) -> int:
+    """A case at the desk whose HS code the desk has confirmed: only then does
+    the code decide the receipt (SCREENS.md A2)."""
+    case_id = await submitted_case(act, people, **form)
+    await ready_for_records(act, people, case_id)
+    assert (await move(act, people["records_officer"], case_id, "originals_received")).status_code == 200
+    assert (await confirm_hs_code(act, people, case_id, hs_code)).status_code == 200
+    return case_id
 
 
 async def _checklist(act, user, case_id) -> dict[str, dict]:
@@ -37,24 +49,30 @@ async def test_five_documents_are_always_required(act, people):
     checklist = await _checklist(act, people["applicant"], await _case(act, people))
     for code in FACILITY_LETTER_DOCUMENTS:
         assert checklist[code]["applies"] and checklist[code]["missing"], code
-    # Not cement: the receipt doesn't apply.
-    assert checklist["cement_receipt"]["applies"] is False
+    # The receipt isn't known yet: the declared code doesn't decide it, the desk's does.
+    assert checklist["cement_receipt"]["applies"] is None
     assert checklist["cement_receipt"]["missing"] is False
+
+
+async def test_a_confirmed_code_other_than_cement_needs_no_receipt(act, people):
+    checklist = await _checklist(act, people["applicant"], await _confirmed(act, people, "7210.49"))
+    assert checklist["cement_receipt"]["applies"] is False
 
 
 @pytest.mark.parametrize("hs_code", ["2523.29", "252321", "2523 90 00 00"])
 async def test_hs_heading_2523_also_needs_the_receipt(act, people, hs_code):
-    checklist = await _checklist(act, people["applicant"], await _case(act, people, hs_code=hs_code))
+    case_id = await _confirmed(act, people, hs_code, certificate_of_origin_numbers=[f"CO-HS-{hs_code}"])
+    checklist = await _checklist(act, people["applicant"], case_id)
     assert checklist["cement_receipt"]["applies"] is True
     assert checklist["cement_receipt"]["missing"] is True
 
 
 async def test_the_product_wording_no_longer_decides(act, people):
     # The old rule matched "cement" in the text, so a cement mixer needed a receipt.
-    mixer = await _case(act, people, product="Cement mixer", hs_code="8474.31")
+    mixer = await _confirmed(act, people, "8474.31", product="Cement mixer", certificate_of_origin_numbers=["CO-MIX"])
     assert (await _checklist(act, people["applicant"], mixer))["cement_receipt"]["applies"] is False
     # ...and cement described without the word "cement" was missed.
-    clinker = await _case(act, people, product="Grey clinker", hs_code="2523.10")
+    clinker = await _confirmed(act, people, "2523.10", product="Grey clinker", certificate_of_origin_numbers=["CO-CLI"])
     assert (await _checklist(act, people["applicant"], clinker))["cement_receipt"]["applies"] is True
 
 

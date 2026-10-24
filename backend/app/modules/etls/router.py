@@ -11,6 +11,8 @@ from app.modules.etls.models import FacilityLetter
 from app.core.documents.models import IssuedDocument
 from app.modules.etls.schemas import (
     CertificateOut,
+    DuplicateNumberOut,
+    OtherCaseOut,
     FacilityLetterForm,
     FacilityLetterOut,
     HsCodeConfirmation,
@@ -78,6 +80,34 @@ async def get_facility_letter(
     session: AsyncSession = Depends(get_session),
 ):
     return await _out(session, await service.get_facility_letter(session, case_id, user), user)
+
+
+@router.get("/facility-letters/{case_id}/duplicates", response_model=list[DuplicateNumberOut])
+async def duplicate_certificates(
+    case_id: int,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Certificate numbers on this case that other submitted cases also used,
+    with each earlier case's reference, current status and date (staff only)."""
+    found = await service.other_uses(session, case_id, user)
+    return [
+        DuplicateNumberOut(
+            number=number,
+            other_cases=[
+                OtherCaseOut(
+                    case_id=case.id,
+                    reference=case.reference,
+                    status=status.name,
+                    status_code=status.code,
+                    submitted_at=case.submitted_at,
+                    importer_name=importer,
+                )
+                for case, status, importer in cases
+            ],
+        )
+        for number, cases in found.items()
+    ]
 
 
 @router.post("/facility-letters/{case_id}/hs-code", response_model=FacilityLetterOut)

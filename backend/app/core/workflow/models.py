@@ -120,6 +120,8 @@ class WorkflowTransition(Base):
     applicant_visible: Mapped[bool] = mapped_column(Boolean, server_default=true())
     # The move needs a message to the applicant, e.g. a return or a rejection (0027).
     requires_applicant_message: Mapped[bool] = mapped_column(Boolean, server_default=false())
+    # May be made while a blocking flag holds the case, and resolves it (0029).
+    allowed_on_hold: Mapped[bool] = mapped_column(Boolean, server_default=false())
 
     # Two links to the same table (from and to), so each says which column it uses.
     from_status: Mapped[WorkflowStatus] = relationship(
@@ -350,6 +352,41 @@ class TransitionEffect(Base):
         Integer, ForeignKey("core.workflow_transitions.id"), primary_key=True
     )
     effect_code: Mapped[str] = mapped_column(Text, primary_key=True)
+
+
+class ChecklistItem(Base):
+    """Something an officer ticks at a step, e.g. "exporter is on the ECOWAS list" (0029)."""
+
+    __tablename__ = "checklist_items"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["workflow_id", "status_id"],
+            ["core.workflow_statuses.workflow_id", "core.workflow_statuses.id"],
+            name="checklist_items_status_fkey",
+        ),
+        UniqueConstraint("workflow_id", "code", name="checklist_items_code_key"),
+        {"schema": "core"},
+    )
+
+    id: Mapped[int] = mapped_column(SmallInteger, Identity(), primary_key=True)
+    workflow_id: Mapped[int] = mapped_column(SmallInteger)
+    status_id: Mapped[int] = mapped_column(Integer)  # the step at which it's ticked
+    code: Mapped[str] = mapped_column(Text)
+    label: Mapped[str] = mapped_column(Text)
+    sort_order: Mapped[int] = mapped_column(SmallInteger)
+
+
+class CaseTick(Base):
+    """One ticked item on one case (0029). Change through workflow/checklist.py, which audits it."""
+
+    __tablename__ = "case_ticks"
+    __table_args__ = {"schema": "core"}
+    __mapper_args__ = {"eager_defaults": True}
+
+    case_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("core.cases.id"), primary_key=True)
+    item_id: Mapped[int] = mapped_column(SmallInteger, ForeignKey("core.checklist_items.id"), primary_key=True)
+    ticked_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("core.users.id"))
+    ticked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class ReferenceCounter(Base):
