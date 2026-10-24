@@ -73,6 +73,8 @@ class WorkflowStatus(Base):
     # What applicants see instead of `code` and `name` (0023).
     applicant_label: Mapped[str] = mapped_column(Text)
     applicant_explanation: Mapped[str | None] = mapped_column(Text)
+    # The applicant may still change the form in this status, e.g. a draft (0026).
+    applicant_editable: Mapped[bool] = mapped_column(Boolean, server_default=false())
 
 
 class WorkflowTransition(Base):
@@ -95,6 +97,9 @@ class WorkflowTransition(Base):
             name="workflow_transitions_move_key",
         ),
         CheckConstraint("from_status_id <> to_status_id", name="workflow_transitions_no_self_loop"),
+        CheckConstraint(
+            "by_applicant = (required_position_id IS NULL)", name="workflow_transitions_post_or_applicant"
+        ),
         {"schema": "core"},
     )
 
@@ -103,7 +108,9 @@ class WorkflowTransition(Base):
     from_status_id: Mapped[int] = mapped_column(Integer)
     to_status_id: Mapped[int] = mapped_column(Integer)
     # The post whose holders may make this move (or anyone acting for that post).
-    required_position_id: Mapped[int] = mapped_column(SmallInteger, ForeignKey("core.positions.id"))
+    # Empty for the applicant's own moves, such as "Submit" (0026).
+    required_position_id: Mapped[int | None] = mapped_column(SmallInteger, ForeignKey("core.positions.id"))
+    by_applicant: Mapped[bool] = mapped_column(Boolean, server_default=false())
     name: Mapped[str] = mapped_column(Text)
     # The move needs a written reason (the comment), e.g. cancelling a signed letter (0022).
     requires_comment: Mapped[bool] = mapped_column(Boolean, server_default=false())
@@ -125,7 +132,7 @@ class WorkflowTransition(Base):
         lazy="selectin",
         viewonly=True,
     )
-    required_position: Mapped[Position] = relationship(lazy="selectin", viewonly=True)
+    required_position: Mapped[Position | None] = relationship(lazy="selectin", viewonly=True)
 
 
 class Case(Base):

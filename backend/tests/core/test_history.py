@@ -124,7 +124,13 @@ async def test_the_applicant_timeline_uses_plain_labels(act, people):
 
     response = await act(people["applicant"], "get", f"/cases/{case_id}/timeline")
     entries = response.json()
-    assert [e["label"] for e in entries] == ["Submitted", "Originals checked", "Awaiting signature", "Letter signed"]
+    assert [e["label"] for e in entries] == [
+        "Draft",
+        "Submitted",
+        "Originals checked",
+        "Awaiting signature",
+        "Letter signed",
+    ]
     # Labels and dates only: no names, posts, comments or internal step names.
     assert all(set(e) == {"occurred_at", "label"} for e in entries)
 

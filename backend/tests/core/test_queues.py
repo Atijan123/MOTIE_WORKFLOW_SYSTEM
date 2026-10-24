@@ -10,18 +10,13 @@ import pytest
 from sqlalchemy import text
 
 from app.core.workflow.delegation import today
-from tests.support import confirm_hs_code, facility_letter_form, move, ready_for_records
+from tests.support import confirm_hs_code, create_draft, move, ready_for_records, submitted_case
 
 pytestmark = pytest.mark.anyio
 
 
 async def _submit(act, people, number="CO-Q-1", **form) -> int:
-    response = await act(
-        people["applicant"], "post", "/etls/facility-letters",
-        json=facility_letter_form(certificate_of_origin_numbers=[number], **form),
-    )
-    assert response.status_code == 201, response.text
-    return response.json()["case_id"]
+    return await submitted_case(act, people, certificate_of_origin_numbers=[number], **form)
 
 
 async def _to_desk(act, people, case_id):
@@ -48,7 +43,7 @@ async def test_an_applicant_lists_their_own_cases_newest_first(act, people, make
     first = await _submit(act, people, "CO-Q-A")
     second = await _submit(act, people, "CO-Q-B")
     other = await make_user("applicant")
-    await act(other, "post", "/etls/facility-letters", json=facility_letter_form(certificate_of_origin_numbers=["CO-Q-X"]))
+    await create_draft(act, other, certificate_of_origin_numbers=["CO-Q-X"])
 
     response = await act(people["applicant"], "get", "/cases")
     assert response.status_code == 200

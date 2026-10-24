@@ -79,18 +79,50 @@ async def confirm_hs_code(act, people, case_id, hs_code="7210.49"):
     return await act(people["desk"], "post", f"/etls/facility-letters/{case_id}/hs-code", json={"hs_code": hs_code})
 
 
-async def ready_for_records(act, people, case_id) -> None:
-    """Upload every document the case needs (as the applicant), then have Records
-    mark the original certificate of origin as seen, so Records may confirm."""
-    checklist = (await act(people["applicant"], "get", f"/cases/{case_id}/documents")).json()
+async def create_draft(act, applicant, **form) -> int:
+    """Start a facility letter application (a draft) and return its case id."""
+    response = await act(applicant, "post", "/etls/facility-letters", json=facility_letter_form(**form))
+    assert response.status_code == 201, response.text
+    return response.json()["case_id"]
+
+
+async def upload_required(act, user, case_id) -> None:
+    """Upload every document the case is known to need and doesn't have yet."""
+    checklist = (await act(user, "get", f"/cases/{case_id}/documents")).json()
     for item in checklist:
-        if item["applies"]:
-            response = await upload(act, people["applicant"], case_id, item["type"])
+        if item["missing"]:
+            response = await upload(act, user, case_id, item["type"])
             assert response.status_code == 201, response.text
-            if item["original_required"]:
-                seen = await act(
-                    people["records_officer"],
-                    "post",
-                    f"/cases/{case_id}/documents/{response.json()['id']}/original-seen",
-                )
-                assert seen.status_code == 200, seen.text
+
+
+async def submit(act, user, case_id):
+    """The applicant's "Submit" (or "Resubmit"). Returns the response."""
+    return await move(act, user, case_id, "submitted")
+
+
+async def submitted_case(act, people, **form) -> int:
+    """A facility letter with its documents, submitted: waiting for Records."""
+    case_id = await create_draft(act, people["applicant"], **form)
+    await upload_required(act, people["applicant"], case_id)
+    response = await submit(act, people["applicant"], case_id)
+    assert response.status_code == 200, response.text
+    return case_id
+
+
+async def ready_for_records(act, people, case_id) -> None:
+    """Upload every document the case needs and submit it (as the applicant),
+    then have Records mark the original certificate of origin as seen, so
+    Records may confirm."""
+    await upload_required(act, people["applicant"], case_id)
+    if (await act(people["applicant"], "get", f"/cases/{case_id}")).json()["status"]["editable"]:
+        response = await submit(act, people["applicant"], case_id)
+        assert response.status_code == 200, response.text
+    checklist = (await act(people["records_officer"], "get", f"/cases/{case_id}/documents")).json()
+    for item in checklist:
+        if item["original_required"] and item["original_pending"] and item["documents"]:
+            seen = await act(
+                people["records_officer"],
+                "post",
+                f"/cases/{case_id}/documents/{item['documents'][0]['id']}/original-seen",
+            )
+            assert seen.status_code == 200, seen.text

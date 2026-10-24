@@ -46,6 +46,7 @@ AUDIT_ENTITY = "case"
 
 class PermittedMove(NamedTuple):
     """A move this user may make, and on what basis:
+    - the applicant's own move, e.g. "Submit" (transition.by_applicant);
     - their own post (delegation and succession both None);
     - a delegation from the required post to one of theirs (`delegation`);
     - the succession order, because the required post's holders are away (`succession`).
@@ -57,12 +58,16 @@ class PermittedMove(NamedTuple):
 
     @property
     def basis(self) -> str:
+        if self.transition.by_applicant:
+            return "applicant"
         return "delegation" if self.delegation else "succession" if self.succession else "own"
 
     @property
     def on_behalf_of(self) -> str | None:
         """The post whose step this is, when the user acts for it ("acting for")."""
-        return None if self.basis == "own" else self.transition.required_position.code
+        if self.basis in ("own", "applicant"):
+            return None
+        return self.transition.required_position.code
 
 
 def is_staff(user: User) -> bool:
@@ -79,7 +84,13 @@ def status_view(status: WorkflowStatus, user: User) -> dict:
         "label": status.applicant_label,
         "explanation": status.applicant_explanation,
         "is_final": status.is_final,
+        "editable": status.applicant_editable,
     }
+
+
+def acts_as_applicant(case: Case, user: User) -> bool:
+    """May this user make the applicant's moves on this case (submit, edit the form)?"""
+    return case.created_by == user.id
 
 
 def can_view(case: Case, user: User) -> bool:
@@ -140,14 +151,16 @@ async def open_case(
             WorkflowStatus.workflow_id == workflow.id, WorkflowStatus.is_initial
         )
     )
-    # Opening is submitting, for now: the case gets its reference straight away.
-    # With drafts (chunk 2) this moves to the applicant's "Submit".
+    # A case that starts as an editable draft gets its reference when the
+    # applicant submits (the assign_reference effect). One that doesn't (the
+    # old etls_application) is submitted by opening it.
+    submitting = not initial.applicant_editable
     case = Case(
         workflow_id=workflow.id,
         current_status_id=initial.id,
         created_by=actor.id,
-        reference=await next_reference(session, workflow),
-        submitted_at=func.now(),
+        reference=await next_reference(session, workflow) if submitting else None,
+        submitted_at=func.now() if submitting else None,
     )
     session.add(case)
     await session.flush()  # sends the INSERT now, so case.id exists for the audit row
@@ -192,9 +205,16 @@ async def _permitted(
     session: AsyncSession, case: Case, user: User, transitions: list[WorkflowTransition]
 ) -> list[PermittedMove]:
     """Which of these transitions the user may make, best basis first: their own
-    posts, then a personal delegation, then the succession order."""
+    posts, then a personal delegation, then the succession order.
+
+    The applicant's moves (Submit) belong to the case's applicant only: no post
+    holds them, so delegation and succession never apply."""
+    applicant_moves = [t for t in transitions if t.by_applicant]
+    own = [PermittedMove(t) for t in applicant_moves] if acts_as_applicant(case, user) else []
+    transitions = [t for t in transitions if not t.by_applicant]
+
     held = {p.id for p in user.positions}
-    own = [PermittedMove(t) for t in transitions if t.required_position_id in held]
+    own += [PermittedMove(t) for t in transitions if t.required_position_id in held]
     rest = [t for t in transitions if t.required_position_id not in held]
     if not rest:
         return own  # nothing left that a delegation or succession could add
@@ -315,7 +335,9 @@ async def change_status(
     issues = await checks.problems(session, case, move.id)
     if issues:
         raise NotReady("Not ready: " + "; ".join(issues))
-    if delegation:
+    if move.by_applicant:
+        acting_from = None  # the applicant acts for themselves, from no post
+    elif delegation:
         acting_from = delegation.to_position.code
     elif succession:
         acting_from = next(p.code for p in actor.positions if p.id == succession.acting_position_id)
@@ -354,5 +376,26 @@ async def change_status(
     except BaseException:
         effects.undo_all(undos)
         raise
-    await session.refresh(case, ["current_status", "updated_at", "status_changed_at"])
+    await session.refresh(case, ["current_status", "updated_at", "status_changed_at", "reference", "submitted_at"])
     return case
+
+
+async def _assign_reference(session: AsyncSession, move: effects.Move) -> None:
+    """The effect of submitting: the case gets its reference, once. A case
+    resubmitted after a return keeps the one it has."""
+    case = move.case
+    if case.reference is not None:
+        return
+    case.reference = await next_reference(session, case.workflow)
+    case.submitted_at = func.now()
+    record_event(
+        session,
+        actor=move.actor,
+        action="case.reference_assigned",
+        entity_type=AUDIT_ENTITY,
+        entity_id=case.id,
+        details={"reference": case.reference},
+    )
+
+
+effects.register("assign_reference", _assign_reference)

@@ -16,6 +16,30 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 8a — Drafts, and the applicant's "Submit" (2026-10-24)
+Chunk 2, step 1.
+
+**Built:**
+- **Every facility letter starts as a draft.** `POST /etls/facility-letters` now opens the case at the new initial status `draft` (applicant label "Draft"), with **no reference yet**. The applicant uploads documents to it as before.
+- **`PUT /etls/facility-letters/{id}`** replaces the whole form while the case is a draft. Only the applicant may do it (others get 403, or 404 if it isn't their case), and only in a status marked `applicant_editable` (409 otherwise). The audit row `case.form_updated` lists each changed field, before and after. Saving an unchanged form writes nothing.
+- **"Submit" is a workflow move** (`draft → submitted`), made through the usual `POST /cases/{id}/status` with `{"to_status": "submitted"}`. It's the first move that belongs to **the applicant rather than a post**:
+  - a new column `workflow_transitions.by_applicant`, with `required_position_id` left empty (a database check keeps the two in step);
+  - `_permitted()` in backend/app/core/workflow/service.py lets only the case's applicant make such moves (`acts_as_applicant()`), never by delegation or succession;
+  - the audit row says `"basis": "applicant"` and has no `as_position`.
+- **Submit is disabled until the documents are in.** The move carries the `known_documents_complete` check, so the Submit action's `blocked_by` lists what's missing (the screen shows the count).
+- **The reference is given at submission**, by a new core effect `assign_reference` on the Submit move (audit row `case.reference_assigned`). Drafts are numbered in the order they're *submitted*. A resubmitted case (step 8b) keeps its number.
+- **The duplicate certificate check moved to Submit** (effect `etls_check_duplicate_certificates`). A draft's numbers don't count as used, and a resubmission only flags numbers no open flag covers yet.
+- **`status.editable`** in every status view tells the screen whether the form can still be changed.
+
+**Files:** backend/alembic/versions/0026_drafts.py, backend/app/core/workflow/models.py, backend/app/core/workflow/service.py (`acts_as_applicant()`, `_permitted()`, `open_case()`, `_assign_reference()`), backend/app/core/workflow/schemas.py, backend/app/modules/etls/service.py (`create_draft()`, `update_form()`, `check_duplicates()`), backend/app/modules/etls/router.py, backend/tests/support.py (`create_draft()`, `upload_required()`, `submit()`, `submitted_case()`), and the facility letter tests in tests/core and tests/modules/etls
+**Try it:**
+- As `applicant@motie.test`, `POST /etls/facility-letters`: `status_label` is "Draft" and `reference` is null.
+- `GET /cases/{id}`: the "Submit" action's `blocked_by` lists the five missing documents. Upload them (`POST /cases/{id}/documents/{type}`) and it's empty.
+- `PUT /etls/facility-letters/{id}` with a different quantity, then as `desk@motie.test` `GET /cases/{id}/history`: a `case.form_updated` row with `{"quantity": {"from": "1200.5", "to": "900"}}`.
+- `POST /cases/{id}/status` with `{"to_status": "submitted"}`: the case now has `MOTIE/ETLS/FL/2026/000n`, and appears in Records' queue.
+- `docker compose run --rm tools pytest tests/modules/etls/test_facility_letter.py tests/core/test_case_references.py -v`
+**New concepts:** Drafts and submission
+
 ### Step 7f — The acting banner and the absences screen views (2026-10-20)
 Chunk 1, step 6 (the last).
 
@@ -988,6 +1012,11 @@ Two more ideas here:
 **Here:** `issue()` and `read()` in backend/app/core/documents/issued.py; `run()` and `undo_all()` in backend/app/core/workflow/effects.py, called from `change_status()`; `issue_letter()` in backend/app/modules/etls/letter.py.
 **Learn more:** [Wikipedia: Cryptographic hash function](https://en.wikipedia.org/wiki/Cryptographic_hash_function) (the "Verifying the integrity of messages and files" section)
 
+### Drafts and submission
+**What:** an application has two lives. While it's a **draft**, it belongs only to the applicant: they can change it, add documents, and nothing official has happened. **Submitting** is the moment it becomes the Ministry's business: it gets its tracking number, other people's checks start (the duplicate check), and it lands in a queue. After that the applicant can't quietly change what was submitted; they can only change it if the Ministry hands it back (a return, step 8b). Here both lives are statuses of the same case, so the history runs unbroken from the first draft to the letter. Whether the form may be changed is a property of the status (`applicant_editable`), not a rule in code.
+**Here:** `draft` and the Submit move in backend/alembic/versions/0026_drafts.py; `update_form()` in backend/app/modules/etls/service.py; `_assign_reference()` in backend/app/core/workflow/service.py.
+**Learn more:** [GOV.UK Service Manual: Structuring forms](https://www.gov.uk/service-manual/design/form-structure) (how public services split "fill in" from "check and send")
+
 ## 3. Decisions
 
 ### Confirmed by the Ministry
@@ -1195,6 +1224,15 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-20 | The HS code is stored as digits only, 6, 8 or 10 of them | keep it as typed | "2523.29" and "252329" must compare equal. Printed back with dots on the letter. |
 | 2026-10-20 | `hs_code` is nullable in the database but required on new forms | `NOT NULL` with a made-up value for old rows | Old dev cases have no code, and inventing one would be false data. Their receipt rule fails closed. **Changed in step 6k: optional on the form; a missing code makes the rule "not known yet".** |
 | 2026-10-20 | Cases signed before step 6f get 404, not a freshly made letter | render one now for old cases | A letter made today isn't the one that was signed. Only your dev database has such cases. |
+| 2026-10-24 | The applicant's own moves are transitions with `by_applicant` and no post | an "applicant" position every applicant holds; a separate `POST /submit` endpoint outside the workflow | Submit stays data, with checks, effects and an audit row like every other move. A pretend post would let delegation or succession hand an applicant's case to someone else. |
+| 2026-10-24 | A draft needs a complete, valid form; editing replaces the whole form | allow half-filled drafts (every column nullable, a "form complete" check on Submit) | Documents attach to an existing case, so the case must exist early; requiring the fields keeps every database constraint (`NOT NULL`, quantity > 0) as it is. The screen keeps unsaved typing itself and shows the 422's field errors. Easy to loosen later. |
+| 2026-10-24 | Whether the form can be changed is a status column (`applicant_editable`) | check for the status code `draft` in the module | "Returned" (8b) is editable too; a column covers both without code knowing status names. |
+| 2026-10-24 | The reference comes from an effect on Submit (`assign_reference`) | the engine numbers any case that leaves its initial status | Which move counts as submitting is then data. `open_case()` still numbers cases at once for a workflow with no editable first status (the old `etls_application`). |
+| 2026-10-24 | The duplicate check runs at Submit, and a draft's numbers don't count | at opening, as before; count drafts too | A draft isn't an application yet: someone's abandoned draft mustn't put a real submission on hold. Checking at Submit also catches a number typed in while editing. |
+| 2026-10-24 | Child rows (approvals, certificates) are deleted and re-added on each save | edit them in place | They have no identity of their own beyond the number. The audit row's before/after keeps the history. The app got `DELETE` on these two tables only. |
+| 2026-10-24 | Submit goes through the generic `POST /cases/{id}/status` | an ETLS `POST .../submit` endpoint | Every move uses one endpoint, so `available_actions` and `blocked_by` work for Submit with no new code. |
+| 2026-10-24 | Staff can still see drafts (`can_view()` unchanged) | hide drafts from staff | It's the existing placeholder rule ("any staff member sees every case"). Drafts are in no queue, so nobody stumbles on them. `[CONFIRM]` with the visibility question. |
+| 2026-10-24 | The applicant's timeline starts with "Draft" | start at "Submitted" | It's true, and shows when they began. Easy to hide with `applicant_visible`-style data if the Ministry prefers. |
 
 ## 4. Open questions
 
@@ -1237,10 +1275,21 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 - [ ] **Who may see a case:** right now, any staff member sees every case. Should staff see only cases in their directorate, or only cases assigned to them? See `can_view()` in backend/app/core/workflow/service.py.
 - [ ] **What applicants see:** only the current status, or also the steps taken (without internal comments)? See `case_history()` in backend/app/core/workflow/router.py.
 - [ ] **Deadlines:** how many days may a file sit at each step before it's overdue? (Needed for deadline tracking, not built yet.)
+- [ ] **Drafts:** may staff see an applicant's unsubmitted draft (now yes, like every case)? Should old drafts be deleted after some time, and how long?
 
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 8a
+1. Why can't the DPS submit an applicant's draft, even when acting for everyone above them?
+2. Two applicants start drafts on Monday and submit on Tuesday in the opposite order. Which one gets `/0001`, and which code decides that?
+3. An applicant's draft uses a certificate number that's already on a submitted case. When is the flag raised, and why not when the draft is saved?
+
+#### Show answers
+1. The Submit move has `by_applicant = true` and no post. `_permitted()` gives such moves only to the case's applicant (`acts_as_applicant()`), before any delegation or succession is looked at, so there's no post for anyone to act for.
+2. The one who submits first. The number comes from the `assign_reference` effect on the Submit move (`_assign_reference()` in backend/app/core/workflow/service.py), not from opening the case.
+3. When they submit, by the `etls_check_duplicate_certificates` effect. A draft isn't an application yet; checking on save would put cases on hold over forms nobody has sent, and the numbers can still change.
 
 ### Step 7f
 1. The Director is on leave. The DPS opens any screen. What does the banner say, and why does it mention ETLS approvals only?

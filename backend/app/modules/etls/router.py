@@ -39,12 +39,26 @@ async def _out(session: AsyncSession, letter: FacilityLetter, user: User) -> Fac
 
 
 @router.post("/facility-letters", response_model=FacilityLetterOut, status_code=status.HTTP_201_CREATED)
-async def submit_facility_letter(
+async def create_facility_letter(
     body: FacilityLetterForm,
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    letter = await service.submit_facility_letter(session, actor=user, form=body)
+    """Start an application as a draft. Upload its documents, then submit it
+    with `POST /cases/{id}/status` and `{"to_status": "submitted"}`."""
+    letter = await service.create_draft(session, actor=user, form=body)
+    return await _out(session, letter, user)
+
+
+@router.put("/facility-letters/{case_id}", response_model=FacilityLetterOut)
+async def update_facility_letter(
+    case_id: int,
+    body: FacilityLetterForm,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Replace the whole form, while the application is still a draft."""
+    letter = await service.update_form(session, case_id=case_id, actor=user, form=body)
     return await _out(session, letter, user)
 
 

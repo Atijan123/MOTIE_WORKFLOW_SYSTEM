@@ -1,7 +1,9 @@
 """The Records step "originals received" on a facility letter.
 
 Records may only confirm when every required document is uploaded and the
-original certificate of origin has been marked as seen in person.
+original certificate of origin has been marked as seen in person. The
+applicant can't submit without the documents, so at Records it's the
+original that's usually left to do.
 """
 
 from datetime import timedelta
@@ -13,17 +15,25 @@ from app.core.workflow import checks
 from app.core.workflow.delegation import today
 from tests.support import (
     FACILITY_LETTER_DOCUMENTS,
-    facility_letter_form,
+    create_draft,
     move,
     ready_for_records,
+    submit,
     upload,
 )
 
 pytestmark = pytest.mark.anyio
 
 async def _case(act, people, **form) -> int:
-    response = await act(people["applicant"], "post", "/etls/facility-letters", json=facility_letter_form(**form))
-    return response.json()["case_id"]
+    return await create_draft(act, people["applicant"], **form)
+
+
+async def _submitted(act, people, **form) -> tuple[int, dict[str, int]]:
+    """A submitted case with every document uploaded, and the uploads' ids."""
+    case_id = await _case(act, people, **form)
+    ids = await _upload_all(act, people, case_id, FACILITY_LETTER_DOCUMENTS)
+    assert (await submit(act, people["applicant"], case_id)).status_code == 200
+    return case_id, ids
 
 
 async def _upload_all(act, people, case_id, types) -> dict[str, int]:
@@ -43,19 +53,25 @@ def _seen_url(case_id, document_id):
     return f"/cases/{case_id}/documents/{document_id}/original-seen"
 
 
-async def test_records_cannot_confirm_with_documents_missing(act, people):
+async def test_the_applicant_cannot_submit_with_documents_missing(act, people):
     case_id = await _case(act, people)
     await _upload_all(act, people, case_id, ["invoice"])
 
-    response = await _confirm(act, people, case_id)
+    response = await submit(act, people["applicant"], case_id)
     assert response.status_code == 409
     assert "Export declaration is missing" in response.json()["detail"]
     assert "Invoice is missing" not in response.json()["detail"]
 
 
-async def test_the_original_certificate_must_be_seen_in_person(act, people, db_session):
+async def test_records_cannot_mark_an_original_before_the_case_is_submitted(act, people):
     case_id = await _case(act, people)
-    ids = await _upload_all(act, people, case_id, FACILITY_LETTER_DOCUMENTS)
+    ids = await _upload_all(act, people, case_id, ["certificate_of_origin"])
+    url = _seen_url(case_id, ids["certificate_of_origin"])
+    assert (await act(people["records_officer"], "post", url)).status_code == 403
+
+
+async def test_the_original_certificate_must_be_seen_in_person(act, people, db_session):
+    case_id, ids = await _submitted(act, people)
 
     response = await _confirm(act, people, case_id)
     assert response.status_code == 409
@@ -84,8 +100,7 @@ async def test_a_new_scan_after_the_original_was_seen_must_be_seen_again(act, pe
 
 
 async def test_only_the_officer_receiving_originals_can_mark_them(act, people):
-    case_id = await _case(act, people)
-    ids = await _upload_all(act, people, case_id, ["certificate_of_origin"])
+    case_id, ids = await _submitted(act, people)
     url = _seen_url(case_id, ids["certificate_of_origin"])
 
     for who in ("applicant", "desk", "permanent_secretary"):
@@ -95,8 +110,7 @@ async def test_only_the_officer_receiving_originals_can_mark_them(act, people):
 async def test_someone_acting_for_records_can_mark_them(act, people):
     # The Records Officer delegates to the ETLS desk post for two days. Marking
     # originals follows the same rules as the Records move itself.
-    case_id = await _case(act, people)
-    ids = await _upload_all(act, people, case_id, ["certificate_of_origin"])
+    case_id, ids = await _submitted(act, people)
     created = await act(
         people["records_officer"],
         "post",
@@ -114,31 +128,28 @@ async def test_someone_acting_for_records_can_mark_them(act, people):
 
 
 async def test_only_documents_whose_original_is_required(act, people):
-    case_id = await _case(act, people)
-    ids = await _upload_all(act, people, case_id, ["invoice"])
+    case_id, ids = await _submitted(act, people)
     assert (await act(people["records_officer"], "post", _seen_url(case_id, ids["invoice"]))).status_code == 422
 
 
 async def test_marking_twice_changes_nothing(act, people):
-    case_id = await _case(act, people)
-    ids = await _upload_all(act, people, case_id, ["certificate_of_origin"])
+    case_id, ids = await _submitted(act, people)
     url = _seen_url(case_id, ids["certificate_of_origin"])
     first = (await act(people["records_officer"], "post", url)).json()
     again = (await act(people["records_officer"], "post", url)).json()
     assert again["original_seen_at"] == first["original_seen_at"]
 
 
-async def test_a_cement_import_cannot_pass_records_without_the_receipt(act, people):
+async def test_a_declared_cement_import_cannot_be_submitted_without_the_receipt(act, people):
     case_id = await _case(act, people, product="Portland cement", hs_code="2523.29")
-    ids = await _upload_all(act, people, case_id, FACILITY_LETTER_DOCUMENTS)
-    await act(people["records_officer"], "post", _seen_url(case_id, ids["certificate_of_origin"]))
+    await _upload_all(act, people, case_id, FACILITY_LETTER_DOCUMENTS)
 
-    response = await _confirm(act, people, case_id)
+    response = await submit(act, people["applicant"], case_id)
     assert response.status_code == 409
     assert "Receipt (cement imports) is missing" in response.json()["detail"]
 
     await _upload_all(act, people, case_id, ["cement_receipt"])
-    assert (await _confirm(act, people, case_id)).status_code == 200
+    assert (await submit(act, people["applicant"], case_id)).status_code == 200
 
 
 async def test_the_same_documents_are_enough_for_a_non_cement_import(act, people):

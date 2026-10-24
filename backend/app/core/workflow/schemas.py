@@ -21,6 +21,7 @@ class StatusOut(BaseModel):
     label: str
     explanation: str | None
     is_final: bool
+    editable: bool  # the applicant may still change the form (a draft)
 
 
 class ActionOut(BaseModel):

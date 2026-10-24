@@ -3,7 +3,7 @@
 import pytest
 from sqlalchemy import text
 
-from tests.support import facility_letter_form, move, ready_for_records
+from tests.support import create_draft, move, ready_for_records, submitted_case
 
 pytestmark = pytest.mark.anyio
 
@@ -31,6 +31,7 @@ async def test_facility_letter_labels_are_the_ones_in_the_spec(db_session):
         )
     ).all()
     assert dict(rows) == {
+        "draft": "Draft",
         "submitted": "Submitted",
         "originals_received": "Being verified",
         "verified": "Awaiting signature",
@@ -42,8 +43,7 @@ async def test_facility_letter_labels_are_the_ones_in_the_spec(db_session):
 
 
 async def test_the_applicant_sees_the_label_and_staff_see_the_code_too(act, people):
-    response = await act(people["applicant"], "post", "/etls/facility-letters", json=facility_letter_form())
-    case_id = response.json()["case_id"]
+    case_id = await submitted_case(act, people)
 
     as_applicant = (await act(people["applicant"], "get", f"/cases/{case_id}")).json()["status"]
     assert as_applicant == {
@@ -52,6 +52,7 @@ async def test_the_applicant_sees_the_label_and_staff_see_the_code_too(act, peop
         "label": "Submitted",
         "explanation": "Bring the original certificate of origin to Records.",
         "is_final": False,
+        "editable": False,
     }
 
     as_staff = (await act(people["desk"], "get", f"/cases/{case_id}")).json()["status"]
@@ -63,9 +64,7 @@ async def test_the_applicant_sees_the_label_and_staff_see_the_code_too(act, peop
 
 
 async def test_the_label_follows_the_case(act, people):
-    case_id = (await act(people["applicant"], "post", "/etls/facility-letters", json=facility_letter_form())).json()[
-        "case_id"
-    ]
+    case_id = await create_draft(act, people["applicant"])
     await ready_for_records(act, people, case_id)
     assert (await move(act, people["records_officer"], case_id, "originals_received")).status_code == 200
 

@@ -3,7 +3,7 @@
 import pytest
 from sqlalchemy import text
 
-from tests.support import confirm_hs_code, facility_letter_form, move, ready_for_records
+from tests.support import confirm_hs_code, facility_letter_form, move, ready_for_records, submit, upload_required
 
 pytestmark = pytest.mark.anyio
 
@@ -30,12 +30,13 @@ async def test_facility_letter_workflow_is_seeded(db_session):
                 "JOIN core.workflows w ON w.id = x.workflow_id "
                 "JOIN core.workflow_statuses f ON f.id = x.from_status_id "
                 "JOIN core.workflow_statuses t ON t.id = x.to_status_id "
-                "JOIN core.positions p ON p.id = x.required_position_id "
+                "LEFT JOIN core.positions p ON p.id = x.required_position_id "
                 "WHERE w.code = 'etls_facility_letter'"
             )
         )
     ).all()
     assert {tuple(r) for r in rows} == {
+        ("draft", "submitted", None),  # the applicant's own move (0026)
         ("submitted", "originals_received", "records_officer"),
         ("originals_received", "verified", "etls_desk_officer"),
         ("originals_received", "rejected", "etls_desk_officer"),
@@ -48,12 +49,13 @@ async def test_facility_letter_workflow_is_seeded(db_session):
     }
 
 
-async def test_applicant_submits_the_form_and_a_case_opens(act, people):
+async def test_the_applicant_starts_a_draft(act, people):
     response = await _submit(act, people["applicant"], product_approval_numbers=["PA-1", "PA-2"])
     assert response.status_code == 201, response.text
     body = response.json()
     # The applicant sees the plain label, never the internal step code.
-    assert (body["status"], body["status_label"]) == (None, "Submitted")
+    assert (body["status"], body["status_label"]) == (None, "Draft")
+    assert body["reference"] is None  # given on submission
     assert body["quantity"] == "1200.500"  # NUMERIC(14, 3): exact, never 1200.4999...
     assert body["product_approval_numbers"] == ["PA-1", "PA-2"]
     assert body["certificate_of_origin_numbers"] == ["SN-CO-2026-0042"]
@@ -61,7 +63,68 @@ async def test_applicant_submits_the_form_and_a_case_opens(act, people):
     case = (await act(people["applicant"], "get", f"/cases/{body['case_id']}")).json()
     assert case["workflow"] == "etls_facility_letter"
     again = await act(people["desk"], "get", f"/etls/facility-letters/{body['case_id']}")
-    assert again.json() == {**body, "status": "submitted"}  # staff also get the code
+    assert again.json() == {**body, "status": "draft"}  # staff also get the code
+
+
+async def test_the_applicant_edits_the_draft_and_the_changes_are_audited(act, people):
+    case_id = (await _submit(act, people["applicant"])).json()["case_id"]
+    changed = facility_letter_form(quantity="900", certificate_of_origin_numbers=["SN-CO-2026-0042", "SN-CO-2026-0043"])
+    response = await act(people["applicant"], "put", f"/etls/facility-letters/{case_id}", json=changed)
+    assert response.status_code == 200, response.text
+    assert response.json()["quantity"] == "900.000"
+    assert response.json()["certificate_of_origin_numbers"] == ["SN-CO-2026-0042", "SN-CO-2026-0043"]
+
+    history = (await act(people["desk"], "get", f"/cases/{case_id}/history")).json()
+    [edit] = [e for e in history if e["action"] == "case.form_updated"]
+    assert edit["details"]["changes"] == {
+        "quantity": {"from": "1200.5", "to": "900"},
+        "certificate_of_origin_numbers": {
+            "from": ["SN-CO-2026-0042"],
+            "to": ["SN-CO-2026-0042", "SN-CO-2026-0043"],
+        },
+    }
+    # Saving the same form again changes nothing and adds no audit row.
+    again = await act(people["applicant"], "put", f"/etls/facility-letters/{case_id}", json=changed)
+    assert again.status_code == 200
+    history = (await act(people["desk"], "get", f"/cases/{case_id}/history")).json()
+    assert len([e for e in history if e["action"] == "case.form_updated"]) == 1
+
+
+async def test_only_the_applicant_edits_and_only_while_a_draft(act, people, make_user):
+    case_id = (await _submit(act, people["applicant"])).json()["case_id"]
+    url = f"/etls/facility-letters/{case_id}"
+    form = facility_letter_form(quantity="5")
+    assert (await act(await make_user("applicant"), "put", url, json=form)).status_code == 404  # not theirs
+    assert (await act(people["records_officer"], "put", url, json=form)).status_code == 403
+
+    await upload_required(act, people["applicant"], case_id)
+    assert (await submit(act, people["applicant"], case_id)).status_code == 200
+    assert (await act(people["applicant"], "put", url, json=form)).status_code == 409
+    case = (await act(people["applicant"], "get", f"/cases/{case_id}")).json()
+    assert case["status"]["label"] == "Submitted"
+    assert case["status"]["editable"] is False
+
+
+async def test_only_the_applicant_may_submit(act, people):
+    case_id = (await _submit(act, people["applicant"])).json()["case_id"]
+    await upload_required(act, people["applicant"], case_id)
+    for who in ("records_officer", "desk", "permanent_secretary"):
+        assert (await submit(act, people[who], case_id)).status_code == 403, who
+    # The applicant's move names no post: nobody acts for the applicant.
+    response = await submit(act, people["applicant"], case_id)
+    assert response.status_code == 200, response.text
+    history = (await act(people["desk"], "get", f"/cases/{case_id}/history")).json()
+    [submitted] = [e for e in history if e["action"] == "case.status_changed"]
+    assert submitted["details"]["basis"] == "applicant"
+    assert submitted["details"]["as_position"] is None
+    assert submitted["acting_for"] is None
+
+
+async def test_drafts_are_in_no_staff_queue(act, people):
+    case_id = (await _submit(act, people["applicant"])).json()["case_id"]
+    for who in ("records_officer", "desk"):
+        queue = (await act(people[who], "get", "/cases/queue")).json()
+        assert case_id not in [row["id"] for row in queue]
 
 
 async def test_the_case_walks_the_whole_route(act, people):

@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.workflow import service
 from app.core.workflow.models import Workflow
-from tests.support import facility_letter_form, move, open_case, ready_for_records
+from tests.support import create_draft, move, open_case, ready_for_records, submitted_case, upload_required, submit
 
 pytestmark = pytest.mark.anyio
 
@@ -18,9 +18,8 @@ FL = re.compile(r"MOTIE/ETLS/FL/(\d{4})/(\d{4,})")
 
 
 async def _submit(act, people, **form) -> dict:
-    response = await act(people["applicant"], "post", "/etls/facility-letters", json=facility_letter_form(**form))
-    assert response.status_code == 201, response.text
-    return response.json()
+    case_id = await submitted_case(act, people, **form)
+    return (await act(people["applicant"], "get", f"/etls/facility-letters/{case_id}")).json()
 
 
 def _number(reference: str) -> int:
@@ -36,6 +35,22 @@ async def test_facility_letters_are_numbered_in_sequence(act, people):
     assert int(match.group(1)) == service.today().year
     # Other tests may have committed cases this year, so check the step, not the value.
     assert _number(second["reference"]) == _number(first["reference"]) + 1
+
+
+async def test_a_draft_has_no_reference_until_it_is_submitted(act, people, monkeypatch):
+    real_today = service.today()
+    monkeypatch.setattr(service, "today", lambda: real_today.replace(year=2096))
+    first = await create_draft(act, people["applicant"], certificate_of_origin_numbers=["CO-D-1"])
+    second = await create_draft(act, people["applicant"], certificate_of_origin_numbers=["CO-D-2"])
+    draft = (await act(people["applicant"], "get", f"/cases/{first}")).json()
+    assert (draft["reference"], draft["submitted_at"]) == (None, None)
+
+    # Numbered in the order they are submitted, not the order they were started.
+    for case_id in (second, first):
+        await upload_required(act, people["applicant"], case_id)
+        assert (await submit(act, people["applicant"], case_id)).status_code == 200
+    references = [(await act(people["applicant"], "get", f"/cases/{c}")).json()["reference"] for c in (second, first)]
+    assert references == ["MOTIE/ETLS/FL/2096/0001", "MOTIE/ETLS/FL/2096/0002"]
 
 
 async def test_each_service_has_its_own_sequence(act, people):
