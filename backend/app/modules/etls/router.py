@@ -9,7 +9,13 @@ from app.modules.etls import letter as facility_letter
 from app.modules.etls import service
 from app.modules.etls.models import FacilityLetter
 from app.core.documents.models import IssuedDocument
-from app.modules.etls.schemas import FacilityLetterForm, FacilityLetterOut, HsCodeConfirmation, IssuedLetterOut
+from app.modules.etls.schemas import (
+    CertificateOut,
+    FacilityLetterForm,
+    FacilityLetterOut,
+    HsCodeConfirmation,
+    IssuedLetterOut,
+)
 
 # Engine errors (WorkflowError) are turned into HTTP statuses by the handler in main.py.
 router = APIRouter(prefix="/etls", tags=["etls"])
@@ -34,7 +40,10 @@ async def _out(session: AsyncSession, letter: FacilityLetter, user: User) -> Fac
         exporter_country=letter.exporter_country,
         exporter_etls_approval_number=letter.exporter_etls_approval_number,
         product_approval_numbers=[a.number for a in letter.product_approvals],
-        certificate_of_origin_numbers=[c.number for c in letter.certificates],
+        certificates_of_origin=[
+            CertificateOut(number=c.number, issued_on=c.issued_on, expires_on=service.certificate_expiry(c))
+            for c in letter.certificates
+        ],
     )
 
 

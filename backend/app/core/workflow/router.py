@@ -46,7 +46,9 @@ async def workflow_error_handler(request: Request, exc: service.WorkflowError) -
     return JSONResponse(status_code=_ERROR_STATUS[type(exc)], content={"detail": str(exc)})
 
 
-def _action_out(m: service.PermittedMove, blocked_by: list[str] | None = None) -> ActionOut:
+def _action_out(
+    m: service.PermittedMove, blocked_by: list[str] | None = None, warnings: list[str] | None = None
+) -> ActionOut:
     return ActionOut(
         to_status=m.transition.to_status.code,
         name=m.transition.name,
@@ -54,6 +56,7 @@ def _action_out(m: service.PermittedMove, blocked_by: list[str] | None = None) -
         requires_comment=m.transition.requires_comment,
         requires_applicant_message=m.transition.requires_applicant_message,
         blocked_by=blocked_by,
+        warnings=warnings,
     )
 
 
@@ -88,7 +91,14 @@ async def _case_out(session: AsyncSession, case: Case, user: User) -> CaseOut:
         updated_at=case.updated_at,
         applicant_message=await history.current_message(session, case),
         # On the case page each action says what (if anything) stops it.
-        available_actions=[_action_out(m, await service.what_blocks(session, case, m.transition)) for m in moves],
+        available_actions=[
+            _action_out(
+                m,
+                await service.what_blocks(session, case, m.transition),
+                await service.what_warns(session, case, m.transition),
+            )
+            for m in moves
+        ],
         on_hold=bool(await flags.open_flags(session, case.id, blocking_only=True))
         if service.is_staff(user)
         else None,

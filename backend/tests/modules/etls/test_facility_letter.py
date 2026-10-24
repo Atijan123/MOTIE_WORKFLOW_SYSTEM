@@ -3,7 +3,15 @@
 import pytest
 from sqlalchemy import text
 
-from tests.support import confirm_hs_code, facility_letter_form, move, ready_for_records, submit, upload_required
+from tests.support import (
+    certificate,
+    confirm_hs_code,
+    facility_letter_form,
+    move,
+    ready_for_records,
+    submit,
+    upload_required,
+)
 
 pytestmark = pytest.mark.anyio
 
@@ -62,7 +70,9 @@ async def test_the_applicant_starts_a_draft(act, people):
     assert body["reference"] is None  # given on submission
     assert body["quantity"] == "1200.500"  # NUMERIC(14, 3): exact, never 1200.4999...
     assert body["product_approval_numbers"] == ["PA-1", "PA-2"]
-    assert body["certificate_of_origin_numbers"] == ["SN-CO-2026-0042"]
+    [certificate] = body["certificates_of_origin"]
+    assert certificate["number"] == "SN-CO-2026-0042"
+    assert certificate["expires_on"] is not None  # six months after issued_on
 
     case = (await act(people["applicant"], "get", f"/cases/{body['case_id']}")).json()
     assert case["workflow"] == "etls_facility_letter"
@@ -76,15 +86,15 @@ async def test_the_applicant_edits_the_draft_and_the_changes_are_audited(act, pe
     response = await act(people["applicant"], "put", f"/etls/facility-letters/{case_id}", json=changed)
     assert response.status_code == 200, response.text
     assert response.json()["quantity"] == "900.000"
-    assert response.json()["certificate_of_origin_numbers"] == ["SN-CO-2026-0042", "SN-CO-2026-0043"]
+    assert [c["number"] for c in response.json()["certificates_of_origin"]] == ["SN-CO-2026-0042", "SN-CO-2026-0043"]
 
     history = (await act(people["desk"], "get", f"/cases/{case_id}/history")).json()
     [edit] = [e for e in history if e["action"] == "case.form_updated"]
     assert edit["details"]["changes"] == {
         "quantity": {"from": "1200.5", "to": "900"},
-        "certificate_of_origin_numbers": {
-            "from": ["SN-CO-2026-0042"],
-            "to": ["SN-CO-2026-0042", "SN-CO-2026-0043"],
+        "certificates_of_origin": {
+            "from": [changed["certificates_of_origin"][0]],
+            "to": changed["certificates_of_origin"],
         },
     }
     # Saving the same form again changes nothing and adds no audit row.
@@ -146,15 +156,18 @@ async def test_the_case_walks_the_whole_route(act, people):
     "changes",
     [
         {"product_approval_numbers": []},
-        {"certificate_of_origin_numbers": []},
-        {"certificate_of_origin_numbers": ["CO 1", "co1"]},  # the same number twice
+        {"certificates_of_origin": []},
+        {"certificates_of_origin": [certificate("CO 1"), certificate("co1")]},  # the same number twice
+        {"certificates_of_origin": [{"number": "CO 1"}]},  # no issue date
+        {"certificates_of_origin": [{"number": "CO 1", "issued_on": "2999-01-01"}]},
         {"product_approval_numbers": ["PA-1", "PA-1"]},
         {"quantity": "0"},
         {"quantity": "1.2345"},  # more than 3 decimal places
         {"importer_name": "   "},
         {"exporter_country": "x" * 201},
     ],
-    ids=["no-approvals", "no-certificates", "repeated-certificate", "repeated-approval",
+    ids=["no-approvals", "no-certificates", "repeated-certificate", "no-issue-date", "issued-in-future",
+         "repeated-approval",
          "zero-quantity", "too-precise", "blank-name", "too-long"],
 )
 async def test_invalid_forms_are_refused(act, people, changes):

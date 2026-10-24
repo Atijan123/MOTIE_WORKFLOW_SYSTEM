@@ -21,7 +21,6 @@ file reference format (settings.facility_letter_reference_format).
 import hashlib
 import re
 from dataclasses import asdict, dataclass
-from datetime import date
 from pathlib import Path
 from string import Template
 
@@ -31,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit.models import AuditEvent
 from app.core.config import settings
+from app.core.dates import long_date  # noqa: F401  (also used as letter.long_date)
 from app.core.documents import issued
 from app.core.documents.models import IssuedDocument
 from app.core.identity.models import Position, User
@@ -104,17 +104,6 @@ def download_name(reference: str, number: int = 1) -> str:
     """facility-letter-MOTIE-ETLS-FL-2026-00042.pdf; a correction ends -2, -3, ..."""
     name = "facility-letter-" + re.sub(r"[^A-Za-z0-9-]+", "-", reference).strip("-")
     return f"{name}-{number}.pdf" if number > 1 else f"{name}.pdf"
-
-
-def _ordinal(n: int) -> str:
-    # 11th, 12th and 13th break the 1st/2nd/3rd pattern.
-    suffix = "th" if 11 <= n % 100 <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
-    return f"{n}{suffix}"
-
-
-def long_date(day: date) -> str:
-    """The Ministry's letter date: "16th September, 2026"."""
-    return f"{_ordinal(day.day)} {day:%B}, {day.year}"
 
 
 def _quantity(letter: FacilityLetter) -> str:

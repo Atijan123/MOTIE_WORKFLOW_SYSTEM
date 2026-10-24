@@ -289,6 +289,11 @@ async def what_blocks(session: AsyncSession, case: Case, transition: WorkflowTra
     return reasons + await checks.problems(session, case, transition.id)
 
 
+async def what_warns(session: AsyncSession, case: Case, transition: WorkflowTransition) -> list[str]:
+    """What the move's warning-only checks would say (e.g. a certificate about to expire)."""
+    return await checks.warnings(session, case, transition.id)
+
+
 async def change_status(
     session: AsyncSession,
     *,
@@ -347,6 +352,8 @@ async def change_status(
     issues = await checks.problems(session, case, move.id)
     if issues:
         raise NotReady("Not ready: " + "; ".join(issues))
+    # Recorded with the move, so the history shows what the actor was told.
+    warned = await checks.warnings(session, case, move.id)
     if move.by_applicant:
         acting_from = None  # the applicant acts for themselves, from no post
     elif delegation:
@@ -379,6 +386,7 @@ async def change_status(
             "absence_ids": [a.id for a in succession.absences] if succession else [],
             "comment": comment,  # internal: staff only
             "applicant_message": applicant_message,  # shown to the applicant
+            **({"warnings": warned} if warned else {}),
         },
     )
     # What the move sets off (e.g. issuing the signed letter), named in core.transition_effects.

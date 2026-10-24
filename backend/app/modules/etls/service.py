@@ -1,13 +1,17 @@
 """ETLS facility letters: the form (a draft until submitted), the duplicate check, and the HS code."""
 
+from datetime import date
+
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit.service import record_event
+from app.core.dates import add_months, long_date
 from app.core.documents import facts
 from app.core.identity.models import User
 from app.core.workflow import checks, effects, flags, summaries
 from app.core.workflow import service as workflow
+from app.core.workflow.delegation import today
 from app.core.workflow.models import Case
 from app.modules.etls.models import (
     FacilityLetter,
@@ -22,6 +26,10 @@ DUPLICATE_CERTIFICATE = "etls.duplicate_certificate_of_origin"
 DESK = "etls_desk_officer"
 HS_CODE_CONFIRMED = "hs_code_confirmed"  # transition check, on the desk's "Verify" move
 CHECK_DUPLICATES = "etls_check_duplicate_certificates"  # transition effect, on "Submit"
+CERTIFICATES_VALID = "etls_certificates_valid"  # check on "Verify": none past six months
+CERTIFICATES_EXPIRING = "etls_certificates_expiring"  # warning on "Submit": one expires soon
+VALID_MONTHS = 6
+WARN_DAYS = 30
 
 
 async def _earlier_uses(session: AsyncSession, case_id: int, numbers: list[str]) -> dict[str, list[int]]:
@@ -75,18 +83,26 @@ def _children(case_id: int, form: FacilityLetterForm) -> list:
     return [
         *(FacilityLetterProductApproval(case_id=case_id, number=n) for n in form.product_approval_numbers),
         *(
-            FacilityLetterCertificate(case_id=case_id, number=n, number_normalized=normalize_certificate_number(n))
-            for n in form.certificate_of_origin_numbers
+            FacilityLetterCertificate(
+                case_id=case_id,
+                number=c.number,
+                number_normalized=normalize_certificate_number(c.number),
+                issued_on=c.issued_on,
+            )
+            for c in form.certificates_of_origin
         ),
     ]
 
 
-def _snapshot(fields: dict, approvals: list[str], certificates: list[str]) -> dict:
+def _snapshot(fields: dict, approvals: list[str], certificates: list) -> dict:
     """The form as plain JSON values, for comparing before and after an edit."""
     return {
         **{k: format(v.normalize(), "f") if k == "quantity" else v for k, v in fields.items()},
         "product_approval_numbers": approvals,
-        "certificate_of_origin_numbers": certificates,
+        "certificates_of_origin": [
+            {"number": c.number, "issued_on": c.issued_on.isoformat() if c.issued_on else None}
+            for c in certificates
+        ],
     }
 
 
@@ -131,9 +147,9 @@ async def update_form(
     before = _snapshot(
         {k: getattr(letter, k) for k in _form_rows(form)},
         [a.number for a in letter.product_approvals],
-        [c.number for c in letter.certificates],
+        list(letter.certificates),
     )
-    after = _snapshot(_form_rows(form), list(form.product_approval_numbers), list(form.certificate_of_origin_numbers))
+    after = _snapshot(_form_rows(form), list(form.product_approval_numbers), list(form.certificates_of_origin))
     changes = {k: {"from": before[k], "to": after[k]} for k in after if before[k] != after[k]}
     if not changes:
         return letter
@@ -243,6 +259,44 @@ async def _check_hs_code_confirmed(session: AsyncSession, case: Case) -> list[st
     return []
 
 
+def certificate_expiry(certificate: FacilityLetterCertificate) -> date | None:
+    """The last day the certificate is valid: six months after its issue date."""
+    return add_months(certificate.issued_on, VALID_MONTHS) if certificate.issued_on else None
+
+
+async def _check_certificates_valid(session: AsyncSession, case: Case) -> list[str]:
+    """Blocks Verify: a certificate more than six months past its issue date, or with no date."""
+    letter = await session.get(FacilityLetter, case.id)
+    problems = []
+    for certificate in letter.certificates if letter else []:
+        expiry = certificate_expiry(certificate)
+        if expiry is None:
+            problems.append(f"the issue date of certificate of origin {certificate.number} isn't recorded")
+        elif today() > expiry:
+            problems.append(
+                f"certificate of origin {certificate.number} expired on {long_date(expiry)} "
+                f"(issued {long_date(certificate.issued_on)})"
+            )
+    return problems
+
+
+async def _check_certificates_expiring(session: AsyncSession, case: Case) -> list[str]:
+    """A warning on Submit: a certificate that has expired or will within 30 days.
+    The applicant may still submit; the desk can't verify once it's expired."""
+    letter = await session.get(FacilityLetter, case.id)
+    found = []
+    for certificate in letter.certificates if letter else []:
+        expiry = certificate_expiry(certificate)
+        if expiry is None or (expiry - today()).days > WARN_DAYS:
+            continue
+        verb = "expired" if expiry < today() else "expires"
+        found.append(
+            f"certificate of origin {certificate.number} {verb} on {long_date(expiry)}; "
+            "the Ministry can't verify your application with an expired certificate"
+        )
+    return found
+
+
 def hs_heading(letter: FacilityLetter) -> str | None:
     """The 4-digit HS heading (2523 = cement): the officer's code once confirmed,
     the applicant's until then."""
@@ -276,4 +330,6 @@ async def facility_letter_summaries(session: AsyncSession, case_ids: list[int]) 
 facts.register(FACILITY_LETTER, facility_letter_facts)
 summaries.register(FACILITY_LETTER, facility_letter_summaries)
 checks.register(HS_CODE_CONFIRMED, _check_hs_code_confirmed)
+checks.register(CERTIFICATES_VALID, _check_certificates_valid)
+checks.register(CERTIFICATES_EXPIRING, _check_certificates_expiring)
 effects.register(CHECK_DUPLICATES, check_duplicates)

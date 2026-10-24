@@ -3,7 +3,9 @@
 Which transition needs which check is data (core.transition_checks). What a
 check does is a function registered here under its name, by whichever part of
 the code knows how (e.g. the documents service registers "documents_complete").
-A check returns the problems it found; an empty list means it passed. A check
+A check returns the problems it found; an empty list means it passed. A row
+marked warn_only turns its problems into warnings: shown on the action and
+recorded with the move, but never stopping it. A check
 must only read: the API also runs every check as a dry run, to show staff why a
 button is disabled (service.what_blocks()).
 """
@@ -33,9 +35,18 @@ def registered() -> set[str]:
 
 async def problems(session: AsyncSession, case: Case, transition_id: int) -> list[str]:
     """Everything that stops this move right now, from all its checks."""
+    return await _run(session, case, transition_id, warn_only=False)
+
+
+async def warnings(session: AsyncSession, case: Case, transition_id: int) -> list[str]:
+    """What the person making this move should know, but which doesn't stop it."""
+    return await _run(session, case, transition_id, warn_only=True)
+
+
+async def _run(session: AsyncSession, case: Case, transition_id: int, *, warn_only: bool) -> list[str]:
     codes = await session.scalars(
         select(TransitionCheck.check_code)
-        .where(TransitionCheck.transition_id == transition_id)
+        .where(TransitionCheck.transition_id == transition_id, TransitionCheck.warn_only == warn_only)
         .order_by(TransitionCheck.check_code)
     )
     found: list[str] = []

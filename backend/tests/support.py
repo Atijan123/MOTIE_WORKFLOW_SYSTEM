@@ -1,5 +1,9 @@
 """Constants and helpers shared by tests. (Fixtures live in conftest.py; pytest finds those itself.)"""
 
+from datetime import date, timedelta
+
+from app.core.workflow.delegation import today
+
 TEST_PASSWORD = "test password 123"
 
 # Each person in the ETLS chain: their role and the post they hold.
@@ -31,8 +35,16 @@ async def move(act, user, case_id, to_status, comment=None, applicant_message=No
     )
 
 
-def facility_letter_form(**changes) -> dict:
-    """A valid ETLS facility letter form (JSON body); pass changes to vary it."""
+def certificate(number: str, issued_on: date | None = None) -> dict:
+    """One certificate of origin on the form; issued a month ago unless said otherwise."""
+    return {"number": number, "issued_on": (issued_on or today() - timedelta(days=30)).isoformat()}
+
+
+def facility_letter_form(*, certificate_of_origin_numbers: list[str] | None = None, **changes) -> dict:
+    """A valid ETLS facility letter form (JSON body); pass changes to vary it.
+
+    `certificate_of_origin_numbers=["A", "B"]` is a shortcut for certificates
+    with those numbers, each issued a month ago."""
     form = {
         "importer_name": "Kombo Building Supplies Ltd",
         "importer_address": "12 Kairaba Avenue, Serrekunda",
@@ -44,7 +56,7 @@ def facility_letter_form(**changes) -> dict:
         "exporter_country": "Senegal",
         "exporter_etls_approval_number": "SN-ETLS-0091",
         "product_approval_numbers": ["SN-PA-2025-011"],
-        "certificate_of_origin_numbers": ["SN-CO-2026-0042"],
+        "certificates_of_origin": [certificate(n) for n in certificate_of_origin_numbers or ["SN-CO-2026-0042"]],
     }
     form.update(changes)
     return form

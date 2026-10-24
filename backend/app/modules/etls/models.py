@@ -3,10 +3,10 @@
 They point at core.cases; core code never reads them.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, CheckConstraint, DateTime, ForeignKey, Index, Numeric, Text
+from sqlalchemy import BigInteger, CheckConstraint, Date, DateTime, ForeignKey, Index, Numeric, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -36,6 +36,9 @@ class FacilityLetterCertificate(Base):
     )
     number: Mapped[str] = mapped_column(Text)  # as typed, for the letter
     number_normalized: Mapped[str] = mapped_column(Text, primary_key=True)  # for comparing
+    # Valid for six months from this date (0028). Empty only on applications
+    # from before then.
+    issued_on: Mapped[date | None] = mapped_column(Date)
 
 
 class FacilityLetter(Base):

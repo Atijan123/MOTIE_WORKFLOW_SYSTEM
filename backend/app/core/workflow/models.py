@@ -333,6 +333,8 @@ class TransitionCheck(Base):
         Integer, ForeignKey("core.workflow_transitions.id"), primary_key=True
     )
     check_code: Mapped[str] = mapped_column(Text, primary_key=True)
+    # Its findings are shown and recorded, but never stop the move (0028).
+    warn_only: Mapped[bool] = mapped_column(Boolean, server_default=false())
 
 
 class TransitionEffect(Base):

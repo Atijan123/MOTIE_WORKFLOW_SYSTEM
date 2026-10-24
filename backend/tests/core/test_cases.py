@@ -181,6 +181,7 @@ async def test_available_actions_depend_on_who_is_asking(act, people):
             "requires_comment": False,
             "requires_applicant_message": False,
             "blocked_by": [],
+            "warnings": [],
         }
     ]
     assert as_officer["available_actions"] == []

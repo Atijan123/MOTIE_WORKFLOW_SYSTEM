@@ -41,6 +41,9 @@ class ActionOut(BaseModel):
     # Why the button is disabled right now, e.g. ["Invoice is missing"]; empty
     # when it can be pressed. Null where it isn't worked out (queues, for speed).
     blocked_by: list[str] | None = None
+    # Things to know before pressing it, which don't stop it (e.g. "certificate
+    # SN-CO-1 expires on 3rd November, 2026"). Null where not worked out.
+    warnings: list[str] | None = None
 
 
 class CaseOut(BaseModel):

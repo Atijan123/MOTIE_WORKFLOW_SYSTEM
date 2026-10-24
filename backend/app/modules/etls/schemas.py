@@ -1,9 +1,11 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 from typing import Annotated
 
 from pydantic import AfterValidator, BaseModel, Field, StringConstraints, field_validator
+
+from app.core.workflow.delegation import today
 
 # Stripped of surrounding spaces, never empty, and bounded so nobody can store a
 # novel in a form field.
@@ -31,6 +33,18 @@ def normalize_certificate_number(number: str) -> str:
     return "".join(number.split()).upper()
 
 
+class CertificateOfOrigin(BaseModel):
+    number: Number
+    issued_on: date  # valid for six months from this date
+
+    @field_validator("issued_on")
+    @classmethod
+    def _not_in_the_future(cls, issued_on: date) -> date:
+        if issued_on > today():
+            raise ValueError("a certificate can't be issued in the future")
+        return issued_on
+
+
 class FacilityLetterForm(BaseModel):
     importer_name: ShortText
     importer_address: LongText
@@ -44,7 +58,7 @@ class FacilityLetterForm(BaseModel):
     exporter_country: ShortText
     exporter_etls_approval_number: Number
     product_approval_numbers: list[Number] = Field(min_length=1, max_length=50)
-    certificate_of_origin_numbers: list[Number] = Field(min_length=1, max_length=50)
+    certificates_of_origin: list[CertificateOfOrigin] = Field(min_length=1, max_length=50)
 
     @field_validator("product_approval_numbers")
     @classmethod
@@ -53,13 +67,19 @@ class FacilityLetterForm(BaseModel):
             raise ValueError("a product approval number is listed twice")
         return numbers
 
-    @field_validator("certificate_of_origin_numbers")
+    @field_validator("certificates_of_origin")
     @classmethod
-    def _no_repeated_certificates(cls, numbers: list[str]) -> list[str]:
-        normalized = [normalize_certificate_number(n) for n in numbers]
+    def _no_repeated_certificates(cls, certificates: list) -> list:
+        normalized = [normalize_certificate_number(c.number) for c in certificates]
         if len(set(normalized)) != len(normalized):
             raise ValueError("a certificate of origin number is listed twice")
-        return numbers
+        return certificates
+
+
+class CertificateOut(BaseModel):
+    number: str
+    issued_on: date | None  # empty only on applications from before issue dates were asked
+    expires_on: date | None  # six months after issue
 
 
 class FacilityLetterOut(FacilityLetterForm):
@@ -70,6 +90,7 @@ class FacilityLetterOut(FacilityLetterForm):
     # Cases from before step 6g have no declared code.
     hs_code: str | None
     hs_code_confirmed: str | None
+    certificates_of_origin: list[CertificateOut]
 
 
 class HsCodeConfirmation(BaseModel):

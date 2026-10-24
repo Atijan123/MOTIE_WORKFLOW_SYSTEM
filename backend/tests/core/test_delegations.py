@@ -64,6 +64,7 @@ async def test_delegate_can_act_and_the_audit_log_says_on_whose_behalf(act, peop
             "requires_comment": False,
             "requires_applicant_message": False,
             "blocked_by": [],
+            "warnings": [],
         }
     ]
 

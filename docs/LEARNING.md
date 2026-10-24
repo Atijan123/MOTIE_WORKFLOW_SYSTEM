@@ -16,6 +16,22 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 8c — Certificate issue dates, and the six-month rule (2026-10-24)
+Chunk 2, step 3.
+
+**Built:**
+- **Each certificate of origin has an issue date.** The form's `certificate_of_origin_numbers` (a list of strings) became **`certificates_of_origin`**: a list of `{"number", "issued_on"}`. The date is required and can't be in the future. Responses add **`expires_on`**, six calendar months after `issued_on`. It's stored in the new column `etls.facility_letter_certificates.issued_on`; it's empty only on applications from before this step.
+- **Verify is blocked by an expired certificate.** The new check `etls_certificates_valid` on the desk's Verify fails while any certificate is past its expiry date (or has no date). The desk's `blocked_by` says which one, e.g. "certificate of origin SN-CO-1 expired on 16th April, 2026 (issued 16th October, 2025)". On the expiry day itself it's still valid.
+- **Warning-only checks.** `core.transition_checks.warn_only` turns a check's findings into **warnings**: listed on the action as `warnings` (next to `blocked_by`), recorded in the move's audit row as `"warnings"`, but never stopping the move. The first one, `etls_certificates_expiring` on Submit and Resubmit, warns when a certificate expires within 30 days, or already has.
+- **`app/core/dates.py`**: `long_date()` moved here from the letter code (`letter.long_date` still works), plus `add_months()`, which handles month ends: 31st August + 6 months = 28th February.
+
+**Files:** backend/alembic/versions/0028_certificate_validity.py, backend/app/core/dates.py, backend/app/core/workflow/checks.py (`problems()`, `warnings()`), backend/app/core/workflow/service.py (`what_warns()`, `change_status()`), backend/app/core/workflow/router.py, backend/app/core/workflow/schemas.py, backend/app/core/workflow/models.py, backend/app/modules/etls/schemas.py (`CertificateOfOrigin`, `CertificateOut`), backend/app/modules/etls/service.py (`certificate_expiry()`, `_check_certificates_valid()`, `_check_certificates_expiring()`), backend/app/modules/etls/models.py, backend/app/modules/etls/router.py, backend/app/modules/etls/letter.py, backend/tests/modules/etls/test_certificate_validity.py, backend/tests/support.py (`certificate()`)
+**Try it:**
+- Start a draft whose certificate was issued five and a half months ago: `"certificates_of_origin": [{"number": "SN-CO-1", "issued_on": "2026-05-10"}]`. Upload the documents. `GET /cases/{id}`: the Submit action has an empty `blocked_by` and one entry in `warnings`.
+- Submit, take it through Records, and once the date has passed, the desk's Verify is blocked with the expiry date.
+- `docker compose run --rm tools pytest tests/modules/etls/test_certificate_validity.py -v`
+**New concepts:** Blocking checks and warnings
+
 ### Step 8b — Returning an application, and resubmitting it (2026-10-24)
 Chunk 2, step 2.
 
@@ -1042,6 +1058,11 @@ Two more ideas here:
 **Here:** `draft` and the Submit move in backend/alembic/versions/0026_drafts.py; `update_form()` in backend/app/modules/etls/service.py; `_assign_reference()` in backend/app/core/workflow/service.py.
 **Learn more:** [GOV.UK Service Manual: Structuring forms](https://www.gov.uk/service-manual/design/form-structure) (how public services split "fill in" from "check and send")
 
+### Blocking checks and warnings
+**What:** a rule can do two different things to a move. A **blocking check** says "not yet": the move is refused until it passes, and the button shows why (`blocked_by`). A **warning** says "are you sure?": the person is told before they press, the move goes ahead, and the warning is recorded with it, so nobody can later say they weren't told. The same rule can be either at different steps. Here a nearly expired certificate is only a warning when the applicant submits (it's their risk), but an expired one blocks the desk's Verify (the Ministry mustn't approve it). Which one applies is a column on the link between the move and the check (`warn_only`), not code.
+**Here:** `problems()` and `warnings()` in backend/app/core/workflow/checks.py; `what_blocks()` and `what_warns()` in backend/app/core/workflow/service.py; the two certificate checks in backend/app/modules/etls/service.py.
+**Learn more:** [Nielsen Norman Group: Confirmation dialogs](https://www.nngroup.com/articles/confirmation-dialog/) (when to warn and when to prevent)
+
 ## 3. Decisions
 
 ### Confirmed by the Ministry
@@ -1265,6 +1286,14 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-24 | Editing the product or HS code clears the desk's confirmed code | keep it | It was confirmed for different goods. The desk's Verify needs a confirmed code, so it must be looked at again; the cleared value stays in the audit row. |
 | 2026-10-24 | Reject needs a message to the applicant; the minute stays optional | require the minute too | The spec says the applicant sees the reason. A minute can be added when the desk wants one. |
 | 2026-10-24 | Timeline entries with a message are always shown, even if the label repeats | dedupe by label as before | Two returns in a row each carry a different message the applicant must see. |
+| 2026-10-24 | The form field became a list of `{number, issued_on}` (`certificates_of_origin`) | keep `certificate_of_origin_numbers` and add a parallel list of dates | A date belongs to one certificate; two lists can fall out of step. There's no frontend yet, so changing the API costs nothing now. |
+| 2026-10-24 | Six months = the same day six calendar months later, the month's last day if there's no such day; valid through that day | 182 days; valid until the day before | It's how people read "six months" on a certificate. Counting days would drift by a day or two. `[CONFIRM]` the exact convention with the desk if a boundary case matters. |
+| 2026-10-24 | Verify is measured against today (the day the desk verifies) | the submission date | The Ministry's answer: blocked if more than six months past issue *at Verify*. |
+| 2026-10-24 | The submission warning also covers certificates that have already expired | warn only for "within 30 days, not yet expired" | An expired certificate is the strongest reason to warn; the applicant may still submit and replace it after a return. |
+| 2026-10-24 | Warnings are a property of the link between move and check (`warn_only`) | a separate warnings table; a flag on the check's code | The same check could warn at one step and block at another. Everything else about checks (registry, dry run) is reused. |
+| 2026-10-24 | Warnings go in the move's audit row only when there are some | always write `"warnings": []` | Old rows and moves without warnings stay as they were. |
+| 2026-10-24 | Old applications with no issue date can't be verified ("isn't recorded") | treat them as valid | Failing closed, as with other checks. Only dev data is affected. |
+| 2026-10-24 | `long_date()` moved to `app/core/dates.py` | import it from the letter module | Check messages in `service.py` need it, and `letter.py` imports `service.py`: importing back would be circular. The frontend formatter should follow the same rules. |
 
 ## 4. Open questions
 
@@ -1312,6 +1341,16 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 8c
+1. A certificate was issued on 31st August 2026. On which date does Verify start being blocked, and which function decides?
+2. Why can the applicant submit with an expired certificate, but the desk can't verify it? Where in the database is that difference?
+3. Months later someone asks "was the applicant told the certificate was about to expire?" Where do you look?
+
+#### Show answers
+1. On 1st March 2027. `certificate_expiry()` uses `add_months()`, which gives 28th February 2027 (February has no 31st); the certificate is valid through that day, and `_check_certificates_valid()` fails once `today() > expiry`.
+2. The expiring check is linked to Submit with `warn_only = true`, so it only produces `warnings`. The valid check is linked to Verify as a normal (blocking) check. Both links are rows in `core.transition_checks` (migration 0028).
+3. In the Submit move's audit row (`GET /cases/{id}/history`, the `case.status_changed` row to `submitted`): `details.warnings` holds the exact text they were shown.
 
 ### Step 8b
 1. The desk returns a case with a message and a minute. Name every place the applicant could see the minute, and explain why it can't appear in any of them.
