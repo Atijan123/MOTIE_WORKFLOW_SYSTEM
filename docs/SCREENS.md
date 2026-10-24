@@ -36,7 +36,8 @@ Items marked `[CONFIRM]` are assumptions still to check with the ETLS desk.
 - Exporter: name, country, ETLS approval number, one or more product approval numbers, one or more certificates of origin, **each with its number and issue date** (so the system can check the six-month validity).
 - Documents checklist: business registration, annual returns certificate, certificate of origin (with note: bring the original to Records), invoice, export declaration, receipt (cement only, shown as "not known yet" until the **desk confirms** the HS code; a code the applicant declares does not decide it).
 - Save draft; Submit is disabled until required documents are uploaded, with a count of what is missing.
-- **Applicant labels (facility letter):** Draft → Submitted ("Bring the original certificate of origin to Records") → Originals checked → Being verified → Awaiting signature → Letter signed → Letter sent to GRA. Plus: Returned: action needed (with the message), Rejected (with the reason). A cancelled and reissued letter is invisible to the applicant: the case simply shows "Being verified" again.
+- **Certificate warning at submission:** if a certificate of origin expires (six months after its issue date) within 30 days, the applicant is warned but may still submit.
+- **Applicant labels (facility letter):** Draft → Submitted ("Bring the original certificate of origin to Records") → Originals checked → Being verified → Awaiting signature → Letter signed → Letter sent to GRA. Plus: Returned: action needed (with the message), Rejected (with the reason). Cancelling a signed letter is invisible to the applicant: the cancel itself is hidden and the case simply shows "Being verified" again. If the cancelled letter had already been sent to GRA, the corrected letter's "sent to GRA" shows as **"Corrected letter issued"** (decided 2026-10-24).
 
 ### A3. Status on a phone (`Track`)
 - One case: reference, goods, exporter, current applicant status with a one-line explanation, timeline.
@@ -75,7 +76,7 @@ Route: Records (originals seen) → ETLS desk (verify) → PS (sign) → **Recor
 - Application summary.
 - HS code: enter or confirm; shows whether the cement receipt applies.
 - Checks against the ECOWAS ETLS list, each a recorded tick: exporter approval listed; product approval covers the goods.
-- Certificate validity is **computed** from the issue dates on the form: any certificate more than six months old is flagged.
+- Certificate validity is **computed** from the issue dates on the form: Verify is blocked while any certificate is more than six months past its issue date (decided 2026-10-24; GRA needing it valid at clearance is confirmed).
 - Verify (disabled until flag cleared, HS code confirmed, checks ticked, documents complete) or return to applicant.
 - History panel.
 

@@ -138,6 +138,16 @@ The facility letter labels are SCREENS.md A2's. "Draft" and "Returned: action ne
 - `docker compose run --rm tools pytest tests/core/test_applicant_labels.py -v`
 **New concepts:** none. It's the same separation as the letter template: *what* people see is data, not code.
 
+### Docs — Answers on certificate validity and the timeline (2026-10-24)
+**Built:** nothing; the docs catch up with two answers from you, before chunk 2.
+- **Six-month check:** the desk's Verify is blocked if any certificate of origin is more than six months past its issue date. At submission the applicant is only *warned* if one expires within 30 days. GRA needing it valid at clearance is confirmed.
+- **Timeline after a cancelled letter:** only the cancel move stays hidden. If the cancelled letter had already gone to GRA, the corrected letter's "sent to GRA" reads "Corrected letter issued".
+
+docs/GAPS.md now says chunk 1 is done, and its marks include what chunk 1 built (labels, references, queues, `blocked_by`, history, timeline, the acting and absence views). Chunk 2's backend is steps 8a–8h.
+**Files:** docs/GAPS.md, docs/SCREENS.md (A2, S2), docs/LEARNING.md
+**Try it:** read docs/GAPS.md, C10, C11 and section 8.
+**New concepts:** none.
+
 ### Audit — The backend against the screen spec (2026-10-20)
 **Built:** nothing; this is a review step. docs/SCREENS.md is now the agreed spec, and docs/GAPS.md lists, for every global rule and screen (A1–A6, S1–S10), what the backend already supports (with the file or endpoint), what's partial and what's missing. It also covers the conflicts with what's built, a check of the stand-in rules and of "acting for" in the history, and a proposed build order that finishes the facility letter screens first.
 **Files:** docs/SCREENS.md, docs/GAPS.md
@@ -992,6 +1002,8 @@ These were open questions; the Ministry has answered them. The code follows them
 - **When the Minister is away, the PS acts; when the PS is away too, a DPS acts (2026-10-19).** This follows the general chain of command, through the succession order (steps 5b and 5d), not a standing transition. (Which DPS is still open.)
 - **When the Director of Industry and Investment is away, the DPS Administration and Finance may sign and assign ETLS files (2026-10-19).**
 - **A position holder, or an authorised officer on their behalf, records absences (2026-10-19).** The audit log shows who recorded it. (Who counts as "authorised" is still open.)
+- **Certificate of origin validity (2026-10-24):** the desk can't verify while any certificate is more than six months past its issue date; at submission the applicant is warned, not stopped, if one expires within 30 days. GRA needs the certificate valid at clearance.
+- **The applicant's timeline after a cancelled letter (2026-10-24):** only the cancel move is hidden. A corrected letter replacing one already sent to GRA reads "Corrected letter issued" when it is sent.
 
 ### Choices made while building
 
@@ -1159,7 +1171,7 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-20 | The app may in principle update `cases.reference` (its `UPDATE` grant on `core.cases` is table-wide) | narrow the grant to named columns now | No code changes it, and narrowing the grant touches every column the engine writes. Worth doing in a hardening step. |
 | 2026-10-20 | Applicant labels live on statuses (required), with optional timeline wording and a "hidden" flag on moves | a label per move only; a mapping in the frontend | Labels are data, like the rest of the workflow, and the database refuses a status without one. "Originals checked" vs "Being verified" needs both: one for what happened, one for where the case is. |
 | 2026-10-20 | Applicants get `null` for the internal code and name, rather than those fields being removed | separate response models for applicants and staff | One shape for the frontend; the rule is in one function, `status_view()`. |
-| 2026-10-20 | The cancel move is hidden, but earlier "Letter signed" timeline entries stay | rewrite the applicant's timeline to drop everything about the cancelled letter | The applicant may already have seen "Letter signed"; hiding history they saw would be confusing and dishonest. `[CONFIRM]` |
+| 2026-10-20 | The cancel move is hidden, but earlier "Letter signed" timeline entries stay | rewrite the applicant's timeline to drop everything about the cancelled letter | The applicant may already have seen "Letter signed"; hiding history they saw would be confusing and dishonest. Confirmed 2026-10-24. |
 | 2026-10-20 | Cancelling a letter is a workflow move with an effect | a separate `POST .../cancel` endpoint | Who may cancel then follows the post rules for free, delegation and succession included, and it's a status change in the audit log like every other. Which statuses it's allowed from is data. |
 | 2026-10-20 | Cancel goes back to "Originals received" (the desk), not to "Verified" (the PS) | straight back to the PS to re-sign | Most corrections need the desk: the HS code can only be changed before Verify. Going back to the PS would only allow re-signing the same data. `[CONFIRM]` |
 | 2026-10-20 | Allowed from "Signed" and "Sent to GRA", not from "Closed" | from "Signed" only; from any status | A mistake is often found after the letter reached GRA. A closed file stays closed. `[CONFIRM]` |
