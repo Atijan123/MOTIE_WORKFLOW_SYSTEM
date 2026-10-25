@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Technical review</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&amp;family=Source+Serif+4:wght@600&amp;display=swap">
+<style>
+body{margin:0;background:#F7F5EF}
+a{color:#1F5F8B}a:hover{color:#13283A}
+input,select,textarea{font:inherit;font-weight:400;padding:10px 12px;min-height:44px;box-sizing:border-box;border:1px solid #B9B5AA;border-radius:8px;background:#FFFFFF;color:#13283A}
+td,th{padding:12px 14px;text-align:left;vertical-align:middle}
+</style>
+</helmet>
+<div style="min-height: 100vh; background: #F7F5EF; color: #13283A; font-family: 'IBM Plex Sans', Arial, sans-serif; font-size: 16px">
+<header style="background: #13283A; color: #F7F5EF; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 24px">
+<div style="display: flex; align-items: baseline; gap: 12px"><span style="font-family: 'Source Serif 4', Georgia, serif; font-size: 22px; font-weight: 600">MOTIE</span><span style="font-size: 15px; color: #C9D6DF">ETLS Services · Staff</span></div>
+<div style="display: flex; align-items: center; gap: 16px; font-size: 15px"><span>ETLS Desk Officer</span><a href="#" style="color: #C9D6DF">Sign out</a></div>
+</header>
+<main style="max-width: 1120px; margin: 0 auto; padding: 24px; display: flex; flex-direction: column; gap: 20px">
+<div style="display: flex; flex-direction: column; gap: 4px">
+<a href="#" style="font-size: 15px">← My queue</a>
+<span style="font-size: 14px; color: #4A5568">ETLS approval · MOTIE/ETLS/AP/2026/0011 · assigned by DPS Admin &amp; Finance for the Director, 20th Oct</span>
+<h1 style="margin: 0; font-family: 'Source Serif 4', Georgia, serif; font-size: 28px; font-weight: 600">Technical review: Banjul Juice Company</h1>
+</div>
+<section style="background: #FFFFFF; border: 1px solid #D9D6CC; border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 14px">
+<h2 style="margin: 0; font-size: 18px; font-weight: 600">1. Products and origin criterion</h2>
+<div style="overflow-x: auto; border: 1px solid #E6E3DA; border-radius: 10px">
+<table style="width: 100%; border-collapse: collapse; font-size: 15px">
+<thead><tr style="background: #EFEDE5"><th>Product</th><th>Tariff item</th><th>Criterion claimed</th><th>Your finding</th></tr></thead>
+<tbody>
+<tr style="border-top: 1px solid #E6E3DA"><td>Mango juice</td><td>2009.89</td><td>Value added, 41%</td><td><select aria-label="Finding for mango juice"><option>Meets the criterion</option><option>Query the applicant</option><option>Does not meet it</option></select></td></tr>
+<tr style="border-top: 1px solid #E6E3DA"><td>Baobab drink</td><td>2202.99</td><td>Value added, 35%</td><td><select aria-label="Finding for baobab drink"><option>Query the applicant</option><option>Meets the criterion</option><option>Does not meet it</option></select></td></tr>
+</tbody>
+</table>
+</div>
+</section>
+<section style="background: #FFFFFF; border: 1px solid #D9D6CC; border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 14px">
+<div style="display: flex; flex-direction: column; gap: 4px">
+<h2 style="margin: 0; font-size: 18px; font-weight: 600">2. Cost price limits (part IV of the form)</h2>
+<p style="margin: 0; font-size: 14px; color: #4A5568">Enter the figures from the applicant’s part IV. The limits are those printed on the ECOWAS form.</p>
+</div>
+<label style="display: flex; flex-direction: column; gap: 6px; font-weight: 500; max-width: 320px">Product<select><option>Baobab drink</option><option>Mango juice</option></select></label>
+<div style="overflow-x: auto; border: 1px solid #E6E3DA; border-radius: 10px">
+<table style="width: 100%; border-collapse: collapse; font-size: 15px">
+<thead><tr style="background: #EFEDE5"><th>Item</th><th>Amount (GMD)</th><th>Share of cost price</th><th>Limit</th><th>Result</th></tr></thead>
+<tbody>
+<tr style="border-top: 1px solid #E6E3DA"><td style="font-weight: 600">Ex-factory cost price</td><td><input type="text" value="1,000,000" aria-label="Ex-factory cost price" style="width: 140px"></td><td>—</td><td>—</td><td>—</td></tr>
+<tr style="border-top: 1px solid #E6E3DA"><td>Salaries and wages</td><td><input type="text" value="160,000" aria-label="Salaries and wages" style="width: 140px"></td><td>16%</td><td>20%</td><td style="color: #1E5A3C; font-weight: 500">Within limit</td></tr>
+<tr style="border-top: 1px solid #E6E3DA"><td>External works and services</td><td><input type="text" value="80,000" aria-label="External works and services" style="width: 140px"></td><td>8%</td><td>10%</td><td style="color: #1E5A3C; font-weight: 500">Within limit</td></tr>
+<tr style="border-top: 1px solid #E6E3DA; background: #FFF4E0"><td>Financial charges</td><td><input type="text" value="42,000" aria-label="Financial charges" style="width: 140px"></td><td>4.2%</td><td>3%</td><td style="color: #7A4A00; font-weight: 600">Over limit</td></tr>
+</tbody>
+</table>
+</div>
+</section>
+<section style="background: #FFFFFF; border: 1px solid #D9D6CC; border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 14px">
+<h2 style="margin: 0; font-size: 18px; font-weight: 600">3. Factory inspection</h2>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px">
+<label style="display: flex; flex-direction: column; gap: 6px; font-weight: 500">Inspection date<input type="date" value="2026-10-29"></label>
+<label style="display: flex; flex-direction: column; gap: 6px; font-weight: 500">Inspection team<input type="text" value="[NAC MEMBERS ATTENDING]"></label>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid #E6E3DA; border-radius: 10px; padding: 14px 16px">
+<span style="font-weight: 500">Inspection report</span>
+<button type="button" style="font: inherit; font-size: 15px; font-weight: 500; color: #13283A; background: #FFFFFF; border: 1px solid #B9B5AA; border-radius: 8px; padding: 8px 16px; min-height: 44px; cursor: pointer">Upload</button>
+</div>
+<p style="margin: 0; font-size: 14px; color: #4A5568">The applicant sees the date and is asked to have production records ready.</p>
+</section>
+<section style="background: #FFFFFF; border: 1px solid #D9D6CC; border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 14px">
+<label style="display: flex; flex-direction: column; gap: 6px; font-weight: 500">Your recommendation to the committee<textarea rows="3">Recommend mango juice. Baobab drink: financial charges exceed the 3% limit; queried with the applicant.</textarea></label>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px">
+<button type="button" disabled="" style="font: inherit; font-weight: 600; color: #FFFFFF; background: #8FB5A1; border: none; border-radius: 8px; padding: 12px 20px; min-height: 44px">Send to the committee</button>
+<button type="button" style="font: inherit; font-weight: 500; color: #7A4A00; background: #FFFFFF; border: 1px solid #C9A260; border-radius: 8px; padding: 12px 20px; min-height: 44px; cursor: pointer">Ask the applicant for information</button>
+<span style="font-size: 14px; color: #4A5568">Upload the inspection report to send.</span>
+</div>
+</section>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":1500}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

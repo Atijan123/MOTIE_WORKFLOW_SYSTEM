@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>New facility letter application</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&amp;family=Source+Serif+4:wght@600&amp;display=swap">
+<style>
+body{margin:0;background:#F7F5EF}
+a{color:#1F5F8B}a:hover{color:#13283A}
+</style>
+</helmet>
+<div style="min-height: 100vh; background: #F7F5EF; color: #13283A; font-family: 'IBM Plex Sans', Arial, sans-serif; font-size: 16px">
+<header style="background: #13283A; color: #F7F5EF; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 24px">
+<div style="display: flex; align-items: baseline; gap: 12px">
+<span style="font-family: 'Source Serif 4', Georgia, serif; font-size: 22px; font-weight: 600">MOTIE</span>
+<span style="font-size: 15px; color: #C9D6DF">ETLS Services</span>
+</div>
+<div style="display: flex; align-items: center; gap: 16px; font-size: 15px">
+<span>Bakau Agro Supplies</span>
+<a href="#" style="color: #C9D6DF">Sign out</a>
+</div>
+</header>
+<main style="max-width: 860px; margin: 0 auto; padding: 32px 24px 48px; display: flex; flex-direction: column; gap: 24px">
+<a href="Main.dc.html" style="font-size: 15px">← My applications</a>
+<div style="display: flex; flex-direction: column; gap: 8px">
+<h1 style="margin: 0; font-family: 'Source Serif 4', Georgia, serif; font-size: 32px; font-weight: 600">Apply for an ETLS facility letter</h1>
+<p style="margin: 0; color: #4A5568; line-height: 1.5">For goods made by an ETLS-approved company in another ECOWAS country. The Ministry writes to GRA asking for the goods to be cleared without duty.</p>
+</div>
+<section style="background: #FFFFFF; border: 1px solid #D9D6CC; border-radius: 12px; padding: 24px; display: flex; flex-direction: column; gap: 16px">
+<h2 style="margin: 0; font-size: 20px; font-weight: 600">1. Importer</h2>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px">
+<label style="display: flex; flex-direction: column; gap: 6px; font-weight: 500">Business name<input type="text" value="Bakau Agro Supplies" style="font: inherit; font-weight: 400; padding: 10px 12px; min-height: 44px; box-sizing: border-box; border: 1px solid #B9B5AA; border-radius: 8px"></label>
+<label style="display: flex; flex-direction: column; gap: 6px; font-weight: 500">Address<input type="text" value="Bakau New Town, KMC" style="font: inherit; font-weight: 400; padding: 10px 12px; min-height: 44px; box-sizing: border-box; border: 1px solid #B9B5AA; border-radius: 8px"></label>
+</div>
+</section>
+<section style="background: #FFFFFF; border: 1px solid #D9D6CC; border-radius: 12px; padding: 24px; display: flex; flex-direction: column; gap: 16px">
+<h2 style="margin: 0; font-size: 20px; font-weight: 600">2. Goods</h2>
+<label style="display: flex; flex-direction: column; gap: 6px; font-weight: 500">Product<input type="text" value="Poultry feed" style="font: inherit; font-weight: 400; padding: 10px 12px; min-height: 44px; box-sizing: border-box; border: 1px solid #B9B5AA; border-radius: 8px"></label>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px">
+<label style="display: flex; flex-direction: column; gap: 6px; font-weight: 500">Quantity<input type="text" inputmode="numeric" value="1,200" style="font: inherit; font-weight: 400; padding: 10px 12px; min-height: 44px; box-sizing: border-box; border: 1px solid #B9B5AA; border-radius: 8px"></label>
+<label style="display: flex; flex-direction: column; gap: 6px; font-weight: 500">Unit<select style="font: inherit; font-weight: 400; padding: 10px 12px; min-height: 44px; box-sizing: border-box; border: 1px solid #B9B5AA; border-radius: 8px; background: #FFFFFF"><option>bags</option><option>cartons</option><option>tonnes</option></select></label>
+<label style="display: flex; flex-direction: column; gap: 6px; font-weight: 500">HS code (optional)<input type="text" placeholder="e.g. 2309.90" style="font: inherit; font-weight: 400; padding: 10px 12px; min-height: 44px; box-sizing: border-box; border: 1px solid #B9B5AA; border-radius: 8px"></label>
+</div>
+<p style="margin: 0; font-size: 14px; color: #4A5568">Not sure of the HS code? Leave it blank. The Ministry will confirm it.</p>
+</section>
+<section style="background: #FFFFFF; border: 1px solid #D9D6CC; border-radius: 12px; padding: 24px; display: flex; flex-direction: column; gap: 16px">
+<h2 style="margin: 0; font-size: 20px; font-weight: 600">3. Exporter and approvals</h2>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px">
+<label style="display: flex; flex-direction: column; gap: 6px; font-weight: 500">Exporter<input type="text" value="Sahel Feeds SARL" style="font: inherit; font-weight: 400; padding: 10px 12px; min-height: 44px; box-sizing: border-box; border: 1px solid #B9B5AA; border-radius: 8px"></label>
+<label style="display: flex; flex-direction: column; gap: 6px; font-weight: 500">Country<select style="font: inherit; font-weight: 400; padding: 10px 12px; min-height: 44px; box-sizing: border-box; border: 1px solid #B9B5AA; border-radius: 8px; background: #FFFFFF"><option>Senegal</option><option>Ghana</option><option>Nigeria</option><option>Côte d’Ivoire</option></select></label>
+<label style="display: flex; flex-direction: column; gap: 6px; font-weight: 500">Exporter’s ETLS approval number<input type="text" value="686-0123" style="font: inherit; font-weight: 400; padding: 10px 12px; min-height: 44px; box-sizing: border-box; border: 1px solid #B9B5AA; border-radius: 8px"></label>
+<div style="display: flex; flex-direction: column; gap: 6px">
+<label for="pan1" style="font-weight: 500">Product approval numbers</label>
+<input id="pan1" type="text" value="686-0123-01-24" style="font: inherit; padding: 10px 12px; min-height: 44px; box-sizing: border-box; border: 1px solid #B9B5AA; border-radius: 8px">
+<button type="button" style="align-self: flex-start; font: inherit; font-size: 15px; color: #1F5F8B; background: none; border: none; padding: 8px 0; min-height: 44px; cursor: pointer">+ Add another</button>
+</div>
+</div>
+<fieldset style="border: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px">
+<legend style="font-weight: 600; padding: 0 0 6px">Certificates of origin</legend>
+<div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end">
+<label style="display: flex; flex-direction: column; gap: 6px; font-weight: 500">Certificate 1 number<input type="text" value="16021" style="font: inherit; padding: 10px 12px; min-height: 44px; box-sizing: border-box; border: 1px solid #B9B5AA; border-radius: 8px; font-weight: 400; width: 180px"></label>
+<label style="display: flex; flex-direction: column; gap: 6px; font-weight: 500">Issue date<input type="date" value="2026-09-02" style="font: inherit; padding: 10px 12px; min-height: 44px; box-sizing: border-box; border: 1px solid #B9B5AA; border-radius: 8px; font-weight: 400; width: 180px"></label>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end">
+<label style="display: flex; flex-direction: column; gap: 6px; font-weight: 500">Certificate 2 number<input type="text" value="16022" style="font: inherit; padding: 10px 12px; min-height: 44px; box-sizing: border-box; border: 1px solid #B9B5AA; border-radius: 8px; font-weight: 400; width: 180px"></label>
+<label style="display: flex; flex-direction: column; gap: 6px; font-weight: 500">Issue date<input type="date" value="2026-09-02" style="font: inherit; padding: 10px 12px; min-height: 44px; box-sizing: border-box; border: 1px solid #B9B5AA; border-radius: 8px; font-weight: 400; width: 180px"></label>
+</div>
+<button type="button" style="align-self: flex-start; font: inherit; font-size: 15px; color: #1F5F8B; background: none; border: none; padding: 8px 0; min-height: 44px; cursor: pointer">+ Add another certificate</button>
+<p style="margin: 0; font-size: 14px; color: #4A5568">A certificate is valid for six months from its issue date. These are valid until 2nd March, 2027.</p>
+</fieldset>
+</section>
+<section style="background: #FFFFFF; border: 1px solid #D9D6CC; border-radius: 12px; padding: 24px; display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; flex-direction: column; gap: 4px">
+<h2 style="margin: 0; font-size: 20px; font-weight: 600">4. Documents</h2>
+<p style="margin: 0; font-size: 14px; color: #4A5568">PDF, PNG or JPEG, up to 10 MB each.</p>
+</div>
+<ul style="list-style: none; margin: 0; padding: 0; border: 1px solid #E6E3DA; border-radius: 10px">
+<li style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px">
+<div style="display: flex; align-items: center; gap: 12px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2F7A55" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Uploaded"><path d="M5 12l5 5L20 7"></path></svg><span style="font-weight: 500">Business registration</span></div>
+<span style="font-size: 14px; color: #4A5568">business-reg.pdf · <a href="#">Replace</a></span>
+</li>
+<li style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border-top: 1px solid #E6E3DA">
+<div style="display: flex; align-items: center; gap: 12px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2F7A55" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Uploaded"><path d="M5 12l5 5L20 7"></path></svg><span style="font-weight: 500">Annual returns certificate</span></div>
+<span style="font-size: 14px; color: #4A5568">annual-returns-2026.pdf · <a href="#">Replace</a></span>
+</li>
+<li style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border-top: 1px solid #E6E3DA">
+<div style="display: flex; flex-direction: column; gap: 4px">
+<div style="display: flex; align-items: center; gap: 12px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2F7A55" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Uploaded"><path d="M5 12l5 5L20 7"></path></svg><span style="font-weight: 500">Certificate of origin</span></div>
+<span style="font-size: 14px; color: #7A4A00; padding-left: 32px">Bring the original to Records. Copies are not accepted.</span>
+</div>
+<span style="font-size: 14px; color: #4A5568">co-16021-16022.pdf · <a href="#">Replace</a></span>
+</li>
+<li style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border-top: 1px solid #E6E3DA">
+<div style="display: flex; align-items: center; gap: 12px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#9AA5AE" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle></svg><span style="font-weight: 500">Invoice</span></div>
+<button type="button" style="font: inherit; font-size: 15px; font-weight: 500; color: #13283A; background: #FFFFFF; border: 1px solid #B9B5AA; border-radius: 8px; padding: 8px 16px; min-height: 44px; cursor: pointer">Upload</button>
+</li>
+<li style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border-top: 1px solid #E6E3DA">
+<div style="display: flex; align-items: center; gap: 12px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#9AA5AE" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle></svg><span style="font-weight: 500">Export declaration</span></div>
+<button type="button" style="font: inherit; font-size: 15px; font-weight: 500; color: #13283A; background: #FFFFFF; border: 1px solid #B9B5AA; border-radius: 8px; padding: 8px 16px; min-height: 44px; cursor: pointer">Upload</button>
+</li>
+<li style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border-top: 1px solid #E6E3DA; background: #F7F5EF">
+<div style="display: flex; flex-direction: column; gap: 4px">
+<span style="font-weight: 500; color: #4A5568; padding-left: 32px">Receipt (cement only)</span>
+<span style="font-size: 14px; color: #4A5568; padding-left: 32px">Needed only if the goods are cement. We’ll tell you once the HS code is confirmed.</span>
+</div>
+<button type="button" style="font: inherit; font-size: 15px; font-weight: 500; color: #4A5568; background: #FFFFFF; border: 1px solid #C4C0B4; border-radius: 8px; padding: 8px 16px; min-height: 44px; cursor: pointer">Upload</button>
+</li>
+</ul>
+</section>
+<div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px">
+<p style="margin: 0; color: #7A4A00; font-size: 15px">2 documents still to upload before you can submit.</p>
+<div style="display: flex; gap: 12px">
+<button type="button" style="font: inherit; font-weight: 500; color: #13283A; background: #FFFFFF; border: 1px solid #B9B5AA; border-radius: 8px; padding: 12px 20px; min-height: 44px; cursor: pointer">Save draft</button>
+<button type="button" disabled="" style="font: inherit; font-weight: 600; color: #FFFFFF; background: #8FB5A1; border: none; border-radius: 8px; padding: 12px 20px; min-height: 44px">Submit application</button>
+</div>
+</div>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":1500}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

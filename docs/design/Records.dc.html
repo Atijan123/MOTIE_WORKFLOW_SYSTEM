@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Records queue</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&amp;family=Source+Serif+4:wght@600&amp;display=swap">
+<style>
+body{margin:0;background:#F7F5EF}
+a{color:#1F5F8B}a:hover{color:#13283A}
+</style>
+</helmet>
+<div style="min-height: 100vh; background: #F7F5EF; color: #13283A; font-family: 'IBM Plex Sans', Arial, sans-serif; font-size: 16px">
+<header style="background: #13283A; color: #F7F5EF; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 24px">
+<div style="display: flex; align-items: baseline; gap: 12px">
+<span style="font-family: 'Source Serif 4', Georgia, serif; font-size: 22px; font-weight: 600">MOTIE</span>
+<span style="font-size: 15px; color: #C9D6DF">ETLS Services · Staff</span>
+</div>
+<div style="display: flex; align-items: center; gap: 16px; font-size: 15px">
+<span>Records Officer</span>
+<a href="#" style="color: #C9D6DF">Sign out</a>
+</div>
+</header>
+<div style="display: flex; flex-wrap: wrap">
+<nav aria-label="Staff menu" style="flex: 1 1 200px; max-width: 240px; padding: 24px 16px; display: flex; flex-direction: column; gap: 4px; font-size: 15px">
+<a href="#" style="background: #E3EEF7; color: #13283A; text-decoration: none; font-weight: 600; padding: 10px 12px; border-radius: 8px; display: flex; justify-content: space-between; min-height: 44px; box-sizing: border-box; align-items: center">My queue <span style="background: #1F5F8B; color: #FFFFFF; border-radius: 999px; padding: 1px 8px; font-size: 13px">3</span></a>
+<a href="RecordsOutgoing.dc.html" style="color: #13283A; text-decoration: none; padding: 10px 12px; border-radius: 8px; min-height: 44px; box-sizing: border-box; display: flex; justify-content: space-between; align-items: center">Outgoing <span style="background: #1F5F8B; color: #FFFFFF; border-radius: 999px; padding: 1px 8px; font-size: 13px">2</span></a>
+<a href="#" style="color: #13283A; text-decoration: none; padding: 10px 12px; border-radius: 8px; min-height: 44px; box-sizing: border-box; display: flex; align-items: center">All cases</a>
+<a href="#" style="color: #13283A; text-decoration: none; padding: 10px 12px; border-radius: 8px; min-height: 44px; box-sizing: border-box; display: flex; align-items: center">Register walk-in</a>
+<a href="Absences.dc.html" style="color: #13283A; text-decoration: none; padding: 10px 12px; border-radius: 8px; min-height: 44px; box-sizing: border-box; display: flex; align-items: center">Absences</a>
+</nav>
+<main style="flex: 999 1 560px; min-width: 0; padding: 24px; display: flex; flex-direction: column; gap: 20px">
+<h1 style="margin: 0; font-family: 'Source Serif 4', Georgia, serif; font-size: 28px; font-weight: 600">Records queue</h1>
+<div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start">
+<section style="flex: 1 1 320px; background: #FFFFFF; border: 1px solid #D9D6CC; border-radius: 12px; overflow: hidden">
+<h2 style="margin: 0; padding: 14px 16px; font-size: 15px; font-weight: 600; background: #EFEDE5">Submitted, oldest first</h2>
+<ul style="list-style: none; margin: 0; padding: 0">
+<li style="border-top: 1px solid #E6E3DA; border-left: 4px solid #1F5F8B; background: #F2F7FB; padding: 14px 16px; display: flex; flex-direction: column; gap: 4px">
+<a href="#" style="font-weight: 600; color: #13283A">FL/2026/0044</a>
+<span style="font-size: 14px; color: #4A5568">Facility letter · Gunjur Trading · 600 bags of cement</span>
+<span style="font-size: 14px; color: #7A4A00">Waiting 2 days</span>
+</li>
+<li style="border-top: 1px solid #E6E3DA; padding: 14px 16px; display: flex; flex-direction: column; gap: 4px">
+<a href="#" style="font-weight: 600; color: #13283A">AP/2026/0012</a>
+<span style="font-size: 14px; color: #4A5568">ETLS approval · Serrekunda Foods · 2 products, samples to check</span>
+<span style="font-size: 14px; color: #4A5568">Waiting 1 day</span>
+</li>
+<li style="border-top: 1px solid #E6E3DA; padding: 14px 16px; display: flex; flex-direction: column; gap: 4px">
+<a href="#" style="font-weight: 600; color: #13283A">CO/2026/0032</a>
+<span style="font-size: 14px; color: #4A5568">Certificate of origin · Tanji Fish Processing · smoked fish to Ghana</span>
+<span style="font-size: 14px; color: #4A5568">Today · walk-in</span>
+</li>
+</ul>
+</section>
+<section style="flex: 999 1 460px; min-width: 0; background: #FFFFFF; border: 1px solid #D9D6CC; border-radius: 12px; padding: 24px; display: flex; flex-direction: column; gap: 20px">
+<div style="display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px">
+<div style="display: flex; flex-direction: column; gap: 4px">
+<span style="font-size: 14px; color: #4A5568">MOTIE/ETLS/FL/2026/0044 · submitted 18th October, 2026</span>
+<h2 style="margin: 0; font-size: 22px; font-weight: 600">Gunjur Trading</h2>
+<span style="color: #4A5568">600 bags of cement from Ciments du Sahel SA, Senegal</span>
+</div>
+<span style="align-self: flex-start; background: #E3EEF7; color: #1F4E79; padding: 4px 10px; border-radius: 999px; font-size: 14px; font-weight: 500">Submitted</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 10px">
+<h3 style="margin: 0; font-size: 16px; font-weight: 600">Documents</h3>
+<ul style="list-style: none; margin: 0; padding: 0; border: 1px solid #E6E3DA; border-radius: 10px">
+<li style="display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding: 12px 14px"><span>Business registration</span><a href="#">View</a></li>
+<li style="display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding: 12px 14px; border-top: 1px solid #E6E3DA"><span>Annual returns certificate</span><a href="#">View</a></li>
+<li style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; padding: 12px 14px; border-top: 1px solid #E6E3DA; background: #FFF9EE">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<span style="font-weight: 500">Certificate of origin No. 17310</span>
+<label style="display: flex; align-items: center; gap: 10px; font-size: 15px; min-height: 44px"><input type="checkbox" style="width: 20px; height: 20px"> Original seen in person</label>
+</div>
+<a href="#">View scan</a>
+</li>
+<li style="display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding: 12px 14px; border-top: 1px solid #E6E3DA"><span>Invoice</span><a href="#">View</a></li>
+<li style="display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding: 12px 14px; border-top: 1px solid #E6E3DA"><span>Export declaration</span><a href="#">View</a></li>
+<li style="display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding: 12px 14px; border-top: 1px solid #E6E3DA"><span>Receipt (cement)</span><a href="#">View</a></li>
+</ul>
+</div>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px">
+<label style="display: flex; flex-direction: column; gap: 6px; font-weight: 500">Message to the applicant, if returning<textarea rows="3" placeholder="e.g. The invoice scan is unreadable. Please upload a clearer copy." style="font: inherit; font-weight: 400; padding: 10px 12px; border: 1px solid #B9B5AA; border-radius: 8px; resize: vertical"></textarea></label>
+<label style="display: flex; flex-direction: column; gap: 6px; font-weight: 500">Internal minute (optional)<textarea rows="3" placeholder="Staff only" style="font: inherit; font-weight: 400; padding: 10px 12px; border: 1px solid #B9B5AA; border-radius: 8px; resize: vertical"></textarea></label>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px">
+<button type="button" disabled="" style="font: inherit; font-weight: 600; color: #FFFFFF; background: #8FB5A1; border: none; border-radius: 8px; padding: 12px 20px; min-height: 44px">Accept: originals received</button>
+<button type="button" style="font: inherit; font-weight: 500; color: #7A4A00; background: #FFFFFF; border: 1px solid #C9A260; border-radius: 8px; padding: 12px 20px; min-height: 44px; cursor: pointer">Return to applicant</button>
+<span style="font-size: 14px; color: #4A5568">Tick “Original seen” to accept.</span>
+</div>
+</section>
+</div>
+</main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":1000}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

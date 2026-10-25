@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Records outgoing letters</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&amp;family=Source+Serif+4:wght@600&amp;display=swap">
+<style>
+body{margin:0;background:#F7F5EF}
+a{color:#1F5F8B}a:hover{color:#13283A}
+input{font:inherit;font-weight:400;padding:10px 12px;min-height:44px;box-sizing:border-box;border:1px solid #B9B5AA;border-radius:8px;background:#FFFFFF;color:#13283A}
+td,th{padding:12px 14px;text-align:left;vertical-align:middle}
+</style>
+</helmet>
+<div style="min-height: 100vh; background: #F7F5EF; color: #13283A; font-family: 'IBM Plex Sans', Arial, sans-serif; font-size: 16px">
+<header style="background: #13283A; color: #F7F5EF; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 24px">
+<div style="display: flex; align-items: baseline; gap: 12px"><span style="font-family: 'Source Serif 4', Georgia, serif; font-size: 22px; font-weight: 600">MOTIE</span><span style="font-size: 15px; color: #C9D6DF">ETLS Services · Staff</span></div>
+<div style="display: flex; align-items: center; gap: 16px; font-size: 15px"><span>Records Officer</span><a href="#" style="color: #C9D6DF">Sign out</a></div>
+</header>
+<div style="display: flex; flex-wrap: wrap">
+<nav aria-label="Staff menu" style="flex: 1 1 200px; max-width: 240px; padding: 24px 16px; display: flex; flex-direction: column; gap: 4px; font-size: 15px">
+<a href="Records.dc.html" style="color: #13283A; text-decoration: none; padding: 10px 12px; border-radius: 8px; display: flex; justify-content: space-between; min-height: 44px; box-sizing: border-box; align-items: center">My queue <span style="background: #1F5F8B; color: #FFFFFF; border-radius: 999px; padding: 1px 8px; font-size: 13px">3</span></a>
+<a href="#" style="background: #E3EEF7; color: #13283A; text-decoration: none; font-weight: 600; padding: 10px 12px; border-radius: 8px; display: flex; justify-content: space-between; min-height: 44px; box-sizing: border-box; align-items: center">Outgoing <span style="background: #1F5F8B; color: #FFFFFF; border-radius: 999px; padding: 1px 8px; font-size: 13px">2</span></a>
+<a href="#" style="color: #13283A; text-decoration: none; padding: 10px 12px; border-radius: 8px; min-height: 44px; box-sizing: border-box; display: flex; align-items: center">All cases</a>
+<a href="#" style="color: #13283A; text-decoration: none; padding: 10px 12px; border-radius: 8px; min-height: 44px; box-sizing: border-box; display: flex; align-items: center">Register walk-in</a>
+<a href="Absences.dc.html" style="color: #13283A; text-decoration: none; padding: 10px 12px; border-radius: 8px; min-height: 44px; box-sizing: border-box; display: flex; align-items: center">Absences</a>
+</nav>
+<main style="flex: 999 1 560px; min-width: 0; padding: 24px; display: flex; flex-direction: column; gap: 20px">
+<div style="display: flex; flex-direction: column; gap: 4px">
+<h1 style="margin: 0; font-family: 'Source Serif 4', Georgia, serif; font-size: 28px; font-weight: 600">Outgoing letters</h1>
+<p style="margin: 0; color: #4A5568">Signed facility letters to dispatch to GRA. Print the stored letter, send it, then record the dispatch.</p>
+</div>
+<section style="background: #FFFFFF; border: 1px solid #D9D6CC; border-radius: 12px; overflow: hidden">
+<div style="overflow-x: auto">
+<table style="width: 100%; border-collapse: collapse; font-size: 15px">
+<thead><tr style="background: #EFEDE5"><th>Case</th><th>Importer and goods</th><th>Signed</th><th>Letter</th><th>Dispatch date</th><th></th></tr></thead>
+<tbody>
+<tr style="border-top: 1px solid #E6E3DA"><td><a href="#" style="font-weight: 600">FL/2026/0038</a></td><td>Banjul Bakery Supplies<br><span style="color: #4A5568">2,000 bags of wheat flour</span></td><td>PS, 20th Oct</td><td><a href="#">Download PDF</a></td><td><input type="date" value="2026-10-21" aria-label="Dispatch date for FL/2026/0038" style="width: 170px"></td><td><button type="button" style="font: inherit; font-weight: 600; color: #FFFFFF; background: #2F7A55; border: none; border-radius: 8px; padding: 10px 16px; min-height: 44px; cursor: pointer; white-space: nowrap">Mark sent to GRA</button></td></tr>
+<tr style="border-top: 1px solid #E6E3DA"><td><a href="#" style="font-weight: 600">FL/2026/0040</a></td><td>Gunjur Trading<br><span style="color: #4A5568">600 bags of cement</span></td><td>DPS A&amp;F for the PS, 21st Oct</td><td><a href="#">Download PDF</a></td><td><input type="date" aria-label="Dispatch date for FL/2026/0040" style="width: 170px"></td><td><button type="button" style="font: inherit; font-weight: 600; color: #FFFFFF; background: #2F7A55; border: none; border-radius: 8px; padding: 10px 16px; min-height: 44px; cursor: pointer; white-space: nowrap">Mark sent to GRA</button></td></tr>
+</tbody>
+</table>
+</div>
+</section>
+<p style="margin: 0; font-size: 14px; color: #4A5568">The importer is copied on each letter and sees “Letter sent to GRA” once you mark it.</p>
+</main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":760}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>
