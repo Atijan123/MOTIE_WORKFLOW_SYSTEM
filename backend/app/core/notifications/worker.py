@@ -18,6 +18,7 @@ from datetime import timedelta
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import app.models  # noqa: F401  (every table: the outbox's foreign keys point at audit_log, cases, users)
 from app.core.config import settings
 from app.core.notifications.models import Notification
 from app.core.notifications.sender import Email, Sender, get_sender

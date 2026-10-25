@@ -1,6 +1,9 @@
 """Emails to applicants (SCREENS.md global rules): one per status change they can
 see, written to an outbox with the move, sent later by the worker."""
 
+import subprocess
+import sys
+
 import pytest
 from sqlalchemy import select, text
 
@@ -130,3 +133,17 @@ async def test_a_failed_send_is_retried_later_and_given_up_in_the_end(act, peopl
     assert email.attempts == MAX_ATTEMPTS
     assert email.sent_at is None
 
+
+def test_the_worker_starts_on_its_own():
+    # The worker runs as its own process, without the API's imports. Its
+    # foreign keys must still find their tables, or saving "sent" fails
+    # (found by a smoke test: NoReferencedTableError after the first email).
+    check = "; ".join(
+        [
+            "import app.core.notifications.worker",
+            "from app.core.notifications.models import Notification",
+            "[fk.column for fk in Notification.__table__.foreign_keys]",
+        ]
+    )
+    result = subprocess.run([sys.executable, "-c", check], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr

@@ -25,6 +25,7 @@ Chunk 2, step 8: the last backend step of chunk 2.
 - **Senders** (`sender.py`): one interface, and only a **fake sender** for now (`EMAIL_BACKEND=fake`, the default). It logs each email and sends nothing, until the Ministry's mail server is known `[CONFIRM]`.
 - The app may add emails and record sending, but can't change an email's address or text (column grants; a test in test_db_privileges.py checks it).
 - `TimelineEntry` gained `event_id` (internal only), so the engine can tell whether *this* move produced the timeline's newest line.
+- **Found by the smoke test, and fixed:** run on its own, the worker only loaded the `Notification` model, so saving "sent" failed (`NoReferencedTableError`: its foreign keys point at tables it hadn't loaded). The tests import the whole app, which hid it. The worker now imports `app.models`, and `test_the_worker_starts_on_its_own` checks it in a fresh process.
 
 **Files:** backend/alembic/versions/0033_notifications.py, backend/app/core/notifications/models.py, backend/app/core/notifications/service.py (`notify_applicant()`), backend/app/core/notifications/sender.py (`FakeSender`), backend/app/core/notifications/worker.py (`send_pending()`), backend/app/core/workflow/service.py (`change_status()`), backend/app/core/workflow/history.py, backend/app/core/config.py (`email_backend`, `notification_poll_seconds`), backend/app/models.py, docker-compose.yml (`notifier`), backend/tests/core/test_notifications.py
 **Try it:**
