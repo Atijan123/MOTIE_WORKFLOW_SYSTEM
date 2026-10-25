@@ -1,7 +1,7 @@
 # Gaps: backend vs. the screen spec
 
 An audit of the backend against docs/SCREENS.md. First written at commit `2d0bc42` (step 6l), revised 2026-10-20 for the updated SCREENS.md.
-**Chunk 1 (shared foundations, steps 7a–7f) is done**, and the marks below include it (2026-10-24). Chunk 2's backend (steps 8a–8h) is done too (2026-10-25); its frontend is next. Each step updated the marks it changed.
+**Chunk 1 (shared foundations, steps 7a–7f) is done**, and the marks below include it (2026-10-24). Chunk 2's backend (steps 8a–8h, plus the fixes 8i–8l) is done too (2026-10-25); its frontend is next. Each step updated the marks it changed.
 
 **How to read it.** Each item is marked:
 - **Built**: the backend supports it as the spec describes, with the file or endpoint.
@@ -116,7 +116,7 @@ Built route (0015–0030): `draft` →(applicant: Submit)→ `submitted` →(Rec
 | --- | --- | --- |
 | Duplicate flag: earlier case, its status and date | **Built** | 8d: `GET /etls/facility-letters/{id}/duplicates`: every other submitted case with the number, its reference, current status and date. The flag (for the desk) holds only the desk's moves, so the case reaches the desk. |
 | Finding (required) to clear | **Built** | `POST /cases/{id}/flags/{flag_id}/resolve`. |
-| **Or reject directly while the flag is open; the rejection reason resolves the flag** `[CONFIRM]` | **Built** | 8d: `allowed_on_hold` on the desk's Reject; the engine resolves the flag with the minute (or the applicant message). |
+| **Or reject (or return) directly while the flag is open; the reason resolves the flag** `[CONFIRM]` | **Built** | 8d: `allowed_on_hold` on the desk's Reject; the engine resolves the flag with the minute (or the applicant message). 8l: the desk's Return to applicant too (0037); resubmitting runs the duplicate check again. |
 | Application summary | **Built** | `GET /etls/facility-letters/{id}`. |
 | HS code: enter or confirm; whether the receipt applies | **Built** | `POST /etls/facility-letters/{id}/hs-code`; `applies` in the documents checklist, from the confirmed code only (8d). |
 | ECOWAS ETLS list ticks (exporter approval listed; product approval covers the goods), each recorded | **Built** | 8d: `GET /cases/{id}/checklist`, `PUT /cases/{id}/checklist/{code}` (core/workflow/checklist.py); check `checklist_complete` on Verify. Wording `[CONFIRM]`. |
@@ -192,7 +192,7 @@ Everything is **Missing** (S9 comparison table and flags; S10 box 10 certificati
 - **C4. Documents after submission.** *Decided and built (8a):* every application starts as a draft; "Submit" goes to Records and is disabled until the required documents are uploaded.
 - **C5. Which HS code decides the receipt.** *Decided and built (8d):* only the desk-confirmed code. A one-line change in `hs_heading()`.
 - **C6. References.** *Decided:* two different numbers. The **case reference** (`MOTIE/ETLS/FL/2026/0001`) is a sequence per service per year, assigned at submission, shown to everyone. The **registry file reference** printed on the letter stays a setting `[CONFIRM]`. So the letter does *not* switch to the case reference; the setting's default should change to a registry-style value.
-- **C7. Reject while a duplicate flag is open.** *Decided* `[CONFIRM]` *and built (8d)*: allowed, and the rejection reason resolves the flag (`allowed_on_hold`). Found while building: the flag used to hold every move, so a flagged case never reached the desk; a flag now holds only its own post's moves.
+- **C7. Reject while a duplicate flag is open.** *Decided* `[CONFIRM]` *and built (8d)*: allowed, and the rejection reason resolves the flag (`allowed_on_hold`). Since 8l the desk may also return while held `[CONFIRM]`; the return's reason resolves the flag, and resubmitting checks the numbers again. Found while building: the flag used to hold every move, so a flagged case never reached the desk; a flag now holds only its own post's moves.
 - **C8. History order.** *Decided and built (7e):* newest first, with name, post title and acting-for dates.
 - **C9. Dispatch to GRA.** *Decided and built (8e):* Records dispatches signed letters (an "Outgoing" tab) and marks them sent with the dispatch date; `sent_to_gra` is the final status; the manual "Close" goes, unless GRA reports back `[CONFIRM]`. Build: the `signed → sent_to_gra` move changes from the desk to the Records post, with a required dispatch date; `sent_to_gra` becomes final; the "Close the file" move and `closed` status are removed (dev only; the migration must refuse if a case is in `closed`). The PS's "Cancel the signed letter" from `sent_to_gra` stays, so a final status needs a way to allow that one correction move.
 - **C10. Certificate issue dates and validity.** *Decided (2026-10-24) and built (8c):* each certificate on the form has an issue date. At the desk's **Verify**, any certificate more than six months past its issue date **blocks** the move. At **submission**, a certificate that expires within 30 days gives the applicant a **warning** but doesn't block. Whether GRA also needs the certificate still valid at clearance is **not confirmed** `[CONFIRM]`; nothing is built for it. Build: a date column on `etls.facility_letter_certificates`, required on new forms; a blocking check on Verify; a warning-only check on Submit.
@@ -222,7 +222,7 @@ Each chunk is a few small steps, each with tests, a LEARNING.md entry and its ow
 6. **Acting and absences views** (banner, S11): "for which posts am I acting now, and until when", "who acts for my posts", and current and upcoming absences visible to all staff.
 
 ### Chunk 2: facility letter screens end to end
-Backend steps 8a–8h are **done** (2026-10-25); see the build log in LEARNING.md. The frontend (step 9) comes next.
+Backend steps 8a–8h are **done** (2026-10-25), with fixes in 8i–8l (half-filled drafts, set-password links for walk-ins, the registry reference on a real server, returning while held); see the build log in LEARNING.md. The frontend (step 9) comes next.
 1. **Drafts and submit** (C4): `draft` status, editable form, submit with the missing-documents list; the reference is assigned on submit.
 2. **Returns** (C3): `returned` status, applicant message + internal minute, from Records (S1) and the desk (S2); resubmit. Reason required on Reject.
 3. **Certificate dates and validity** (C10): issue dates on the form; Verify blocked by a certificate over six months old; a warning (not a block) at submission for one expiring within 30 days.
@@ -231,7 +231,7 @@ Backend steps 8a–8h are **done** (2026-10-25); see the build log in LEARNING.m
 6. **PS support** (S3): checks summary, letter preview (never stored, marked as draft), return to desk.
 7. **Walk-ins**: Records opens an application for an applicant; both are recorded.
 8. **Notifications**: email on every applicant-visible status change and on return, through an outbox and a background sender. A fake sender for now `[CONFIRM: mail server]`.
-9. **Frontend**: Next.js, login, date formatter, acting banner; A1 (facility letter part), A2, A3, S1 (with Outgoing), S2, S3, S11.
+9. **Frontend**: Next.js, login, a set-password page (reads `#token=`, 8j), date formatter, acting banner; A1 (facility letter part), A2, A3, S1 (with Outgoing), S2, S3, S11.
 
 ### Chunk 3: ETLS approval (A4, A5, S4–S8)
 1. Retire `etls_application`; new `etls_approval` workflow with the spec's statuses and labels; the Director's stand-in row moves to it; returns to Records and the PS.
@@ -251,7 +251,7 @@ CO workflow and labels, reference `MOTIE/ETLS/CO/…`, the certifying officer's 
 
 1. **Facility letter applicant labels**: decided (SCREENS.md A2).
 2. **Return reasons**: decided: a message to the applicant plus an optional internal minute; rejecting needs a reason too.
-3. **Reject while a duplicate flag is open**: decided, still `[CONFIRM]`: allowed; the rejection reason resolves the flag.
+3. **Reject while a duplicate flag is open**: decided, still `[CONFIRM]`: allowed; the rejection reason resolves the flag. Returning while held is allowed too since 8l `[CONFIRM]`.
 4. **Send to GRA and Close**: decided: Records dispatches and marks sent, with the dispatch date; no manual Close `[CONFIRM: unless GRA reports back]`.
 5. **Reference numbers**: decided: a sequence per service per year, assigned at submission. The registry file reference on the letter is separate and stays a setting `[CONFIRM]`.
 6. **Certificates within six months**: decided: computed from issue dates on the form.

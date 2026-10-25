@@ -16,6 +16,24 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 8l — The desk may return a flagged case, not only reject it (2026-10-25)
+A change to chunk 2, step 4 (8d). `[CONFIRM]` with the ETLS desk.
+
+**Built:**
+- The desk's **"Return to applicant"** (`originals_received → returned`) is now allowed while a duplicate certificate flag holds the case, like Reject (`allowed_on_hold`, migration 0037). Its action's `blocked_by` no longer says "On hold".
+- As with Reject, the engine **resolves the flag with the move's reason**: the internal minute, or else the message to the applicant. It's recorded as "Return to applicant: ...", with `by_move` in the audit row. The applicant sees only the message, as before.
+- **When the applicant resubmits, the duplicate check runs again** (the Submit effect `etls_check_duplicate_certificates`, unchanged). If the number is still used on another case, a new flag holds the case at the desk again. If the applicant typed in a different, unused number, no flag is raised.
+- Verify is still held by an open flag.
+- No engine code changed: it's one column on one row. The engine already did the rest for Reject.
+
+**Files:** backend/alembic/versions/0037_return_while_held.py, backend/tests/modules/etls/test_desk_checks.py
+**Try it:**
+- Submit two applications with the same certificate number, and take the second to the desk. As `desk@motie.test`, `GET /cases/{id}`: "Return to applicant" has an empty `blocked_by`; "Verify" says "On hold: ...".
+- Return it with a message and a minute; `GET /cases/{id}/flags` shows it resolved as "Return to applicant: ...".
+- Resubmit it unchanged as the applicant: `GET /cases/{id}/flags` has a new open flag.
+- `docker compose run --rm tools pytest tests/modules/etls/test_desk_checks.py -v`
+**New concepts:** none.
+
 ### Step 8k — A real server can't sign until the registry reference is set (2026-10-25)
 A fix to chunk 2, step 5 (8e).
 
@@ -1505,7 +1523,7 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-24 | Who may tick follows the move that needs the checklist (`may_make_move_with_check()`) | name the desk post | Same pattern as "original seen" and the HS code: no post in code, acting rules for free. |
 | 2026-10-24 | A blocking flag holds only the moves of the post it's for | hold every move, as before | The duplicate flag was raised at Submit and then stopped Records too, so a flagged case could never reach the desk that must judge it, nor be rejected there. Records receiving papers doesn't depend on the duplicate question. A future flag that must stop everything can be given to the first post in line. |
 | 2026-10-24 | A move allowed on hold resolves its post's open flags, with the minute (or else the applicant message) as the reason | leave the flags open; require a separate resolve first | The spec: "the rejection reason also resolves the flag". Leaving a flag open on a rejected case would show it as still needing attention. |
-| 2026-10-24 | Only Reject is allowed on hold; Return is not | allow Return too | The spec names Reject only. The desk can resolve the flag with a finding and then return, which records both. `[CONFIRM]` with C7. |
+| 2026-10-24 | Only Reject is allowed on hold; Return is not | allow Return too | The spec names Reject only. **Changed in 8l** (you asked): Return is allowed on hold too. `[CONFIRM]` with C7. |
 | 2026-10-24 | The duplicates endpoint lists every *other* submitted case with the number, earlier or later | earlier cases only; the ids saved in the flag | The desk wants to know where the number was used now; a later case using the same number matters too. Read live, so the status is current. |
 | 2026-10-24 | Tick labels are my wording `[CONFIRM]` | wait for the desk | Placeholders that read sensibly; changing them is an `UPDATE` in a migration. |
 | 2026-10-25 | The dispatch date has its own table, one row per issued letter | a date column on the case or the form; the date in the move's audit row only | A corrected letter is sent again on another day; each issued letter needs its own date, and the row ties the date to the exact file (checksum) that went. |
@@ -1556,6 +1574,7 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-25 | The dev default comes from `APP_ENV=development`, read in `registry_reference_format()` | keep a default and warn in the log | A warning in a log nobody reads would let letters go out with the example reference. `APP_ENV` already defaults to production, so a server that forgets it is safe. |
 | 2026-10-25 | The preview prints "[REGISTRY FILE REFERENCE NOT SET]" instead of refusing | refuse the preview too | The PS can still check the wording while ICT fixes the setting; the gap is plain on the page. |
 | 2026-10-25 | Tests set the example reference in an autouse fixture | read `.env` | The suite must give the same result on your machine, ICT's, or a CI server. |
+| 2026-10-25 | A return while held resolves the flag with its reason, like Reject | leave the flag open while the case is with the applicant | An open flag on a case nobody at the desk can act on would look like work waiting. The duplicate check runs again at resubmission, so the desk sees the question again if it still applies, against the application as it is then. |
 | 2026-10-25 | Emails are plain text, English only | HTML; French as well | Plain text reads everywhere and can't hide anything. `[CONFIRM]` wording and languages with the Ministry. |
 
 ## 4. Open questions
@@ -1600,7 +1619,7 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 - [ ] **Deadlines:** how many days may a file sit at each step before it's overdue? (Needed for deadline tracking, not built yet.)
 - [ ] **Drafts:** may staff see an applicant's unsubmitted draft (now yes, like every case)? Should old drafts be deleted after some time, and how long?
 - [ ] **ECOWAS list checks:** is the wording of the two ticks right ("The exporter's ETLS approval number is on the ECOWAS ETLS list"; "On the ECOWAS ETLS list, the product approval covers these goods")? Any other checks the desk does by hand? See backend/alembic/versions/0029_desk_checks.py.
-- [ ] **Holds:** may the desk also *return* (not only reject) while a duplicate flag is open? Now it must resolve the flag first.
+- [ ] **Holds:** the desk may now *return* as well as reject while a duplicate flag is open (step 8l, `[CONFIRM]`). Is that right, and is it right that the return resolves the flag (it's raised again if the resubmitted number is still used elsewhere)? See backend/alembic/versions/0037_return_while_held.py.
 - [ ] **Registry file reference:** is `ADM 151/420/01/PART IV` the same on every facility letter, or does part of it change (the year, a folio number, a new "PART" when a file fills up)? It's `FACILITY_LETTER_REFERENCE_FORMAT` in backend/app/core/config.py. A production server must have it set before the PS can sign (step 8k).
 - [ ] **GRA and certificate validity:** must the certificate of origin still be valid on the day GRA clears the goods (not only when the desk verifies)? If yes, the letter may need a "use by" date, or the desk a stricter check. Wrongly marked as confirmed until 2026-10-25. See `_check_certificates_valid()` in backend/app/modules/etls/service.py.
 - [ ] **GRA:** does GRA ever report back about a letter (received, used at clearance)? If so, a step after "Sent to GRA" may be needed again (C9).
@@ -1614,6 +1633,16 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 8l
+1. The desk returns a flagged case with the minute "Ask for the right certificate" and a message to the applicant. What does the flag's resolution say, and what does the applicant see?
+2. The applicant resubmits without changing anything. Is the case held again? Which code decides, and at which moment?
+3. Which single database value would you change to undo this step, and where would the change go?
+
+#### Show answers
+1. "Return to applicant: Ask for the right certificate" (`resolve_by_move()` in backend/app/core/workflow/flags.py, called from `change_status()` with the minute, since there is one). The applicant sees only the message, on the timeline and in their list; never the flag or the minute.
+2. Yes. The Resubmit move has the effect `etls_check_duplicate_certificates` (`check_duplicates()` in backend/app/modules/etls/service.py). The old flag is resolved, so no open flag covers the number, and a new one is raised when the applicant resubmits. It holds the desk's moves again once Records passes the case on.
+3. `allowed_on_hold` on the desk's `originals_received → returned` row in `core.workflow_transitions`, set back to `false` in a new migration (as 0037's `downgrade()` does). Workflows are data: no Python changes.
 
 ### Step 8k
 1. ICT installs the system on the Ministry server and forgets `FACILITY_LETTER_REFERENCE_FORMAT`. What does the PS see, and what can Records and the desk still do?

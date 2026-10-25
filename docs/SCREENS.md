@@ -72,7 +72,7 @@ Route: Records (originals seen) → ETLS desk (verify) → PS (sign) → **Recor
 - **Outgoing tab:** signed facility letters to dispatch. Download the stored letter, then "Mark sent to GRA" with the dispatch date.
 
 ### S2. ETLS desk verification (`Desk`)
-- Duplicate certificate flag: which earlier case used the number, its status and date; finding (required) to clear; **or reject directly while the flag is open** (the rejection reason also resolves the flag) `[CONFIRM]`.
+- Duplicate certificate flag: which earlier case used the number, its status and date; finding (required) to clear; **or reject or return directly while the flag is open** (the reason also resolves the flag; a resubmission is checked again) `[CONFIRM]`.
 - Application summary.
 - HS code: enter or confirm; shows whether the cement receipt applies.
 - Checks against the ECOWAS ETLS list, each a recorded tick: exporter approval listed; product approval covers the goods.

@@ -1,12 +1,12 @@
 """The ETLS desk's checks (SCREENS.md S2): recorded ECOWAS list ticks, other
-cases that used a certificate number, and rejecting while a case is held."""
+cases that used a certificate number, and rejecting or returning while a case is held."""
 
 from datetime import timedelta
 
 import pytest
 
 from app.core.workflow.delegation import today
-from tests.support import confirm_hs_code, move, ready_for_records, submit, submitted_case
+from tests.support import confirm_hs_code, facility_letter_form, move, ready_for_records, submit, submitted_case
 
 pytestmark = pytest.mark.anyio
 
@@ -185,7 +185,48 @@ async def test_the_desk_rejects_while_held_and_the_reason_resolves_the_flag(act,
     assert resolved["details"]["by_move"] == "Reject"
 
 
-async def test_returning_is_still_held(act, people):
+# [CONFIRM] with the desk, like rejecting while held (migration 0037).
+async def test_the_desk_returns_while_held_and_the_reason_resolves_the_flag(act, people):
     case_id = await _flagged_at_desk(act, people)
-    response = await move(act, people["desk"], case_id, "returned", applicant_message="Please check the certificate.")
-    assert response.status_code == 409
+    actions = (await act(people["desk"], "get", f"/cases/{case_id}")).json()["available_actions"]
+    [give_back] = [a for a in actions if a["to_status"] == "returned"]
+    assert give_back["blocked_by"] == []  # returning isn't held any more
+
+    response = await move(
+        act,
+        people["desk"],
+        case_id,
+        "returned",
+        comment="Number used on an earlier case; ask for the right certificate.",
+        applicant_message="This certificate of origin number was already used. Please check it.",
+    )
+    assert response.status_code == 200, response.text
+    [flag] = (await act(people["desk"], "get", f"/cases/{case_id}/flags")).json()
+    assert flag["resolution"] == "Return to applicant: Number used on an earlier case; ask for the right certificate."
+    # The applicant sees the message, never the flag or the minute.
+    timeline = (await act(people["applicant"], "get", f"/cases/{case_id}/timeline")).json()
+    assert timeline[-1]["message"] == "This certificate of origin number was already used. Please check it."
+
+
+async def test_resubmitting_the_same_number_raises_the_flag_again(act, people):
+    case_id = await _flagged_at_desk(act, people)
+    returned = await move(act, people["desk"], case_id, "returned", applicant_message="Please check the certificate.")
+    assert returned.status_code == 200, returned.text
+    assert (await submit(act, people["applicant"], case_id)).status_code == 200  # unchanged
+    case_flags = (await act(people["desk"], "get", f"/cases/{case_id}/flags")).json()
+    assert [f["resolved_at"] is None for f in case_flags] == [False, True]  # the old one resolved, a new one open
+
+
+async def test_resubmitting_a_corrected_number_raises_no_new_flag(act, people):
+    case_id = await _flagged_at_desk(act, people)
+    await move(act, people["desk"], case_id, "returned", applicant_message="Please check the certificate.")
+    form = facility_letter_form(certificate_of_origin_numbers=["CO-DK-FIXED"])
+    assert (await act(people["applicant"], "put", f"/etls/facility-letters/{case_id}", json=form)).status_code == 200
+    assert (await submit(act, people["applicant"], case_id)).status_code == 200
+    case_flags = (await act(people["desk"], "get", f"/cases/{case_id}/flags")).json()
+    assert all(f["resolved_at"] is not None for f in case_flags)
+
+
+async def test_verify_is_still_held(act, people):
+    case_id = await _flagged_at_desk(act, people)
+    assert [r for r in await _verify_blocked_by(act, people, case_id) if r.startswith("On hold:")]
