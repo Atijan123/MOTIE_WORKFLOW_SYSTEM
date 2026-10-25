@@ -33,9 +33,12 @@ class Settings(BaseSettings):
     # Bigger uploads are refused (413) while they stream in, before they fill the disk.
     max_upload_bytes: int = 10 * 1024 * 1024
 
-    # [CONFIRM] The Ministry's file reference format for ETLS facility letters.
-    # Placeholders: {year} and {case_id}, e.g. {case_id:05d} for 00042.
-    facility_letter_reference_format: str = "MOTIE/ETLS/FL/{year}/{case_id:05d}"
+    # The Ministry's registry file reference, printed at the top of each ETLS
+    # facility letter (SCREENS.md global rules). Not the case reference
+    # (MOTIE/ETLS/FL/2026/0001), which is the tracking number. [CONFIRM] what
+    # its parts mean, and whether any part changes per letter. Placeholders
+    # {year} and {case_id} are allowed, e.g. "ADM 151/420/01/{year}".
+    facility_letter_reference_format: str = "ADM 151/420/01/PART IV"
 
     @field_validator("facility_letter_reference_format")
     @classmethod

@@ -74,7 +74,9 @@ async def test_every_workflow_is_well_formed(db_session):
 
         for status in statuses:
             if status.is_final:
-                assert not outgoing[status.id], f"{workflow.code}: final {status.code} has moves out"
+                # Only corrections (e.g. cancelling a letter already sent) may leave a final status.
+                ordinary = [t.name for t in outgoing[status.id] if not t.is_correction]
+                assert not ordinary, f"{workflow.code}: final {status.code} has moves out: {ordinary}"
             else:
                 assert outgoing[status.id], f"{workflow.code}: {status.code} is a dead end"
 

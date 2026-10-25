@@ -6,7 +6,7 @@ They point at core.cases; core code never reads them.
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, CheckConstraint, Date, DateTime, ForeignKey, Index, Numeric, Text
+from sqlalchemy import BigInteger, CheckConstraint, Date, DateTime, ForeignKey, Identity, Index, Numeric, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -39,6 +39,24 @@ class FacilityLetterCertificate(Base):
     # Valid for six months from this date (0028). Empty only on applications
     # from before then.
     issued_on: Mapped[date | None] = mapped_column(Date)
+
+
+class FacilityLetterDispatch(Base):
+    """A signed letter sent to GRA: which issued letter, and on which day (0030)."""
+
+    __tablename__ = "facility_letter_dispatches"
+    __table_args__ = (
+        Index("facility_letter_dispatches_case_idx", "case_id"),
+        {"schema": "etls"},
+    )
+    __mapper_args__ = {"eager_defaults": True}
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    case_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("etls.facility_letters.case_id"))
+    issued_document_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("core.issued_documents.id"), unique=True)
+    dispatched_on: Mapped[date] = mapped_column(Date)
+    recorded_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("core.users.id"))
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class FacilityLetter(Base):

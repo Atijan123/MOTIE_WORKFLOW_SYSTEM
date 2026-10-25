@@ -15,12 +15,13 @@ cancelled (the file is kept). The case goes back to the desk, and the next
 signing issues a corrected letter that records the one it replaces.
 
 [CONFIRM] The wording of the letter, the Ministry's address line, and the
-file reference format (settings.facility_letter_reference_format).
+registry file reference (settings.facility_letter_reference_format).
 """
 
 import hashlib
 import re
 from dataclasses import asdict, dataclass
+from datetime import date
 from pathlib import Path
 from string import Template
 
@@ -29,22 +30,26 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit.models import AuditEvent
+from app.core.audit.service import record_event
 from app.core.config import settings
 from app.core.dates import long_date  # noqa: F401  (also used as letter.long_date)
 from app.core.documents import issued
 from app.core.documents.models import IssuedDocument
 from app.core.identity.models import Position, User
-from app.core.workflow import effects
+from app.core.workflow import checks, effects
 from app.core.workflow import service as workflow
-from app.modules.etls.models import FacilityLetter
+from app.core.workflow.delegation import today
+from app.core.workflow.models import Case
+from app.modules.etls.models import FacilityLetter, FacilityLetterDispatch
 from app.modules.etls.service import FACILITY_LETTER
 
 TEMPLATE = Path(__file__).parent / "templates" / "facility_letter.txt"
 KIND = "etls_facility_letter"  # core.issued_documents.kind
 ISSUE_EFFECT = "issue_facility_letter"  # core.transition_effects.effect_code
 CANCEL_EFFECT = "cancel_facility_letter"
+DISPATCH_RECORDED = "etls_dispatch_recorded"  # check on "Mark sent to GRA"
 # The letter exists once the PS (or someone acting for them) has signed.
-SIGNED_STATUSES = {"signed", "sent_to_gra", "closed"}
+SIGNED_STATUSES = {"signed", "sent_to_gra"}
 
 
 @dataclass
@@ -101,7 +106,8 @@ def file_reference(case_id: int, year: int) -> str:
 
 
 def download_name(reference: str, number: int = 1) -> str:
-    """facility-letter-MOTIE-ETLS-FL-2026-00042.pdf; a correction ends -2, -3, ..."""
+    """facility-letter-MOTIE-ETLS-FL-2026-0042.pdf, from the case reference
+    (the registry reference is the same on every letter); a correction ends -2, -3, ..."""
     name = "facility-letter-" + re.sub(r"[^A-Za-z0-9-]+", "-", reference).strip("-")
     return f"{name}-{number}.pdf" if number > 1 else f"{name}.pdf"
 
@@ -210,7 +216,7 @@ async def issue_letter(session: AsyncSession, move: effects.Move) -> effects.Und
         case=move.case,
         kind=KIND,
         content=render_pdf(fields, template, issue=number),
-        filename=download_name(fields.file_reference, number),
+        filename=download_name(move.case.reference, number),
         template_version=template.version,
         template_sha256=template.sha256,
         actor=move.actor,
@@ -229,8 +235,81 @@ async def cancel_letter(session: AsyncSession, move: effects.Move) -> None:
     await issued.cancel(session, document=current, actor=move.actor, reason=move.event.details["comment"])
 
 
+async def mark_sent_to_gra(session: AsyncSession, *, case_id: int, actor: User, dispatched_on: date) -> Case:
+    """Records sends the signed letter to GRA (SCREENS.md S1, "Outgoing"):
+    the dispatch date is recorded against the exact letter sent, and the case
+    moves to "Sent to GRA", in one transaction.
+
+    Who may do it is the move's own rule (the Records post, or someone acting
+    for it), checked by change_status(). The generic POST /cases/{id}/status
+    can't make the move without a date: its check etls_dispatch_recorded
+    finds no dispatch for the current letter.
+    """
+    case = await _staff_case(session, case_id, actor)
+    # Asked first, with the engine's own rules, so a refusal never leaves a
+    # half-recorded dispatch in the session.
+    send = next(
+        (m for m in await workflow.available_transitions(session, case, actor) if m.transition.to_status.code == "sent_to_gra"),
+        None,
+    )
+    if send is None:
+        raise workflow.NotPermitted("Only Records (or someone acting for Records) sends signed letters to GRA.")
+    if blocked := await workflow.what_blocks(session, case, send.transition):
+        raise workflow.NotReady("Not ready: " + "; ".join(blocked))
+    current = await issued.get_current(session, case.id, KIND)
+    if current is None:
+        raise workflow.NotReady("There is no signed letter on file to send.")
+    if dispatched_on > today():
+        raise workflow.InvalidDate("The dispatch date can't be in the future.")
+    if dispatched_on < current.issued_at.date():
+        raise workflow.InvalidDate("The letter can't have been sent before it was signed.")
+
+    session.add(
+        FacilityLetterDispatch(
+            case_id=case.id, issued_document_id=current.id, dispatched_on=dispatched_on, recorded_by=actor.id
+        )
+    )
+    record_event(
+        session,
+        actor=actor,
+        action="case.letter_dispatched",
+        entity_type=workflow.AUDIT_ENTITY,
+        entity_id=case.id,
+        details={
+            "issued_document_id": current.id,
+            "sha256": current.sha256,  # which file went to GRA
+            "dispatched_on": dispatched_on.isoformat(),
+        },
+    )
+    try:
+        # Commits the dispatch, its audit row and the move together.
+        return await workflow.change_status(session, case_id=case.id, to_status_code="sent_to_gra", actor=actor)
+    except BaseException:
+        # Only something unexpected gets here (e.g. another officer moved the
+        # case at the same moment). The dispatch row mustn't stay in this
+        # session for a later commit to save.
+        await session.rollback()
+        raise
+
+
+async def _check_dispatch_recorded(session: AsyncSession, case: Case) -> list[str]:
+    current = await issued.get_current(session, case.id, KIND)
+    if current is not None and await session.scalar(
+        select(FacilityLetterDispatch.id).where(FacilityLetterDispatch.issued_document_id == current.id)
+    ):
+        return []
+    return ["the dispatch date hasn't been entered; use Mark sent to GRA with the date"]
+
+
+async def dispatches(session: AsyncSession, case_id: int) -> dict[int, FacilityLetterDispatch]:
+    """{issued letter id: its dispatch}, for the letters listing."""
+    rows = await session.scalars(select(FacilityLetterDispatch).where(FacilityLetterDispatch.case_id == case_id))
+    return {d.issued_document_id: d for d in rows}
+
+
 effects.register(ISSUE_EFFECT, issue_letter)
 effects.register(CANCEL_EFFECT, cancel_letter)
+checks.register(DISPATCH_RECORDED, _check_dispatch_recorded)
 
 
 async def _staff_case(session: AsyncSession, case_id: int, user: User):

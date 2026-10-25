@@ -124,6 +124,16 @@ async def submitted_case(act, people, **form) -> int:
     return case_id
 
 
+async def send_to_gra(act, people, case_id, dispatched_on=None, who="records_officer"):
+    """Records' "Mark sent to GRA", with the dispatch date (today unless said). Returns the response."""
+    return await act(
+        people[who],
+        "post",
+        f"/etls/facility-letters/{case_id}/sent-to-gra",
+        json={"dispatched_on": (dispatched_on or today()).isoformat()},
+    )
+
+
 # The ECOWAS ETLS list checks the desk ticks before Verify (0029).
 ECOWAS_TICKS = ["ecowas_exporter_listed", "ecowas_product_covered"]
 

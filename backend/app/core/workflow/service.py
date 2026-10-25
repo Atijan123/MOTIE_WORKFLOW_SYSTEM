@@ -21,6 +21,7 @@ from app.core.workflow.errors import (  # noqa: F401  (re-exported: callers use 
     CaseBlocked,
     CommentRequired,
     InvalidAbsence,
+    InvalidDate,
     InvalidDelegation,
     InvalidDocument,
     MessageNotExpected,
@@ -288,7 +289,7 @@ async def what_blocks(session: AsyncSession, case: Case, transition: WorkflowTra
     reasons = []
     if not transition.allowed_on_hold:
         reasons = [f"On hold: {f.message}" for f in await holding(session, case.id, transition)]
-    return reasons + await checks.problems(session, case, transition.id)
+    return reasons + await checks.problems(session, case, transition.id, dry_run=True)
 
 
 async def what_warns(session: AsyncSession, case: Case, transition: WorkflowTransition) -> list[str]:

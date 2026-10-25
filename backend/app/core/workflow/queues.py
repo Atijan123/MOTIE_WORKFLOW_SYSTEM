@@ -94,7 +94,9 @@ async def queue(
             ~WorkflowStatus.is_final,
             Case.current_status_id.in_(
                 select(WorkflowTransition.from_status_id).where(
-                    WorkflowTransition.required_position_id.in_(positions)
+                    WorkflowTransition.required_position_id.in_(positions),
+                    # Being able to put a mistake right isn't work waiting for you.
+                    ~WorkflowTransition.is_correction,
                 )
             ),
         )
@@ -107,7 +109,7 @@ async def queue(
 
     items = []
     for case in await session.scalars(query):
-        moves = await service.available_transitions(session, case, user)
+        moves = [m for m in await service.available_transitions(session, case, user) if not m.transition.is_correction]
         if moves:
             items.append(QueueItem(case, moves, None, None))
 

@@ -38,6 +38,7 @@ _ERROR_STATUS = {
     service.InvalidDocument: status.HTTP_422_UNPROCESSABLE_ENTITY,
     service.CommentRequired: status.HTTP_422_UNPROCESSABLE_ENTITY,
     service.MessageNotExpected: status.HTTP_422_UNPROCESSABLE_ENTITY,
+    service.InvalidDate: status.HTTP_422_UNPROCESSABLE_ENTITY,
     service.UploadTooLarge: status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
     service.UnsupportedFileType: status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
 }
@@ -80,7 +81,8 @@ def _summary_out(item: queues.QueueItem, user: User) -> CaseSummaryOut:
     )
 
 
-async def _case_out(session: AsyncSession, case: Case, user: User) -> CaseOut:
+async def case_out(session: AsyncSession, case: Case, user: User) -> CaseOut:
+    """The case as this user may see it, with their actions. Modules use it too."""
     moves = await service.available_transitions(session, case, user)
     return CaseOut(
         id=case.id,
@@ -114,7 +116,7 @@ async def start_case(
     session: AsyncSession = Depends(get_session),
 ):
     case = await service.start_case(session, workflow_code=body.workflow, actor=user)
-    return await _case_out(session, case, user)
+    return await case_out(session, case, user)
 
 
 # These two come before "/{case_id}", or FastAPI would try to read "queue" as a case id.
@@ -147,7 +149,7 @@ async def get_case(
     session: AsyncSession = Depends(get_session),
 ):
     case = await service.get_case(session, case_id, user)
-    return await _case_out(session, case, user)
+    return await case_out(session, case, user)
 
 
 @router.post("/{case_id}/status", response_model=CaseOut)
@@ -165,7 +167,7 @@ async def change_status(
         comment=body.comment,
         applicant_message=body.applicant_message,
     )
-    return await _case_out(session, case, user)
+    return await case_out(session, case, user)
 
 
 @router.get("/{case_id}/history", response_model=list[AuditEventOut])

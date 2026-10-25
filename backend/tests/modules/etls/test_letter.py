@@ -15,7 +15,7 @@ from app.core.documents.models import IssuedDocument
 from app.core.workflow import effects
 from app.core.workflow.delegation import today
 from app.modules.etls import letter
-from tests.support import ready_to_verify, facility_letter_form, move, ready_for_records
+from tests.support import facility_letter_form, move, ready_for_records, ready_to_verify, send_to_gra
 
 pytestmark = pytest.mark.anyio
 
@@ -77,9 +77,9 @@ async def test_the_letter_has_every_field(act, people, db_session):
         act, people, product_approval_numbers=["PA-1", "PA-2"], certificate_of_origin_numbers=["CO-9", "CO-10"]
     )
     fields = await _fields(db_session, case_id)
-    year = today().year
 
-    assert fields.file_reference == f"MOTIE/ETLS/FL/{year}/{case_id:05d}"
+    # The registry file reference, a setting; not the case's tracking number.
+    assert fields.file_reference == "ADM 151/420/01/PART IV"
     assert fields.date == letter.long_date(today())
     assert fields.importer_name == "Kombo Building Supplies Ltd"
     assert fields.importer_name_upper == "KOMBO BUILDING SUPPLIES LTD"
@@ -169,13 +169,14 @@ async def test_when_the_ps_is_away_the_signature_block_says_who_acted(act, peopl
 
 async def test_download_through_the_api(act, people):
     case_id = await _signed_case(act, people)
+    reference = (await act(people["desk"], "get", f"/cases/{case_id}")).json()["reference"]
     response = await act(people["desk"], "get", f"/etls/facility-letters/{case_id}/letter.pdf")
 
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/pdf"
     assert response.content.startswith(b"%PDF-")
     assert response.headers["content-disposition"] == (
-        f'attachment; filename="facility-letter-MOTIE-ETLS-FL-{today().year}-{case_id:05d}.pdf"'
+        f'attachment; filename="facility-letter-{reference.replace("/", "-")}.pdf"'
     )
     assert response.headers["x-checksum-sha256"] == hashlib.sha256(response.content).hexdigest()
 
@@ -292,8 +293,7 @@ async def test_a_letter_changed_on_disk_is_refused(act, people, db_session):
 
 async def test_a_case_gets_only_one_issued_letter(act, people, db_session):
     case_id = await _signed_case(act, people)
-    for to_status in ["sent_to_gra", "closed"]:
-        assert (await move(act, people["desk"], case_id, to_status)).status_code == 200
+    assert (await send_to_gra(act, people, case_id)).status_code == 200
     rows = (await db_session.scalars(select(IssuedDocument).where(IssuedDocument.case_id == case_id))).all()
     assert len(rows) == 1
 

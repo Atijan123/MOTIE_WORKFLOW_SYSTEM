@@ -16,6 +16,31 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 8e — Records sends letters to GRA; "Sent to GRA" is final (2026-10-25)
+Chunk 2, step 5.
+
+**Built:**
+- **Records' "Mark sent to GRA".** The move `signed → sent_to_gra` now belongs to the Records post (it was the desk's), and needs the dispatch date. **`POST /etls/facility-letters/{id}/sent-to-gra`** with `{"dispatched_on": "2026-10-25"}` does both in one transaction:
+  - it records the date in the new table `etls.facility_letter_dispatches`, against the exact issued letter (audit row `case.letter_dispatched` with its checksum);
+  - it makes the move.
+
+  The date can't be in the future or before the letter was signed. Permission and readiness are asked first, using the engine's own rules. The generic `POST /cases/{id}/status` can't make the move without a date, because the check `etls_dispatch_recorded` finds no dispatch.
+- **Records' Outgoing tab** is `GET /cases/queue?status=signed` as Records. The letters listing (`GET /etls/facility-letters/{id}/letters`) shows each letter's `sent_to_gra_on`.
+- **"Sent to GRA" is final; "Close the file" and `closed` are gone** (migration 0030 refuses to run if a case is still in `closed`).
+- **Correction moves** (`workflow_transitions.is_correction`): cancelling a signed letter may leave a final status, and doesn't count as work in anybody's queue. Before, every signed letter also sat in the PS's queue, because the PS *could* cancel it. The workflow shape test now allows only corrections out of a final status.
+- **Checks the dry run can't judge** (`transition_checks.in_dry_run = false`): the dispatch-date check is about something sent with the click, so `blocked_by` leaves it out (otherwise the button would always look disabled). The move itself still runs it.
+- **"Corrected letter issued" (C11).** `workflow_statuses.applicant_label_corrected` is the timeline's wording when a case comes back to a status that a hidden move had taken it away from. A letter cancelled *after* it reached GRA, then corrected and sent, reads "Corrected letter issued". One cancelled before it was sent reads "Letter sent to GRA" as normal.
+- **The registry reference.** The setting `FACILITY_LETTER_REFERENCE_FORMAT` is now documented as the Ministry's registry file reference, defaulting to `ADM 151/420/01/PART IV` `[CONFIRM]`. Download names use the case reference instead (`facility-letter-MOTIE-ETLS-FL-2026-0001.pdf`), because the registry reference is the same on every letter.
+
+**Files:** backend/alembic/versions/0030_dispatch_to_gra.py, backend/app/modules/etls/letter.py (`mark_sent_to_gra()`, `_check_dispatch_recorded()`, `download_name()`), backend/app/modules/etls/models.py (`FacilityLetterDispatch`), backend/app/modules/etls/router.py, backend/app/modules/etls/schemas.py, backend/app/core/workflow/queues.py, backend/app/core/workflow/history.py (`applicant_timeline()`), backend/app/core/workflow/checks.py, backend/app/core/workflow/models.py, backend/app/core/workflow/router.py (`case_out()`), backend/app/core/config.py, backend/tests/modules/etls/test_dispatch.py, backend/tests/core/test_workflow_definitions.py, backend/tests/support.py (`send_to_gra()`)
+**Try it:**
+- Sign a letter. As `records@motie.test`, `GET /cases/queue?status=signed` lists it; as `ps@motie.test`, `GET /cases/queue` doesn't.
+- `POST /etls/facility-letters/{id}/sent-to-gra` with today's date: the case is "Sent to GRA", final, with no actions left.
+- As the PS, cancel it with a reason, verify and sign again, send it again. The applicant's `GET /cases/{id}/timeline` ends "Corrected letter issued".
+- If `alembic upgrade head` refuses because of `closed` cases on your dev database, run `bash scripts/reset-dev.sh`.
+- `docker compose run --rm tools pytest tests/modules/etls/test_dispatch.py -v`
+**New concepts:** none new; it reuses checks, effects and the timeline rules.
+
 ### Step 8d — The desk's checks: ECOWAS ticks, the confirmed HS code, duplicates, rejecting while held (2026-10-24)
 Chunk 2, step 4.
 
@@ -1211,7 +1236,7 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-19 | The generic `POST /cases` refuses workflows with `opened_by_module` set | trust callers to use the right endpoint | Workflows are data: the rule is a column, not code that knows about ETLS. |
 | 2026-10-19 | "One or more" numbers are child tables, not arrays or JSON | `TEXT[]` or JSONB columns | Each certificate number needs its own row for the duplicate check (step 6b) and an index to find earlier uses. |
 | 2026-10-19 | No review step between the desk and the PS yet | a placeholder reviewer | We don't know who reviews; a guessed gate would block files. Adding one later is a status and two transitions in a migration. |
-| 2026-10-19 | The desk sends to GRA, closes and rejects (placeholders) | Records; the PS | The desk follows the file from verification on. All three are `[CONFIRM]`. GRA is sent to by hand until the GRA adapter exists. |
+| 2026-10-19 | The desk sends to GRA, closes and rejects (placeholders) | Records; the PS | The desk follows the file from verification on. All three are `[CONFIRM]`. GRA is sent to by hand until the GRA adapter exists. **Replaced in step 8e (SCREENS.md): Records sends, there's no Close; the desk still rejects.** |
 | 2026-10-19 | Form fields are plain checked text (country, unit, product) | fixed lists (ECOWAS countries, units, product codes) | We don't have the lists yet. Lists would make the cement rule (step 6c) much more reliable. |
 | 2026-10-19 | A reused certificate number holds the case for the desk instead of refusing the submission | refuse it with an error; a `UNIQUE` constraint | You asked for "block and flag". It also lets the desk judge real cases (a split shipment) and keeps a record of the attempt, which a refused form wouldn't. |
 | 2026-10-19 | Flags are a core feature; the ETLS module only decides *when* to raise one | an ETLS-only "duplicate" column | Other modules will need "hold this for someone to look at" (missing payment, failed GRA check). Holding a case is the engine's job. |
@@ -1276,7 +1301,7 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-20 | The cancel move is hidden, but earlier "Letter signed" timeline entries stay | rewrite the applicant's timeline to drop everything about the cancelled letter | The applicant may already have seen "Letter signed"; hiding history they saw would be confusing and dishonest. Confirmed 2026-10-24. |
 | 2026-10-20 | Cancelling a letter is a workflow move with an effect | a separate `POST .../cancel` endpoint | Who may cancel then follows the post rules for free, delegation and succession included, and it's a status change in the audit log like every other. Which statuses it's allowed from is data. |
 | 2026-10-20 | Cancel goes back to "Originals received" (the desk), not to "Verified" (the PS) | straight back to the PS to re-sign | Most corrections need the desk: the HS code can only be changed before Verify. Going back to the PS would only allow re-signing the same data. `[CONFIRM]` |
-| 2026-10-20 | Allowed from "Signed" and "Sent to GRA", not from "Closed" | from "Signed" only; from any status | A mistake is often found after the letter reached GRA. A closed file stays closed. `[CONFIRM]` |
+| 2026-10-20 | Allowed from "Signed" and "Sent to GRA", not from "Closed" | from "Signed" only; from any status | A mistake is often found after the letter reached GRA. A closed file stays closed. `[CONFIRM]` **Since step 8e there's no "Closed"; cancelling is a correction move out of the final "Sent to GRA".** |
 | 2026-10-20 | `requires_comment` is a column on transitions, checked by the engine | check the comment inside the cancel effect | It's a property of the move, useful elsewhere (e.g. rejecting), and the frontend can see it in `available_actions` before the click. |
 | 2026-10-20 | A cancelled letter's PDF isn't stamped; the response header and listing say "cancelled" | re-render it with a "CANCELLED" watermark | The stored bytes must keep matching the checksum in the audit log. A watermarked copy could be added later as a separate, derived file. |
 | 2026-10-20 | Each PDF carries its issue number in its metadata | accept identical files; print "Issue 2" on the letter | Two issues with the same checksum couldn't be told apart. Printing it would change the Ministry's wording. |
@@ -1330,6 +1355,15 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-24 | Only Reject is allowed on hold; Return is not | allow Return too | The spec names Reject only. The desk can resolve the flag with a finding and then return, which records both. `[CONFIRM]` with C7. |
 | 2026-10-24 | The duplicates endpoint lists every *other* submitted case with the number, earlier or later | earlier cases only; the ids saved in the flag | The desk wants to know where the number was used now; a later case using the same number matters too. Read live, so the status is current. |
 | 2026-10-24 | Tick labels are my wording `[CONFIRM]` | wait for the desk | Placeholders that read sensibly; changing them is an `UPDATE` in a migration. |
+| 2026-10-25 | The dispatch date has its own table, one row per issued letter | a date column on the case or the form; the date in the move's audit row only | A corrected letter is sent again on another day; each issued letter needs its own date, and the row ties the date to the exact file (checksum) that went. |
+| 2026-10-25 | One ETLS endpoint records the date and makes the move | two calls (save the date, then move); generic "data" on every move | One click, as the screen has it, and one transaction. The engine stays unaware of dates. The check stops the generic endpoint skipping the date. |
+| 2026-10-25 | `mark_sent_to_gra()` asks permission and readiness first, and rolls back only on the unexpected | add the row, try the move, roll back on any refusal | A rollback expires everything loaded in the session. Asking first means the normal "not allowed" path changes nothing. |
+| 2026-10-25 | Checks can be left out of the dry run (`in_dry_run`) | always run them; hide the dispatch move's `blocked_by` in code | It's a property of the check-on-move link, like `warn_only`; no special case in the engine. |
+| 2026-10-25 | "Correction" is a property of a move (`is_correction`): may leave a final status, never in a queue | keep `sent_to_gra` non-final; a separate "reopen" mechanism | Final means "nobody needs to act". A correction is the exception that proves it, and it shouldn't fill queues with every signed letter. |
+| 2026-10-25 | The corrected wording is a status column (`applicant_label_corrected`), used after any hidden move away from that status | hard-code "Corrected letter issued" for sent_to_gra in the timeline | Workflows are data; the CO workflow will have the same "reissued" case. |
+| 2026-10-25 | Migration 0030 refuses when a case is in `closed` | move those cases to `sent_to_gra` | Rewriting a case's status without an audit row would break the history. Only dev data can be there; `scripts/reset-dev.sh` clears it. (As planned in GAPS.md C9.) |
+| 2026-10-25 | The registry reference default is the example from the spec, `ADM 151/420/01/PART IV`, the same on every letter | keep the old case-reference-like default | The case reference is the tracking number (C6); printing a look-alike would confuse. `[CONFIRM]` with the desk what the parts mean. The setting keeps its name, so `.env` files keep working. |
+| 2026-10-25 | Download names use the case reference | the registry reference | That's the same on every letter, so every download would have the same name. |
 
 ## 4. Open questions
 
@@ -1375,10 +1409,22 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 - [ ] **Drafts:** may staff see an applicant's unsubmitted draft (now yes, like every case)? Should old drafts be deleted after some time, and how long?
 - [ ] **ECOWAS list checks:** is the wording of the two ticks right ("The exporter's ETLS approval number is on the ECOWAS ETLS list"; "On the ECOWAS ETLS list, the product approval covers these goods")? Any other checks the desk does by hand? See backend/alembic/versions/0029_desk_checks.py.
 - [ ] **Holds:** may the desk also *return* (not only reject) while a duplicate flag is open? Now it must resolve the flag first.
+- [ ] **Registry file reference:** is `ADM 151/420/01/PART IV` the same on every facility letter, or does part of it change (the year, a folio number, a new "PART" when a file fills up)? It's `FACILITY_LETTER_REFERENCE_FORMAT` in backend/app/core/config.py.
+- [ ] **GRA:** does GRA ever report back about a letter (received, used at clearance)? If so, a step after "Sent to GRA" may be needed again (C9).
 
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 8e
+1. Why does the "Mark sent to GRA" action show `blocked_by: []` even though the date hasn't been entered, and what stops someone making the move without one?
+2. A letter went to GRA on Monday, was cancelled on Tuesday and a corrected one went on Thursday. How many rows are in `etls.facility_letter_dispatches`, and what does the applicant's timeline end with?
+3. "Sent to GRA" is final, yet the PS can still cancel from it. Why doesn't that put every sent letter in the PS's queue?
+
+#### Show answers
+1. The `etls_dispatch_recorded` check is linked with `in_dry_run = false`, so `what_blocks()` leaves it out: the date comes with the click. The move itself runs every check, so the generic `POST /cases/{id}/status` gets 409 ("the dispatch date hasn't been entered"); only `POST /etls/facility-letters/{id}/sent-to-gra` adds the dispatch row first.
+2. Two: one per issued letter (each `issued_document_id` once). The timeline ends "Letter sent to GRA", then (cancel hidden) "Awaiting signature", "Letter signed", "Corrected letter issued", because the hidden cancel took the case away from `sent_to_gra`, which has `applicant_label_corrected`.
+3. The cancel move has `is_correction = true`. `queue()` in backend/app/core/workflow/queues.py ignores correction moves, both in the SQL pre-filter and in the per-case check, and final statuses are left out anyway.
 
 ### Step 8d
 1. Two applications use the same certificate number. The second is submitted. Can Records accept its originals? Can the desk verify it? Why the difference?

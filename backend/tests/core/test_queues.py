@@ -131,7 +131,8 @@ async def test_the_queue_can_be_narrowed_to_one_status(act, people):
     await _to_ps(act, people, signed)
     assert (await move(act, people["permanent_secretary"], signed, "signed")).status_code == 200
 
-    only_signed = await _queue(act, people["desk"], status="signed")
+    # Records' "Outgoing" tab: signed letters to send to GRA.
+    only_signed = await _queue(act, people["records_officer"], status="signed")
     assert signed in only_signed and waiting not in only_signed
     assert all(item["status"]["code"] == "signed" for item in only_signed.values())
 

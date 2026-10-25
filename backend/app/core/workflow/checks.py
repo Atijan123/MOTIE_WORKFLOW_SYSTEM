@@ -33,9 +33,10 @@ def registered() -> set[str]:
     return set(_checks)
 
 
-async def problems(session: AsyncSession, case: Case, transition_id: int) -> list[str]:
-    """Everything that stops this move right now, from all its checks."""
-    return await _run(session, case, transition_id, warn_only=False)
+async def problems(session: AsyncSession, case: Case, transition_id: int, *, dry_run: bool = False) -> list[str]:
+    """Everything that stops this move right now, from all its checks. A dry
+    run leaves out checks about what's sent with the move (in_dry_run false)."""
+    return await _run(session, case, transition_id, warn_only=False, dry_run=dry_run)
 
 
 async def warnings(session: AsyncSession, case: Case, transition_id: int) -> list[str]:
@@ -43,12 +44,15 @@ async def warnings(session: AsyncSession, case: Case, transition_id: int) -> lis
     return await _run(session, case, transition_id, warn_only=True)
 
 
-async def _run(session: AsyncSession, case: Case, transition_id: int, *, warn_only: bool) -> list[str]:
-    codes = await session.scalars(
-        select(TransitionCheck.check_code)
-        .where(TransitionCheck.transition_id == transition_id, TransitionCheck.warn_only == warn_only)
-        .order_by(TransitionCheck.check_code)
+async def _run(
+    session: AsyncSession, case: Case, transition_id: int, *, warn_only: bool, dry_run: bool = False
+) -> list[str]:
+    query = select(TransitionCheck.check_code).where(
+        TransitionCheck.transition_id == transition_id, TransitionCheck.warn_only == warn_only
     )
+    if dry_run:
+        query = query.where(TransitionCheck.in_dry_run)
+    codes = await session.scalars(query.order_by(TransitionCheck.check_code))
     found: list[str] = []
     for code in codes:
         check = _checks.get(code)

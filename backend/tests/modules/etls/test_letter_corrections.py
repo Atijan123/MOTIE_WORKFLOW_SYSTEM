@@ -14,7 +14,7 @@ from app.core.audit.models import AuditEvent
 from app.core.documents import issued, storage
 from app.core.workflow.delegation import today
 from app.modules.etls import letter
-from tests.support import ready_to_verify, facility_letter_form, move, ready_for_records
+from tests.support import facility_letter_form, move, ready_for_records, ready_to_verify, send_to_gra
 
 pytestmark = pytest.mark.anyio
 
@@ -136,16 +136,10 @@ async def test_someone_acting_for_the_ps_may_cancel(act, people, db_session):
 
 
 async def test_a_letter_already_sent_to_gra_can_be_cancelled(act, people):
+    # "Sent to GRA" is final, but cancelling is a correction move, which may leave it.
     case_id = await _signed_case(act, people)
-    assert (await move(act, people["desk"], case_id, "sent_to_gra")).status_code == 200
+    assert (await send_to_gra(act, people, case_id)).status_code == 200
     assert (await _cancel(act, people, case_id)).status_code == 200
-
-
-async def test_a_closed_file_cannot_be_cancelled(act, people):
-    case_id = await _signed_case(act, people)
-    for to_status in ["sent_to_gra", "closed"]:
-        assert (await move(act, people["desk"], case_id, to_status)).status_code == 200
-    assert (await _cancel(act, people, case_id)).status_code == 409
 
 
 # --- The corrected letter ----------------------------------------------------

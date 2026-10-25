@@ -151,6 +151,11 @@ async def applicant_timeline(session: AsyncSession, case: Case) -> list[Timeline
     a signed letter) are left out, and a label repeating the one before it is
     shown once (e.g. several internal minutes that all read "Accepted by the
     Ministry").
+
+    When a hidden move took the case away from a status, and the case later
+    comes back to it, that status's applicant_label_corrected is shown if it
+    has one: a letter cancelled after it was sent to GRA, then corrected and
+    sent again, reads "Corrected letter issued".
     """
     statuses = {
         s.code: s
@@ -175,17 +180,22 @@ async def applicant_timeline(session: AsyncSession, case: Case) -> list[Timeline
         )
 
     entries: list[TimelineEntry] = []
+    corrected_from: set[str] = set()  # statuses a hidden move took the case away from
     for event in await history(session, service.AUDIT_ENTITY, case.id):
         if event.action == "case.created":
             label = statuses[event.details["status"]].applicant_label
         elif event.action == "case.status_changed":
             move = move_for(event)
             if move is not None and not move.applicant_visible:
+                corrected_from.add(event.details["from"])
                 continue
             target = statuses.get(event.details["to"])
             if target is None:
                 continue  # a status since removed from the workflow; nothing safe to show
             label = (move.applicant_event if move else None) or target.applicant_label
+            if target.code in corrected_from:
+                corrected_from.discard(target.code)
+                label = target.applicant_label_corrected or label
         else:
             continue  # uploads, flags, letters: not part of the applicant's timeline
         message = event.details.get("applicant_message")

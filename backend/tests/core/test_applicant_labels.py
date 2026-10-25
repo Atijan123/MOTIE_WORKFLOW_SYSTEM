@@ -38,7 +38,6 @@ async def test_facility_letter_labels_are_the_ones_in_the_spec(db_session):
         "verified": "Awaiting signature",
         "signed": "Letter signed",
         "sent_to_gra": "Letter sent to GRA",
-        "closed": "Letter sent to GRA",
         "rejected": "Rejected",
     }
 

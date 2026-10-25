@@ -107,6 +107,10 @@ class DuplicateNumberOut(BaseModel):
     other_cases: list[OtherCaseOut]  # oldest first
 
 
+class DispatchRequest(BaseModel):
+    dispatched_on: date  # the day the letter went to GRA
+
+
 class HsCodeConfirmation(BaseModel):
     hs_code: HsCode
 
@@ -123,4 +127,5 @@ class IssuedLetterOut(BaseModel):
     cancelled_at: datetime | None
     cancelled_by: int | None
     cancellation_reason: str | None
+    sent_to_gra_on: date | None  # the dispatch date, once Records has sent it
     download_url: str

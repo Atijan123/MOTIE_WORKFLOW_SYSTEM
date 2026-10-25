@@ -3,7 +3,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.identity.deps import get_current_user
 from app.core.identity.models import User
+from app.core.workflow import router as workflow_router
 from app.core.workflow import service as workflow
+from app.core.workflow.schemas import CaseOut
 from app.db.session import get_session
 from app.modules.etls import letter as facility_letter
 from app.modules.etls import service
@@ -11,6 +13,7 @@ from app.modules.etls.models import FacilityLetter
 from app.core.documents.models import IssuedDocument
 from app.modules.etls.schemas import (
     CertificateOut,
+    DispatchRequest,
     DuplicateNumberOut,
     OtherCaseOut,
     FacilityLetterForm,
@@ -149,7 +152,24 @@ async def list_letters(
     session: AsyncSession = Depends(get_session),
 ):
     """Every letter issued on this case, oldest first, with cancelled ones marked."""
-    return [_letter_out(case_id, d) for d in await facility_letter.letters(session, case_id, user)]
+    letters = await facility_letter.letters(session, case_id, user)
+    sent = await facility_letter.dispatches(session, case_id)
+    return [_letter_out(case_id, d, sent.get(d.id)) for d in letters]
+
+
+@router.post("/facility-letters/{case_id}/sent-to-gra", response_model=CaseOut)
+async def mark_sent_to_gra(
+    case_id: int,
+    body: DispatchRequest,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Records' "Mark sent to GRA": records the dispatch date against the
+    current letter and moves the case to "Sent to GRA"."""
+    case = await facility_letter.mark_sent_to_gra(
+        session, case_id=case_id, actor=user, dispatched_on=body.dispatched_on
+    )
+    return await workflow_router.case_out(session, case, user)
 
 
 @router.get(
@@ -183,7 +203,7 @@ def _pdf(document: IssuedDocument, content: bytes) -> Response:
     )
 
 
-def _letter_out(case_id: int, d: IssuedDocument) -> IssuedLetterOut:
+def _letter_out(case_id: int, d: IssuedDocument, dispatch=None) -> IssuedLetterOut:
     return IssuedLetterOut(
         id=d.id,
         filename=d.filename,
@@ -196,5 +216,6 @@ def _letter_out(case_id: int, d: IssuedDocument) -> IssuedLetterOut:
         cancelled_at=d.cancelled_at,
         cancelled_by=d.cancelled_by,
         cancellation_reason=d.cancellation_reason,
+        sent_to_gra_on=dispatch.dispatched_on if dispatch else None,
         download_url=f"/etls/facility-letters/{case_id}/letters/{d.id}/file",
     )

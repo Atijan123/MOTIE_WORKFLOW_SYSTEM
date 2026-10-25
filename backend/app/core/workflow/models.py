@@ -75,6 +75,9 @@ class WorkflowStatus(Base):
     applicant_explanation: Mapped[str | None] = mapped_column(Text)
     # The applicant may still change the form in this status, e.g. a draft (0026).
     applicant_editable: Mapped[bool] = mapped_column(Boolean, server_default=false())
+    # The timeline's wording when the case comes back here after a hidden
+    # correction took it away, e.g. "Corrected letter issued" (0030).
+    applicant_label_corrected: Mapped[str | None] = mapped_column(Text)
 
 
 class WorkflowTransition(Base):
@@ -122,6 +125,9 @@ class WorkflowTransition(Base):
     requires_applicant_message: Mapped[bool] = mapped_column(Boolean, server_default=false())
     # May be made while a blocking flag holds the case, and resolves it (0029).
     allowed_on_hold: Mapped[bool] = mapped_column(Boolean, server_default=false())
+    # Puts a mistake right (cancelling a letter): may leave a final status, and
+    # puts the case in nobody's queue (0030).
+    is_correction: Mapped[bool] = mapped_column(Boolean, server_default=false())
 
     # Two links to the same table (from and to), so each says which column it uses.
     from_status: Mapped[WorkflowStatus] = relationship(
@@ -337,6 +343,9 @@ class TransitionCheck(Base):
     check_code: Mapped[str] = mapped_column(Text, primary_key=True)
     # Its findings are shown and recorded, but never stop the move (0028).
     warn_only: Mapped[bool] = mapped_column(Boolean, server_default=false())
+    # False when it checks something sent with the move itself (a date), which
+    # the dry run behind `blocked_by` can't know yet (0030).
+    in_dry_run: Mapped[bool] = mapped_column(Boolean, server_default=true())
 
 
 class TransitionEffect(Base):

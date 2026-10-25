@@ -27,7 +27,7 @@ Two things apply to every screen and aren't repeated below:
 | Drafts: every application starts as an editable draft; "Submit" goes to Records; a returned case becomes editable and is resubmitted with the same reference and history | **Built** | 8a: `POST /etls/facility-letters` opens a `draft`; `PUT /etls/facility-letters/{id}` edits it while the status is `applicant_editable`; Submit is the applicant's move `draft → submitted` (`by_applicant`, 0026). 8b: `returned` is editable too, and "Resubmit" (`returned → submitted`) keeps the reference (0027). |
 | Dates in the Ministry format | **Partial** | `long_date()` in modules/etls/letter.py, used on the letter. The API returns ISO dates elsewhere (right for an API); the frontend needs the same formatter. |
 | Case reference numbers: a sequence per service per year, assigned at submission (`MOTIE/ETLS/FL/2026/0001`, `/AP/`, `/CO/`), shown to applicants and staff | **Built** | `core.reference_counters`, `next_reference()` in core/workflow/service.py (0024); given by the `assign_reference` effect on Submit (8a), kept on resubmission. |
-| The Ministry's **registry file reference** (e.g. `ADM 151/420/01/PART IV`) is separate: printed at the top of the letter; a setting until the desk explains it `[CONFIRM]` | **Partial** | The letter prints a setting (`FACILITY_LETTER_REFERENCE_FORMAT`, core/config.py). Its default (`MOTIE/ETLS/FL/{year}/{case_id:05d}`) looks like the case reference but isn't one; it should become a registry-style value. |
+| The Ministry's **registry file reference** (e.g. `ADM 151/420/01/PART IV`) is separate: printed at the top of the letter; a setting until the desk explains it `[CONFIRM]` | **Built** | 8e: `FACILITY_LETTER_REFERENCE_FORMAT` (core/config.py) defaults to `ADM 151/420/01/PART IV`; download names use the case reference. |
 | Uploads: PDF/PNG/JPEG, max 10 MB, type from content | **Built** | core/documents/storage.py `save()`, `POST /cases/{id}/documents/{type}`, `MAX_UPLOAD_BYTES`. |
 | Notifications: email at each status change and on return | **Missing** | No email code. Needs the Ministry's mail server `[CONFIRM]`, an outbox table and a background sender. |
 | Queues show how long each case has waited at its current step | **Built** | `GET /cases/queue`: `status_since`, `days_waiting` (core/workflow/queues.py, `cases.status_changed_at` from 0025). |
@@ -58,7 +58,7 @@ Two things apply to every screen and aren't repeated below:
 | Receipt "not known yet" until the **desk confirms** the HS code; a declared code doesn't decide it | **Built** | 8d: `hs_heading()` in modules/etls/service.py uses only the confirmed code (C5). |
 | Save draft; Submit disabled until required documents are uploaded, with a count | **Built** | 8a: the draft is saved with `POST`/`PUT /etls/facility-letters`; the Submit action carries `known_documents_complete`, so its `blocked_by` lists what's missing. A draft needs every required field (decided in 8a; see LEARNING.md). |
 | **Warning at submission** when a certificate expires within 30 days (doesn't block) | **Built** | 8c: the warning-only check `etls_certificates_expiring` on Submit and Resubmit; shown in the action's `warnings`, recorded with the move. |
-| Applicant labels: Draft → Submitted ("Bring the original certificate of origin to Records") → Originals checked → Being verified → Awaiting signature → Letter signed → Letter sent to GRA; Returned: action needed; Rejected; a cancelled letter is invisible (shows "Being verified" again); a corrected letter that replaces one already sent to GRA shows "Corrected letter issued" | **Partial** | Built (0023): every label except Draft and Returned, which come with those statuses; the cancel move is hidden. Missing: "Corrected letter issued" (decided 2026-10-24). |
+| Applicant labels: Draft → Submitted ("Bring the original certificate of origin to Records") → Originals checked → Being verified → Awaiting signature → Letter signed → Letter sent to GRA; Returned: action needed; Rejected; a cancelled letter is invisible (shows "Being verified" again); a corrected letter that replaces one already sent to GRA shows "Corrected letter issued" | **Built** | 0023, 0026, 0027: every label; the cancel move is hidden. 8e: `applicant_label_corrected` gives "Corrected letter issued" (0030). |
 
 ### A3. Status on a phone
 
@@ -97,7 +97,7 @@ Everything is **Missing**: no register, no CO workflow, no CO tables (boxes 1–
 ## 3. Staff screens: facility letters
 
 Spec route: Records (originals seen) → ETLS desk (verify) → PS (sign) → **Records dispatches the letter** → `Sent to GRA` (final; no manual Close unless GRA reports back `[CONFIRM]`).
-Built route (0015, 0018, 0020–0022): `submitted` →(Records: Confirm originals received)→ `originals_received` →(desk: Verify / Reject)→ `verified` / `rejected` →(PS: Sign)→ `signed` →(**desk**: Send to GRA)→ `sent_to_gra` →(**desk**: Close the file)→ `closed`; plus the PS's "Cancel the signed letter" from `signed`/`sent_to_gra` back to `originals_received`. Differences: "Send to GRA" belongs to Records, with a dispatch date; `sent_to_gra` must become final and "Close" goes (C9).
+Built route (0015–0030): `draft` →(applicant: Submit)→ `submitted` →(Records: Confirm originals received / Return)→ `originals_received` →(desk: Verify / Return / Reject)→ `verified` / `returned` / `rejected` →(PS: Sign)→ `signed` →(**Records**: Mark sent to GRA, with the dispatch date)→ `sent_to_gra` (final); `returned` →(applicant: Resubmit)→ `submitted`; plus the PS's correction "Cancel the signed letter" from `signed`/`sent_to_gra` back to `originals_received`. Matches the spec since 8e.
 
 ### S1. Records queue
 
@@ -108,7 +108,7 @@ Built route (0015, 0018, 0020–0022): `submitted` →(Records: Confirm original
 | "Original seen in person" | **Built** | `POST /cases/{id}/documents/{document_id}/original-seen`. |
 | Accept, disabled until originals seen | **Built** | Records' move has `known_documents_complete` and `originals_seen`; `blocked_by` says which is missing. |
 | Return to applicant with message (and internal minute) | **Built** | 8b: "Return to applicant" (`submitted → returned`). |
-| **Outgoing tab**: signed letters to dispatch; download the stored letter; "Mark sent to GRA" with the dispatch date | **Partial** | Built: the stored letter (`GET /etls/facility-letters/{id}/letter.pdf`) and the queue filter (`GET /cases/queue?status=signed`). Missing: the move belongs to the desk today (C9), so Records' queue never shows signed letters; no dispatch date. |
+| **Outgoing tab**: signed letters to dispatch; download the stored letter; "Mark sent to GRA" with the dispatch date | **Built** | 8e: `GET /cases/queue?status=signed` (Records), `GET /etls/facility-letters/{id}/letter.pdf`, `POST /etls/facility-letters/{id}/sent-to-gra` with `dispatched_on` (`etls.facility_letter_dispatches`). |
 
 ### S2. ETLS desk verification
 
@@ -134,7 +134,7 @@ Built route (0015, 0018, 0020–0022): `submitted` →(Records: Confirm original
 | Letter preview in the Ministry's wording | **Missing** | `render_pdf()` exists; a preview must never be stored and must be marked as a draft. |
 | Sign (stores the letter) | **Built** | `verified → signed`, effect `issue_facility_letter` (core/documents/issued.py). |
 | Return to desk | **Missing** | No `verified → originals_received` move for the PS. |
-| Cancel and reissue | **Built** | "Cancel the signed letter" (0022); `.../letters`, `.../letters/{letter_id}/file`. The timeline hides the cancel move (7e). Signed letters also sit in the PS's queue today, because the cancel move counts as work. |
+| Cancel and reissue | **Built** | "Cancel the signed letter" (0022); `.../letters`, `.../letters/{letter_id}/file`. The timeline hides the cancel move (7e). Since 8e it's a correction move (`is_correction`), so it puts no letter in the PS's queue. |
 
 ### S11. Absences and delegations (all staff)
 
@@ -194,14 +194,13 @@ Everything is **Missing** (S9 comparison table and flags; S10 box 10 certificati
 - **C6. References.** *Decided:* two different numbers. The **case reference** (`MOTIE/ETLS/FL/2026/0001`) is a sequence per service per year, assigned at submission, shown to everyone. The **registry file reference** printed on the letter stays a setting `[CONFIRM]`. So the letter does *not* switch to the case reference; the setting's default should change to a registry-style value.
 - **C7. Reject while a duplicate flag is open.** *Decided* `[CONFIRM]` *and built (8d)*: allowed, and the rejection reason resolves the flag (`allowed_on_hold`). Found while building: the flag used to hold every move, so a flagged case never reached the desk; a flag now holds only its own post's moves.
 - **C8. History order.** *Decided and built (7e):* newest first, with name, post title and acting-for dates.
-- **C9. Dispatch to GRA.** *Decided:* Records dispatches signed letters (an "Outgoing" tab) and marks them sent with the dispatch date; `sent_to_gra` is the final status; the manual "Close" goes, unless GRA reports back `[CONFIRM]`. Build: the `signed → sent_to_gra` move changes from the desk to the Records post, with a required dispatch date; `sent_to_gra` becomes final; the "Close the file" move and `closed` status are removed (dev only; the migration must refuse if a case is in `closed`). The PS's "Cancel the signed letter" from `sent_to_gra` stays, so a final status needs a way to allow that one correction move.
+- **C9. Dispatch to GRA.** *Decided and built (8e):* Records dispatches signed letters (an "Outgoing" tab) and marks them sent with the dispatch date; `sent_to_gra` is the final status; the manual "Close" goes, unless GRA reports back `[CONFIRM]`. Build: the `signed → sent_to_gra` move changes from the desk to the Records post, with a required dispatch date; `sent_to_gra` becomes final; the "Close the file" move and `closed` status are removed (dev only; the migration must refuse if a case is in `closed`). The PS's "Cancel the signed letter" from `sent_to_gra` stays, so a final status needs a way to allow that one correction move.
 - **C10. Certificate issue dates and validity.** *Decided (2026-10-24) and built (8c):* each certificate on the form has an issue date. At the desk's **Verify**, any certificate more than six months past its issue date **blocks** the move. At **submission**, a certificate that expires within 30 days gives the applicant a **warning** but doesn't block. GRA needing the certificate valid at clearance is confirmed. Build: a date column on `etls.facility_letter_certificates`, required on new forms; a blocking check on Verify; a warning-only check on Submit.
-- **C11. Timeline after a cancelled letter.** *Decided (2026-10-24):* keep hiding only the cancel move. If the cancelled letter had already been sent to GRA, the next "sent to GRA" shows to the applicant as **"Corrected letter issued"**.
+- **C11. Timeline after a cancelled letter.** *Decided (2026-10-24) and built (8e):* keep hiding only the cancel move. If the cancelled letter had already been sent to GRA, the next "sent to GRA" shows to the applicant as **"Corrected letter issued"**.
 
 ### Built but not used by any screen
 
 - **`POST /cases`** (generic case opening): unused; retires with `etls_application`.
-- **"Close the file"** and the `closed` status: dropped by the spec (C9).
 - **Placeholder posts:** `director_of_trade`, `trade_officer`, the Directorate of Trade (0008).
 - **Letter field `$hs_code`**: not in the Ministry's wording.
 - **Facts `product`, `unit`, `exporter_country`**: no rule uses them since step 6g.

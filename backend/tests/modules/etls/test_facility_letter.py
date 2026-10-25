@@ -9,20 +9,19 @@ from tests.support import (
     facility_letter_form,
     move,
     ready_for_records,
+    send_to_gra,
     submit,
     upload_required,
 )
 
 pytestmark = pytest.mark.anyio
 
-# The route as the Ministry gave it. [CONFIRM] who reviews between desk and PS,
-# who sends to GRA and closes, and who rejects.
+# The route in SCREENS.md (Records sends to GRA, and that's final). [CONFIRM]
+# who reviews between desk and PS, and who rejects.
 ROUTE = [
     ("records_officer", "originals_received"),
     ("desk", "verified"),
     ("permanent_secretary", "signed"),
-    ("desk", "sent_to_gra"),
-    ("desk", "closed"),
 ]
 
 
@@ -53,8 +52,7 @@ async def test_facility_letter_workflow_is_seeded(db_session):
         ("originals_received", "verified", "etls_desk_officer"),
         ("originals_received", "rejected", "etls_desk_officer"),
         ("verified", "signed", "permanent_secretary"),
-        ("signed", "sent_to_gra", "etls_desk_officer"),
-        ("sent_to_gra", "closed", "etls_desk_officer"),
+        ("signed", "sent_to_gra", "records_officer"),  # Records dispatches (0030)
         # Cancelling a signed letter so a corrected one can be issued (0022).
         ("signed", "originals_received", "permanent_secretary"),
         ("sent_to_gra", "originals_received", "permanent_secretary"),
@@ -149,6 +147,8 @@ async def test_the_case_walks_the_whole_route(act, people):
             assert (await ready_to_verify(act, people, case_id)).status_code == 200
         response = await move(act, people[who], case_id, to_status)
         assert response.status_code == 200, f"{who}: {response.text}"
+    response = await send_to_gra(act, people, case_id)
+    assert response.status_code == 200, response.text
     assert response.json()["status"]["is_final"] is True
 
 
