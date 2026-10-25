@@ -16,6 +16,12 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Docs — GRA and certificate validity at clearance is not confirmed (2026-10-25)
+**Built:** nothing; a correction. The docs said the Ministry had confirmed that GRA needs the certificate of origin still valid on the day goods are cleared. It hadn't. What *is* decided stays as built: the desk's Verify is blocked once a certificate is more than six months past its issue date, and the applicant is warned at submission if one expires within 30 days. Whether GRA's own rule needs more (say, refusing a letter whose certificate expires before the goods arrive) is now an open question `[CONFIRM]`. Nothing in the code depended on it.
+**Files:** docs/SCREENS.md (S2), docs/GAPS.md (C10, and the chunk 1 answers), docs/LEARNING.md (Decisions, Open questions)
+**Try it:** read docs/GAPS.md C10.
+**New concepts:** none.
+
 ### Step 8h — Emails to applicants, through an outbox (2026-10-25)
 Chunk 2, step 8: the last backend step of chunk 2.
 
@@ -317,7 +323,7 @@ The facility letter labels are SCREENS.md A2's. "Draft" and "Returned: action ne
 
 ### Docs — Answers on certificate validity and the timeline (2026-10-24)
 **Built:** nothing; the docs catch up with two answers from you, before chunk 2.
-- **Six-month check:** the desk's Verify is blocked if any certificate of origin is more than six months past its issue date. At submission the applicant is only *warned* if one expires within 30 days. GRA needing it valid at clearance is confirmed.
+- **Six-month check:** the desk's Verify is blocked if any certificate of origin is more than six months past its issue date. At submission the applicant is only *warned* if one expires within 30 days. (Corrected 2026-10-25: whether GRA needs it valid at clearance was *not* confirmed; it's an open question.)
 - **Timeline after a cancelled letter:** only the cancel move stays hidden. If the cancelled letter had already gone to GRA, the corrected letter's "sent to GRA" reads "Corrected letter issued".
 
 docs/GAPS.md now says chunk 1 is done, and its marks include what chunk 1 built (labels, references, queues, `blocked_by`, history, timeline, the acting and absence views). Chunk 2's backend is steps 8a–8h.
@@ -1204,7 +1210,7 @@ These were open questions; the Ministry has answered them. The code follows them
 - **When the Minister is away, the PS acts; when the PS is away too, a DPS acts (2026-10-19).** This follows the general chain of command, through the succession order (steps 5b and 5d), not a standing transition. (Which DPS is still open.)
 - **When the Director of Industry and Investment is away, the DPS Administration and Finance may sign and assign ETLS files (2026-10-19).**
 - **A position holder, or an authorised officer on their behalf, records absences (2026-10-19).** The audit log shows who recorded it. (Who counts as "authorised" is still open.)
-- **Certificate of origin validity (2026-10-24):** the desk can't verify while any certificate is more than six months past its issue date; at submission the applicant is warned, not stopped, if one expires within 30 days. GRA needs the certificate valid at clearance.
+- **Certificate of origin validity (2026-10-24):** the desk can't verify while any certificate is more than six months past its issue date; at submission the applicant is warned, not stopped, if one expires within 30 days. (Whether GRA also needs it valid at clearance is *not* confirmed; see Open questions.)
 - **The applicant's timeline after a cancelled letter (2026-10-24):** only the cancel move is hidden. A corrected letter replacing one already sent to GRA reads "Corrected letter issued" when it is sent.
 
 ### Choices made while building
@@ -1506,6 +1512,7 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 - [ ] **ECOWAS list checks:** is the wording of the two ticks right ("The exporter's ETLS approval number is on the ECOWAS ETLS list"; "On the ECOWAS ETLS list, the product approval covers these goods")? Any other checks the desk does by hand? See backend/alembic/versions/0029_desk_checks.py.
 - [ ] **Holds:** may the desk also *return* (not only reject) while a duplicate flag is open? Now it must resolve the flag first.
 - [ ] **Registry file reference:** is `ADM 151/420/01/PART IV` the same on every facility letter, or does part of it change (the year, a folio number, a new "PART" when a file fills up)? It's `FACILITY_LETTER_REFERENCE_FORMAT` in backend/app/core/config.py.
+- [ ] **GRA and certificate validity:** must the certificate of origin still be valid on the day GRA clears the goods (not only when the desk verifies)? If yes, the letter may need a "use by" date, or the desk a stricter check. Wrongly marked as confirmed until 2026-10-25. See `_check_certificates_valid()` in backend/app/modules/etls/service.py.
 - [ ] **GRA:** does GRA ever report back about a letter (received, used at clearance)? If so, a step after "Sent to GRA" may be needed again (C9).
 - [ ] **Walk-in applicants:** how will a walk-in applicant get into their account later (a "set your password" email, or Records hands them a one-time code)? Must a walk-in applicant have an email at all, or can Records enter a phone number instead? See `open_walk_in()` in backend/app/modules/etls/service.py.
 - [ ] **Email:** the Ministry's mail server (SMTP host, port, login) and sender address; the wording of the emails, and whether they should also be in French; whether staff should get emails too (e.g. a file waiting more than N days). See backend/app/core/notifications/.

@@ -76,7 +76,7 @@ Route: Records (originals seen) → ETLS desk (verify) → PS (sign) → **Recor
 - Application summary.
 - HS code: enter or confirm; shows whether the cement receipt applies.
 - Checks against the ECOWAS ETLS list, each a recorded tick: exporter approval listed; product approval covers the goods.
-- Certificate validity is **computed** from the issue dates on the form: Verify is blocked while any certificate is more than six months past its issue date (decided 2026-10-24; GRA needing it valid at clearance is confirmed).
+- Certificate validity is **computed** from the issue dates on the form: Verify is blocked while any certificate is more than six months past its issue date (decided 2026-10-24). Whether GRA also needs it still valid on the day of clearance is not confirmed `[CONFIRM]`.
 - Verify (disabled until flag cleared, HS code confirmed, checks ticked, documents complete) or return to applicant.
 - History panel.
 
