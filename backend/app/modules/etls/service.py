@@ -1,5 +1,6 @@
 """ETLS facility letters: the form (a draft until submitted), the duplicate check, and the HS code."""
 
+import secrets
 from datetime import date
 
 from sqlalchemy import delete, func, select
@@ -9,6 +10,7 @@ from app.core.audit.service import record_event
 from app.core.dates import add_months, long_date
 from app.core.documents import facts
 from app.core.documents import service as documents
+from app.core.identity import service as identity
 from app.core.identity.models import User
 from app.core.workflow import checklist, checks, effects, flags, summaries
 from app.core.workflow import service as workflow
@@ -107,11 +109,14 @@ def _snapshot(fields: dict, approvals: list[str], certificates: list) -> dict:
     }
 
 
-async def create_draft(session: AsyncSession, *, actor: User, form: FacilityLetterForm) -> FacilityLetter:
+async def create_draft(
+    session: AsyncSession, *, actor: User, form: FacilityLetterForm, applicant: User | None = None
+) -> FacilityLetter:
     """Open an etls_facility_letter case as a draft, with the importer's form,
-    in one transaction. It gets its reference when the applicant submits."""
+    in one transaction. It gets its reference when the applicant submits.
+    `applicant` is set when Records opens it for a walk-in."""
     case = await workflow.open_case(
-        session, workflow_code=FACILITY_LETTER, actor=actor, module=MODULE
+        session, workflow_code=FACILITY_LETTER, actor=actor, module=MODULE, applicant=applicant
     )
     session.add(FacilityLetter(case_id=case.id, **_form_rows(form)))
     await session.flush()  # the parent row first: the child rows point at it
@@ -127,6 +132,43 @@ async def _reloaded(session: AsyncSession, case_id: int) -> FacilityLetter:
     letter = await session.get(FacilityLetter, case_id)
     await session.refresh(letter)
     return letter
+
+
+async def open_walk_in(
+    session: AsyncSession, *, actor: User, email: str, full_name: str, form: FacilityLetterForm
+) -> FacilityLetter:
+    """Records opens a draft for an applicant who came in person.
+
+    The case belongs to the applicant's account, found by email, or made now
+    if they have none. A new account gets a random password nobody knows, so
+    nobody can log in to it until a "set your password" step exists; the
+    applicant can still be told of each step by email, and Records can finish
+    the application for them.
+    """
+    if not await workflow.may_open_walk_in(session, FACILITY_LETTER, actor):
+        # Checked before an account might be made.
+        raise workflow.NotPermitted("Your post can't open applications for walk-in applicants.")
+    applicant = await identity.get_user_by_email(session, email)
+    if applicant is None:
+        applicant = await identity.create_user(
+            session,
+            email=email,
+            full_name=full_name,
+            password=secrets.token_urlsafe(32),
+            role_codes=["applicant"],
+        )
+        record_event(
+            session,
+            actor=actor,
+            action="user.created_for_walk_in",
+            entity_type=identity.AUDIT_ENTITY,
+            entity_id=applicant.id,
+            details={"email": applicant.email},
+        )
+    elif not applicant.is_active or applicant.role_codes != {"applicant"}:
+        # Never attach an application to a staff member's or a closed account.
+        raise workflow.NotPermitted("That email belongs to an account that can't apply.")
+    return await create_draft(session, actor=actor, form=form, applicant=applicant)
 
 
 async def update_form(

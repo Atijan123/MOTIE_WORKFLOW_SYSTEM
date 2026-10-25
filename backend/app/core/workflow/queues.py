@@ -10,7 +10,7 @@ step belongs to a post the user could possibly act as.
 
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.identity.models import User
@@ -40,10 +40,12 @@ async def _summaries(session: AsyncSession, cases: list[Case]) -> dict[int, str]
 
 
 async def my_cases(session: AsyncSession, user: User) -> list[QueueItem]:
-    """The cases this user applied for, newest first."""
+    """The cases this user applied for, or entered for a walk-in applicant, newest first."""
     cases = list(
         await session.scalars(
-            select(Case).where(Case.created_by == user.id).order_by(Case.created_at.desc(), Case.id.desc())
+            select(Case)
+            .where(or_(Case.created_by == user.id, Case.entered_by == user.id))
+            .order_by(Case.created_at.desc(), Case.id.desc())
         )
     )
     found = await _summaries(session, cases)

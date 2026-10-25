@@ -91,6 +91,7 @@ async def case_out(session: AsyncSession, case: Case, user: User) -> CaseOut:
         workflow=case.workflow.code,
         status=StatusOut(**service.status_view(case.current_status, user)),
         created_by=case.created_by,
+        entered_by=case.entered_by,
         created_at=case.created_at,
         updated_at=case.updated_at,
         applicant_message=await history.current_message(session, case),

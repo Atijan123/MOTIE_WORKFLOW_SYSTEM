@@ -21,6 +21,7 @@ from app.modules.etls.schemas import (
     FacilityLetterOut,
     HsCodeConfirmation,
     IssuedLetterOut,
+    WalkInApplication,
 )
 
 # Engine errors (WorkflowError) are turned into HTTP statuses by the handler in main.py.
@@ -62,6 +63,20 @@ async def create_facility_letter(
     """Start an application as a draft. Upload its documents, then submit it
     with `POST /cases/{id}/status` and `{"to_status": "submitted"}`."""
     letter = await service.create_draft(session, actor=user, form=body)
+    return await _out(session, letter, user)
+
+
+@router.post("/facility-letters/walk-in", response_model=FacilityLetterOut, status_code=status.HTTP_201_CREATED)
+async def walk_in(
+    body: WalkInApplication,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Records starts a draft for an applicant who came in person. Records can
+    then upload the documents and submit it for them, like the applicant."""
+    letter = await service.open_walk_in(
+        session, actor=user, email=body.applicant_email, full_name=body.applicant_name, form=body.form
+    )
     return await _out(session, letter, user)
 
 

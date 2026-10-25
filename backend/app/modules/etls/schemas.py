@@ -82,6 +82,18 @@ class CertificateOut(BaseModel):
     expires_on: date | None  # six months after issue
 
 
+class WalkInApplication(BaseModel):
+    """Records opens an application for an applicant who came in person."""
+
+    # A loose shape check: the address is for notifications, and a typo shows
+    # up as an email that never arrives, which Records can correct.
+    applicant_email: Annotated[
+        str, StringConstraints(strip_whitespace=True, to_lower=True, max_length=254, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    ]
+    applicant_name: ShortText
+    form: FacilityLetterForm
+
+
 class FacilityLetterOut(FacilityLetterForm):
     case_id: int
     reference: str | None  # the case's tracking number, e.g. MOTIE/ETLS/FL/2026/0001

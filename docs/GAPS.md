@@ -31,7 +31,7 @@ Two things apply to every screen and aren't repeated below:
 | Uploads: PDF/PNG/JPEG, max 10 MB, type from content | **Built** | core/documents/storage.py `save()`, `POST /cases/{id}/documents/{type}`, `MAX_UPLOAD_BYTES`. |
 | Notifications: email at each status change and on return | **Missing** | No email code. Needs the Ministry's mail server `[CONFIRM]`, an outbox table and a background sender. |
 | Queues show how long each case has waited at its current step | **Built** | `GET /cases/queue`: `status_since`, `days_waiting` (core/workflow/queues.py, `cases.status_changed_at` from 0025). |
-| Walk-ins: Records creates any application for an applicant, recorded as such | **Missing** | Only the applicant role can open cases; `cases.created_by` is the only person field. |
+| Walk-ins: Records creates any application for an applicant, recorded as such | **Built** (facility letters) | 8g: `POST /etls/facility-letters/walk-in`; `cases.entered_by`, `workflows.walk_in_position_id` (0032); Records may make the walk-in's applicant moves. Approvals and COs get the same when they're built. |
 
 ---
 

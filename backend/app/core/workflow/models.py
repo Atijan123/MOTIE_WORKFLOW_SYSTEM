@@ -45,6 +45,8 @@ class Workflow(Base):
     opened_by_module: Mapped[str | None] = mapped_column(Text)
     # Case references are "<prefix>/<year>/<number>", e.g. MOTIE/ETLS/FL/2026/0001 (0024).
     reference_prefix: Mapped[str] = mapped_column(Text, unique=True)
+    # The post whose holders may open a case for an applicant who came in person (0032).
+    walk_in_position_id: Mapped[int | None] = mapped_column(SmallInteger, ForeignKey("core.positions.id"))
 
     start_role: Mapped[Role] = relationship(lazy="selectin", viewonly=True)
 
@@ -177,6 +179,9 @@ class Case(Base):
     # When it entered its current status: queues' "waiting since" (0025). Set
     # only by the engine, so editing a draft doesn't reset it.
     status_changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # A walk-in: the staff member who typed it in for the applicant (0032).
+    # created_by is still the applicant, whose case it is.
+    entered_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("core.users.id"))
 
     workflow: Mapped[Workflow] = relationship(
         primaryjoin="Workflow.id == Case.workflow_id",

@@ -52,7 +52,8 @@ class CaseOut(BaseModel):
     submitted_at: datetime | None
     workflow: str
     status: StatusOut
-    created_by: int
+    created_by: int  # the applicant whose case it is
+    entered_by: int | None  # a walk-in: the staff member who typed it in
     created_at: datetime
     updated_at: datetime
     # Why the case was returned or rejected, as the applicant was told: the

@@ -91,8 +91,15 @@ def status_view(status: WorkflowStatus, user: User) -> dict:
 
 
 def acts_as_applicant(case: Case, user: User) -> bool:
-    """May this user make the applicant's moves on this case (submit, edit the form)?"""
-    return case.created_by == user.id
+    """May this user make the applicant's moves on this case (submit, edit the form)?
+
+    The applicant themselves; and, for a walk-in, any holder of the workflow's
+    walk-in post (Records), so a colleague can finish what another started.
+    """
+    if case.created_by == user.id:
+        return True
+    walk_in_post = case.workflow.walk_in_position_id
+    return case.entered_by is not None and walk_in_post in {p.id for p in user.positions}
 
 
 def can_view(case: Case, user: User) -> bool:
@@ -129,14 +136,28 @@ async def start_case(session: AsyncSession, *, workflow_code: str, actor: User) 
     return case
 
 
+async def may_open_walk_in(session: AsyncSession, workflow_code: str, actor: User) -> bool:
+    """Does the actor hold the post that opens this workflow's cases for walk-in applicants?"""
+    post = await session.scalar(select(Workflow.walk_in_position_id).where(Workflow.code == workflow_code))
+    return post is not None and post in {p.id for p in actor.positions}
+
+
 async def open_case(
-    session: AsyncSession, *, workflow_code: str, actor: User, module: str | None
+    session: AsyncSession,
+    *,
+    workflow_code: str,
+    actor: User,
+    module: str | None,
+    applicant: User | None = None,
 ) -> Case:
     """Add a new case and its audit row to the current transaction. Does NOT commit.
 
     A module calls this with its own name, saves its form rows, then commits
     once, so a case can never exist without its form. `module` must match the
     workflow's opened_by_module: the generic endpoint can't open module cases.
+
+    `applicant` is set for a walk-in: the actor (Records) opens the case for
+    them. The case is the applicant's; the actor is recorded as entered_by.
     """
     workflow = await session.scalar(select(Workflow).where(Workflow.code == workflow_code))
     if workflow is None:
@@ -145,7 +166,9 @@ async def open_case(
         raise NotPermitted(
             f"Cases of '{workflow_code}' are opened through the {workflow.opened_by_module} module."
         )
-    if workflow.start_role.code not in actor.role_codes:
+    if applicant is not None and not await may_open_walk_in(session, workflow_code, actor):
+        raise NotPermitted("Your post can't open applications for walk-in applicants.")
+    if workflow.start_role.code not in (applicant or actor).role_codes:
         raise NotPermitted("Your role can't open this kind of case.")
 
     initial = await session.scalar(
@@ -160,7 +183,8 @@ async def open_case(
     case = Case(
         workflow_id=workflow.id,
         current_status_id=initial.id,
-        created_by=actor.id,
+        created_by=(applicant or actor).id,
+        entered_by=actor.id if applicant else None,
         reference=await next_reference(session, workflow) if submitting else None,
         submitted_at=func.now() if submitting else None,
     )
@@ -175,7 +199,13 @@ async def open_case(
         action="case.created",
         entity_type=AUDIT_ENTITY,
         entity_id=case.id,
-        details={"workflow": workflow.code, "status": initial.code, "reference": case.reference},
+        details={
+            "workflow": workflow.code,
+            "status": initial.code,
+            "reference": case.reference,
+            # A walk-in: the actor typed it in for this applicant.
+            **({"walk_in_for_user_id": applicant.id} if applicant else {}),
+        },
     )
     return case
 
@@ -391,6 +421,8 @@ async def change_status(
             "comment": comment,  # internal: staff only
             "applicant_message": applicant_message,  # shown to the applicant
             **({"warnings": warned} if warned else {}),
+            # Records making a walk-in applicant's move (e.g. Submit) for them.
+            **({"for_applicant_user_id": case.created_by} if move.by_applicant and actor.id != case.created_by else {}),
         },
     )
     # A move allowed on hold resolves the flags holding the case, with its reason:

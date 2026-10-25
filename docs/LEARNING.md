@@ -16,6 +16,26 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 8g — Walk-in applicants (2026-10-25)
+Chunk 2, step 7.
+
+**Built:**
+- **`POST /etls/facility-letters/walk-in`** with `{"applicant_email", "applicant_name", "form": {...}}`: Records starts a draft for someone who came in person.
+  - The case belongs to the **applicant's account** (`created_by`): it's in their `GET /cases`, they'll be emailed (8h), and they can carry on online.
+  - The new column **`cases.entered_by`** records the Records officer who typed it in. The `case.created` audit row has Records as its actor and `walk_in_for_user_id`.
+  - If no account has that email, one is made with the applicant role and a random password nobody knows (audit row `user.created_for_walk_in`). An email belonging to staff, or to a deactivated account, is refused.
+- **Who may open walk-ins is data:** `workflows.walk_in_position_id` (the Records post for facility letters). Others get 403, *before* any account is made.
+- **Records can finish a walk-in.** `acts_as_applicant()` in backend/app/core/workflow/service.py now also lets holders of the walk-in post make the applicant's moves on a walk-in case (edit the draft, Submit, Resubmit), so a colleague can carry on. The move's audit row adds `for_applicant_user_id`. On an application the applicant started online, Records still can't edit or submit.
+- `GET /cases` (my cases) also lists the walk-ins I entered.
+
+**Files:** backend/alembic/versions/0032_walk_ins.py, backend/app/core/workflow/service.py (`acts_as_applicant()`, `may_open_walk_in()`, `open_case()`, `change_status()`), backend/app/core/workflow/models.py, backend/app/core/workflow/queues.py (`my_cases()`), backend/app/core/workflow/schemas.py, backend/app/core/workflow/router.py, backend/app/modules/etls/service.py (`open_walk_in()`, `create_draft()`), backend/app/modules/etls/schemas.py (`WalkInApplication`), backend/app/modules/etls/router.py, backend/tests/modules/etls/test_walk_ins.py
+**Try it:**
+- As `records@motie.test`, `POST /etls/facility-letters/walk-in` with a new email. `GET /cases/{id}`: `created_by` is the new applicant, `entered_by` is you.
+- Upload the documents and submit it as Records; `GET /cases/{id}/history` shows Records as actor with `for_applicant_user_id`.
+- As `applicant@motie.test`, a walk-in opened with your email appears in `GET /cases`.
+- `docker compose run --rm tools pytest tests/modules/etls/test_walk_ins.py -v`
+**New concepts:** none.
+
 ### Step 8f — What the PS needs before signing (2026-10-25)
 Chunk 2, step 6.
 
@@ -1394,6 +1414,13 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-25 | "Return to the desk" needs an internal minute, and is visible on the applicant's timeline ("Being verified") | hide it like the cancel | Nothing was issued, so it's an ordinary step back, and "Being verified" is true. |
 | 2026-10-25 | The desk's ticks survive a return from the PS | clear them as on a return to the applicant | The application didn't change, so the desk's statements still hold. The desk can untick if the PS's minute calls for it. |
 | 2026-10-25 | One checks summary endpoint for S3 | the frontend calls the five endpoints it's built from | One request for the PS's screen, and the summary can't disagree with the moves' own checks because it reads the same functions. |
+| 2026-10-25 | A walk-in case belongs to the applicant's account; Records is `entered_by` | Records owns the case, with the applicant's name as text | The applicant then sees it, is notified, and can carry on online, and "my cases", notifications and permissions need no special path. |
+| 2026-10-25 | Records makes an account when the email has none, with a random password nobody knows | refuse until the applicant registers; give Records a password to hand over | No password is ever known to staff. The applicant can't log in until a "set your password" step exists (not built), but is still told of each step by email. |
+| 2026-10-25 | The walk-in post is a workflow column (`walk_in_position_id`) | allow any staff; name Records in code | Workflows are data; another module may take walk-ins at a different desk. |
+| 2026-10-25 | Any holder of the walk-in post may make a walk-in's applicant moves; no delegation or succession | only the officer who entered it; follow acting rules | A colleague must be able to finish when the first officer is away. Acting rules belong to post moves; applicant moves never use them (8a). |
+| 2026-10-25 | Records can't edit or submit an application the applicant started online | let Records help with any draft | The spec's walk-in rule is about cases Records creates. An online draft is the applicant's own until they send it. |
+| 2026-10-25 | The email check is a simple shape check (no new library) | `pydantic[email]` (email-validator) | CLAUDE.md asks before new libraries; a mistyped address shows up as an email that never arrives, which Records can correct. |
+| 2026-10-25 | `GET /cases` also lists walk-ins I entered | a separate "entered by me" endpoint | Records' own list of what they typed in, without another endpoint. It settles the step 7c question: "my cases" is both applied for and entered. |
 
 ## 4. Open questions
 
@@ -1432,7 +1459,7 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 - [ ] **Applicant explanations:** the one-line explanation under each facility letter label (e.g. "The ETLS desk is checking your application.") is my wording. See backend/alembic/versions/0023_applicant_labels.py.
 - [ ] **Who may upload, and until when:** right now the applicant and any staff member, until the case is closed.
 - [ ] **Security to-do before going live (not a Ministry question):** scan uploads for viruses (e.g. ClamAV), back up the `documents` volume together with the database, and add a clean-up job for files left behind if the server crashes mid-upload.
-- [ ] **Who may open an ETLS case:** only the applicant online, or can Records register walk-in applications too?
+- [x] **Who may open an ETLS case:** answered by SCREENS.md: the applicant online, or Records for a walk-in (built in step 8g).
 - [ ] **Who may see a case:** right now, any staff member sees every case. Should staff see only cases in their directorate, or only cases assigned to them? See `can_view()` in backend/app/core/workflow/service.py.
 - [ ] **What applicants see:** only the current status, or also the steps taken (without internal comments)? See `case_history()` in backend/app/core/workflow/router.py.
 - [ ] **Deadlines:** how many days may a file sit at each step before it's overdue? (Needed for deadline tracking, not built yet.)
@@ -1441,10 +1468,21 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 - [ ] **Holds:** may the desk also *return* (not only reject) while a duplicate flag is open? Now it must resolve the flag first.
 - [ ] **Registry file reference:** is `ADM 151/420/01/PART IV` the same on every facility letter, or does part of it change (the year, a folio number, a new "PART" when a file fills up)? It's `FACILITY_LETTER_REFERENCE_FORMAT` in backend/app/core/config.py.
 - [ ] **GRA:** does GRA ever report back about a letter (received, used at clearance)? If so, a step after "Sent to GRA" may be needed again (C9).
+- [ ] **Walk-in applicants:** how will a walk-in applicant get into their account later (a "set your password" email, or Records hands them a one-time code)? Must a walk-in applicant have an email at all, or can Records enter a phone number instead? See `open_walk_in()` in backend/app/modules/etls/service.py.
 
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 8g
+1. Records opens a walk-in for fatou@example.gm, who has no account. Who is `created_by`, who is the audit actor of `case.created`, and can anyone log in as Fatou?
+2. The Records officer who started a walk-in goes home. Can a second Records officer submit it? Can the desk? Which function decides?
+3. Why does the walk-in endpoint check the post before looking up the email?
+
+#### Show answers
+1. `created_by` is Fatou's new applicant account; the audit actor is the Records officer, and the row has `walk_in_for_user_id`. Nobody can log in as her: her password is a random string (`secrets.token_urlsafe(32)`) that was never shown to anyone.
+2. Yes, any holder of the workflow's walk-in post (`walk_in_position_id`, Records); no, the desk doesn't hold it. `acts_as_applicant()` in backend/app/core/workflow/service.py.
+3. Otherwise anyone could create applicant accounts for any email just by trying; `open_walk_in()` refuses with 403 before `create_user()` runs, which the test `test_only_records_opens_walk_ins` checks.
 
 ### Step 8f
 1. Someone prints the preview and tries to pass it off as the signed letter. What on the page and in the file gives it away?
