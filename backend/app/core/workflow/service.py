@@ -431,6 +431,15 @@ async def change_status(
         resolve_by_move(session, flag, actor=actor, move_name=move.name, reason=comment or applicant_message or "")
     # What the move sets off (e.g. issuing the signed letter), named in core.transition_effects.
     undos = await effects.run(session, effects.Move(case, actor, event), move.id)
+    # The applicant's email goes in the outbox with the move: both or neither.
+    # Imported here because notifications reads the timeline, which imports this module.
+    from app.core.notifications.service import notify_applicant
+
+    try:
+        await notify_applicant(session, case, event)
+    except BaseException:
+        effects.undo_all(undos)
+        raise
     # Status change, audit row and effects are committed together, or not at all.
     try:
         await session.commit()

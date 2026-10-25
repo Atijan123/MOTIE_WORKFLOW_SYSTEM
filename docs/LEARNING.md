@@ -16,6 +16,26 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 8h — Emails to applicants, through an outbox (2026-10-25)
+Chunk 2, step 8: the last backend step of chunk 2.
+
+**Built** (backend/app/core/notifications/):
+- **The outbox, `core.notifications`.** Every move calls `notify_applicant()` inside its own transaction. If the move added a line to the applicant's timeline, an email row is written: to the applicant's email, with the subject "MOTIE/ETLS/FL/2026/0001: Returned: action needed" and a body with the label, the status's explanation and any message to the applicant. Because the email is built from the timeline, it can only say what the timeline says. So hidden moves (cancelling a letter) and repeated labels send nothing, and internal minutes or staff names never appear. If the move fails, there's no email; if the email can't be written, there's no move.
+- **The worker** (`python -m app.core.notifications.worker`, or the new Compose service **`notifier`**) sends due emails one at a time. Each row is locked while it's sent (`FOR UPDATE SKIP LOCKED`), then marked `sent_at`. A failure is recorded (`attempts`, `last_error`) and tried again after 1, 2, 4… minutes, up to 8 attempts.
+- **Senders** (`sender.py`): one interface, and only a **fake sender** for now (`EMAIL_BACKEND=fake`, the default). It logs each email and sends nothing, until the Ministry's mail server is known `[CONFIRM]`.
+- The app may add emails and record sending, but can't change an email's address or text (column grants; a test in test_db_privileges.py checks it).
+- `TimelineEntry` gained `event_id` (internal only), so the engine can tell whether *this* move produced the timeline's newest line.
+
+**Files:** backend/alembic/versions/0033_notifications.py, backend/app/core/notifications/models.py, backend/app/core/notifications/service.py (`notify_applicant()`), backend/app/core/notifications/sender.py (`FakeSender`), backend/app/core/notifications/worker.py (`send_pending()`), backend/app/core/workflow/service.py (`change_status()`), backend/app/core/workflow/history.py, backend/app/core/config.py (`email_backend`, `notification_poll_seconds`), backend/app/models.py, docker-compose.yml (`notifier`), backend/tests/core/test_notifications.py
+**Try it:**
+- `docker compose up -d notifier`, submit an application, then `docker compose logs notifier`: "Email (not sent, fake sender) to applicant@motie.test: MOTIE/ETLS/FL/2026/0001: Submitted".
+- In a database tool: `SELECT to_email, subject, sent_at, attempts FROM core.notifications ORDER BY id DESC;`
+- Or once by hand: `docker compose run --rm tools python -m app.core.notifications.worker --once`
+- `docker compose run --rm tools pytest tests/core/test_notifications.py -v`
+**New concepts:** The outbox pattern, Background workers
+
+**Chunk 2's backend is done.** Next is its frontend (GAPS.md chunk 2, step 9).
+
 ### Step 8g — Walk-in applicants (2026-10-25)
 Chunk 2, step 7.
 
@@ -1159,6 +1179,16 @@ Two more ideas here:
 **Here:** `checklist()`, `set_tick()`, `_check_complete()` and `_clear()` in backend/app/core/workflow/checklist.py; the items in backend/alembic/versions/0029_desk_checks.py.
 **Learn more:** [Wikipedia: Non-repudiation](https://en.wikipedia.org/wiki/Non-repudiation) (why a record of *who* confirmed something matters later)
 
+### The outbox pattern
+**What:** sending an email (or calling any outside system) can't be part of a database transaction. If you send first and the save then fails, the applicant was told about something that never happened. If you save first and the send fails, nobody is told. The **outbox** fixes this: the move writes "an email to send" as a row, *in the same transaction* as the status change, so both happen or neither does. Something else sends the rows afterwards and marks them sent. The email may go a few seconds late, or (after a crash) twice, but it's never lost and never about a move that didn't happen. It also keeps a slow mail server from slowing down the officer clicking "Return".
+**Here:** `notify_applicant()` in backend/app/core/notifications/service.py, called from `change_status()` in backend/app/core/workflow/service.py; `send_pending()` in backend/app/core/notifications/worker.py.
+**Learn more:** [microservices.io: Transactional outbox](https://microservices.io/patterns/data/transactional-outbox.html)
+
+### Background workers
+**What:** a separate process that does slow or unreliable work away from web requests: here, sending emails. It loops: find what's due, do it, record the result, sleep, repeat. Two habits make it safe. **Lock what you're working on, and skip what others have locked** (`SELECT ... FOR UPDATE SKIP LOCKED`), so two workers never take the same job. **Retry with a growing wait** (1, 2, 4… minutes), so a mail server that's down for an hour isn't hammered, then give up and leave the error for a person to see. In Compose it's one more service built from the same image, with a different command.
+**Here:** backend/app/core/notifications/worker.py (`send_pending()`, `MAX_ATTEMPTS`, `main()`); the `notifier` service in docker-compose.yml.
+**Learn more:** [PostgreSQL docs: SELECT, the locking clause](https://www.postgresql.org/docs/16/sql-select.html#SQL-FOR-UPDATE-SHARE) (read the part about `SKIP LOCKED`)
+
 ## 3. Decisions
 
 ### Confirmed by the Ministry
@@ -1421,6 +1451,14 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-25 | Records can't edit or submit an application the applicant started online | let Records help with any draft | The spec's walk-in rule is about cases Records creates. An online draft is the applicant's own until they send it. |
 | 2026-10-25 | The email check is a simple shape check (no new library) | `pydantic[email]` (email-validator) | CLAUDE.md asks before new libraries; a mistyped address shows up as an email that never arrives, which Records can correct. |
 | 2026-10-25 | `GET /cases` also lists walk-ins I entered | a separate "entered by me" endpoint | Records' own list of what they typed in, without another endpoint. It settles the step 7c question: "my cases" is both applied for and entered. |
+| 2026-10-25 | Emails go through an outbox table written in the move's transaction | send from the request; a message queue (Redis, RabbitMQ) | No email about a move that rolled back, no lost email, and no new service: Postgres is the queue. A real queue is worth it only at volumes the Ministry won't reach. |
+| 2026-10-25 | The email text comes from the applicant's timeline | its own wording rules per move | One rule for what applicants may see: the email can't say more than the timeline (no minutes, no names, no hidden moves), and repeated labels don't spam. |
+| 2026-10-25 | The engine calls `notify_applicant()` directly (a local import), not through a registry | an "after every move" hook list like checks and effects | Every move must be considered for an email; a hook someone forgets to import would quietly send none. The local import avoids a circular import (notifications reads the timeline, which imports the engine). |
+| 2026-10-25 | The worker sends one row at a time, each locked and committed | lock a batch and commit at the end | A crash then repeats at most one email, and a second worker can run beside it safely. |
+| 2026-10-25 | Retry after 1, 2, 4… minutes, give up after 8 attempts (about 4 hours) | retry forever; never retry | A mail server down for a morning recovers on its own; one that's broken for good leaves a visible error (`last_error`) instead of looping. `[CONFIRM]` with ICT. |
+| 2026-10-25 | Only a fake sender exists; it logs and keeps emails in memory | write an SMTP sender now | We don't know the Ministry's mail server (host, login, sender address). An SMTP sender with Python's own `smtplib` is a small addition once we do, with no new library. |
+| 2026-10-25 | A `notifier` service in Compose, using the API's database user | run sending inside the API process | A web server that also loops over emails is harder to restart and scale. The worker needs nothing the API can't already do. |
+| 2026-10-25 | Emails are plain text, English only | HTML; French as well | Plain text reads everywhere and can't hide anything. `[CONFIRM]` wording and languages with the Ministry. |
 
 ## 4. Open questions
 
@@ -1469,10 +1507,22 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 - [ ] **Registry file reference:** is `ADM 151/420/01/PART IV` the same on every facility letter, or does part of it change (the year, a folio number, a new "PART" when a file fills up)? It's `FACILITY_LETTER_REFERENCE_FORMAT` in backend/app/core/config.py.
 - [ ] **GRA:** does GRA ever report back about a letter (received, used at clearance)? If so, a step after "Sent to GRA" may be needed again (C9).
 - [ ] **Walk-in applicants:** how will a walk-in applicant get into their account later (a "set your password" email, or Records hands them a one-time code)? Must a walk-in applicant have an email at all, or can Records enter a phone number instead? See `open_walk_in()` in backend/app/modules/etls/service.py.
+- [ ] **Email:** the Ministry's mail server (SMTP host, port, login) and sender address; the wording of the emails, and whether they should also be in French; whether staff should get emails too (e.g. a file waiting more than N days). See backend/app/core/notifications/.
+- [ ] **Email retries (ICT, not the Ministry):** is "8 attempts over about 4 hours, then stop" right, and who is told when an email is given up?
 
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 8h
+1. Records returns a case, but the commit fails (say, the database restarts). Does the applicant get an email? Why?
+2. The PS cancels a signed letter. Why does no email go out, and which code decides that?
+3. Two `notifier` workers run at the same time. Why can't they send the same email twice?
+
+#### Show answers
+1. No. The email is only a row in `core.notifications`, written by `notify_applicant()` inside the move's transaction; when that rolls back, the row goes with it, and the worker never sees it.
+2. The cancel move has `applicant_visible = false`, so `applicant_timeline()` skips it, and `notify_applicant()` only writes an email when the timeline's newest line comes from this move (`entries[-1].event_id == event.id`).
+3. `send_pending()` takes each row with `FOR UPDATE SKIP LOCKED`: while one worker holds a row, the other skips it, and once it's committed with `sent_at` set it's no longer "pending".
 
 ### Step 8g
 1. Records opens a walk-in for fatou@example.gm, who has no account. Who is `created_by`, who is the audit actor of `case.created`, and can anyone log in as Fatou?

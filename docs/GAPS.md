@@ -1,7 +1,7 @@
 # Gaps: backend vs. the screen spec
 
 An audit of the backend against docs/SCREENS.md. First written at commit `2d0bc42` (step 6l), revised 2026-10-20 for the updated SCREENS.md.
-**Chunk 1 (shared foundations, steps 7a–7f) is done**, and the marks below include it (2026-10-24). Chunk 2's backend steps are being built against this list; each step updates the marks it changes.
+**Chunk 1 (shared foundations, steps 7a–7f) is done**, and the marks below include it (2026-10-24). Chunk 2's backend (steps 8a–8h) is done too (2026-10-25); its frontend is next. Each step updated the marks it changed.
 
 **How to read it.** Each item is marked:
 - **Built**: the backend supports it as the spec describes, with the file or endpoint.
@@ -29,7 +29,7 @@ Two things apply to every screen and aren't repeated below:
 | Case reference numbers: a sequence per service per year, assigned at submission (`MOTIE/ETLS/FL/2026/0001`, `/AP/`, `/CO/`), shown to applicants and staff | **Built** | `core.reference_counters`, `next_reference()` in core/workflow/service.py (0024); given by the `assign_reference` effect on Submit (8a), kept on resubmission. |
 | The Ministry's **registry file reference** (e.g. `ADM 151/420/01/PART IV`) is separate: printed at the top of the letter; a setting until the desk explains it `[CONFIRM]` | **Built** | 8e: `FACILITY_LETTER_REFERENCE_FORMAT` (core/config.py) defaults to `ADM 151/420/01/PART IV`; download names use the case reference. |
 | Uploads: PDF/PNG/JPEG, max 10 MB, type from content | **Built** | core/documents/storage.py `save()`, `POST /cases/{id}/documents/{type}`, `MAX_UPLOAD_BYTES`. |
-| Notifications: email at each status change and on return | **Missing** | No email code. Needs the Ministry's mail server `[CONFIRM]`, an outbox table and a background sender. |
+| Notifications: email at each status change and on return | **Built** (fake sender) | 8h: `core.notifications` outbox written with each applicant-visible move (core/notifications/service.py); the `notifier` worker sends it. Only a fake sender (logs) until the mail server is known `[CONFIRM]`. |
 | Queues show how long each case has waited at its current step | **Built** | `GET /cases/queue`: `status_since`, `days_waiting` (core/workflow/queues.py, `cases.status_changed_at` from 0025). |
 | Walk-ins: Records creates any application for an applicant, recorded as such | **Built** (facility letters) | 8g: `POST /etls/facility-letters/walk-in`; `cases.entered_by`, `workflows.walk_in_position_id` (0032); Records may make the walk-in's applicant moves. Approvals and COs get the same when they're built. |
 
@@ -222,7 +222,7 @@ Each chunk is a few small steps, each with tests, a LEARNING.md entry and its ow
 6. **Acting and absences views** (banner, S11): "for which posts am I acting now, and until when", "who acts for my posts", and current and upcoming absences visible to all staff.
 
 ### Chunk 2: facility letter screens end to end
-Backend steps 8a–8h; the frontend (step 9) comes after.
+Backend steps 8a–8h are **done** (2026-10-25); see the build log in LEARNING.md. The frontend (step 9) comes next.
 1. **Drafts and submit** (C4): `draft` status, editable form, submit with the missing-documents list; the reference is assigned on submit.
 2. **Returns** (C3): `returned` status, applicant message + internal minute, from Records (S1) and the desk (S2); resubmit. Reason required on Reject.
 3. **Certificate dates and validity** (C10): issue dates on the form; Verify blocked by a certificate over six months old; a warning (not a block) at submission for one expiring within 30 days.

@@ -46,6 +46,26 @@ services:
       db:
         condition: service_healthy
 
+  notifier:
+    # Sends the emails waiting in core.notifications, every NOTIFICATION_POLL_SECONDS
+    # (backend/app/core/notifications/worker.py). With EMAIL_BACKEND=fake, the only
+    # backend yet, it logs each email instead of sending it: `docker compose logs notifier`.
+    build:
+      context: ./backend
+      args:
+        REQUIREMENTS: requirements-dev.txt
+    command: python -m app.core.notifications.worker
+    environment:
+      # The same least-privileged user as the API.
+      DATABASE_URL: postgresql+asyncpg://motie_app:${APP_DB_PASSWORD:?Set APP_DB_PASSWORD in .env}@db:5432/${POSTGRES_DB}
+      # Not used by the worker, but every process checks the settings at start-up.
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env (see .env.example)}
+    volumes:
+      - ./backend:/app
+    depends_on:
+      db:
+        condition: service_healthy
+
   tools:
     # Same image as the API, for admin commands that need the schema owner:
     #   docker compose run --rm tools alembic upgrade head

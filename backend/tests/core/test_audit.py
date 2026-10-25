@@ -35,7 +35,9 @@ CHANGES = pytest.mark.parametrize(
     [
         "UPDATE core.audit_log SET action = 'tampered'",
         "DELETE FROM core.audit_log",
-        "TRUNCATE core.audit_log",
+        # CASCADE: core.notifications points at audit rows (0033), and without it
+        # that foreign key would refuse first. The test is about the trigger.
+        "TRUNCATE core.audit_log CASCADE",
     ],
     ids=["update", "delete", "truncate"],
 )

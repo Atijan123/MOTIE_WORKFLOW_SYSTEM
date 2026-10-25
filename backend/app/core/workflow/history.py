@@ -123,6 +123,7 @@ class TimelineEntry:
     occurred_at: datetime
     label: str
     message: str | None = None  # the message to the applicant, on a return or rejection
+    event_id: int | None = None  # the audit row it comes from (not shown to anyone)
 
 
 async def current_message(session: AsyncSession, case: Case) -> str | None:
@@ -201,5 +202,5 @@ async def applicant_timeline(session: AsyncSession, case: Case) -> list[Timeline
         message = event.details.get("applicant_message")
         if entries and entries[-1].label == label and not message:
             continue
-        entries.append(TimelineEntry(event.occurred_at, label, message))
+        entries.append(TimelineEntry(event.occurred_at, label, message, event.id))
     return entries

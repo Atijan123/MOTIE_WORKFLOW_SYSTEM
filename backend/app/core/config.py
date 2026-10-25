@@ -33,6 +33,12 @@ class Settings(BaseSettings):
     # Bigger uploads are refused (413) while they stream in, before they fill the disk.
     max_upload_bytes: int = 10 * 1024 * 1024
 
+    # How emails leave. Only "fake" exists yet: it logs them and sends nothing.
+    # [CONFIRM] the Ministry's mail server; then "smtp" with its settings.
+    email_backend: Literal["fake"] = "fake"
+    # How often the notification worker looks for emails to send.
+    notification_poll_seconds: int = 30
+
     # The Ministry's registry file reference, printed at the top of each ETLS
     # facility letter (SCREENS.md global rules). Not the case reference
     # (MOTIE/ETLS/FL/2026/0001), which is the tracking number. [CONFIRM] what

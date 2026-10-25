@@ -73,6 +73,8 @@ async def test_app_user_cannot_skip_triggers_with_replication_mode(db_session):
         "INSERT INTO core.transition_effects (transition_id, effect_code) VALUES (1, 'x')",
         # The applicant's form may be edited (while a draft), but never moved to another case.
         "UPDATE etls.facility_letters SET case_id = case_id + 1",
+        # The worker records sending, but nobody may change who an email goes to or what it says.
+        "UPDATE core.notifications SET to_email = 'someone@else.gm'",
     ],
     ids=[
         "create-table",
@@ -90,6 +92,7 @@ async def test_app_user_cannot_skip_triggers_with_replication_mode(db_session):
         "delete-issued-document",
         "add-transition-effect",
         "move-a-form-to-another-case",
+        "rewrite-an-email",
     ],
 )
 async def test_app_user_cannot_do_what_it_was_never_granted(db_session, statement):
