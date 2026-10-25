@@ -3,18 +3,26 @@ expiring, stored as a hash, sent through the outbox."""
 
 import hashlib
 import re
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
+from sqlalchemy.exc import DBAPIError
 
 from app.core.audit.models import AuditEvent
 from app.core.identity import password_links
 from app.core.identity.models import PasswordLink, User
 from app.core.notifications.models import Notification
+from app.core.notifications.sender import FakeSender
+from app.core.notifications.worker import send_pending
 from tests.support import facility_letter_form
 
 pytestmark = pytest.mark.anyio
+
+class BrokenSender:
+    async def send(self, email):
+        raise ConnectionError("mail server unreachable")
+
 
 NEW_PASSWORD = "a long new password 42"
 
@@ -119,3 +127,72 @@ async def test_a_deactivated_account_cannot_use_its_link(act, people, client, db
     user.is_active = False
     await db_session.commit()
     assert (await _set(client, token)).status_code == 400
+
+
+# --- The outbox copy loses the link once it's no use (0038) -----------------
+
+
+async def _link_email(db_session, email="setme@example.gm") -> Notification:
+    return await db_session.scalar(select(Notification).where(Notification.to_email == email))
+
+
+async def test_a_sent_email_no_longer_holds_the_token(act, people, db_session):
+    await _walk_in(act, people)
+    [token] = await _tokens(db_session)
+    sender = FakeSender()
+    await send_pending(db_session, sender, limit=1000)
+
+    # The applicant got the working link...
+    [sent] = [e for e in sender.sent if e.to == "setme@example.gm"]
+    assert f"#token={token}" in sent.body
+    # ...but the stored copy no longer has it.
+    stored = await _link_email(db_session)
+    await db_session.refresh(stored)
+    assert stored.sent_at is not None
+    assert token not in stored.body and "#token=" not in stored.body
+    assert "[link removed after sending]" in stored.body
+    assert "Dear Isatou Bah" in stored.body  # the rest is kept
+
+
+async def test_a_failed_email_keeps_its_link_for_the_retry(act, people, db_session):
+    await _walk_in(act, people)
+    [token] = await _tokens(db_session)
+    await send_pending(db_session, BrokenSender(), limit=1000)
+    stored = await _link_email(db_session)
+    await db_session.refresh(stored)
+    assert stored.sent_at is None and stored.attempts == 1
+    assert f"#token={token}" in stored.body
+
+
+async def test_an_expired_link_is_scrubbed_and_not_sent(people, db_session):
+    applicant = people["applicant"]
+    # A link that expired an hour ago, its email never sent (e.g. the mail server was down).
+    link = PasswordLink(
+        user_id=applicant.id,
+        token_sha256=hashlib.sha256(b"old-token").hexdigest(),
+        created_at=datetime.now(timezone.utc) - timedelta(hours=73),
+        expires_at=datetime.now(timezone.utc) - timedelta(hours=1),
+    )
+    db_session.add(link)
+    await db_session.flush()
+    email = Notification(
+        user_id=applicant.id,
+        to_email=applicant.email,
+        subject="Set your password",
+        body="Use this: http://localhost:3000/set-password#token=old-token\nThanks",
+        password_link_id=link.id,
+    )
+    db_session.add(email)
+    await db_session.commit()
+
+    sender = FakeSender()
+    await send_pending(db_session, sender, limit=1000)
+    await db_session.refresh(email)
+    assert email.body == "Use this: [link removed after it expired]\nThanks"
+    assert email.sent_at is None
+    assert not [e for e in sender.sent if e.to == applicant.email]
+
+
+async def test_the_app_still_cannot_rewrite_an_email(people, db_session):
+    with pytest.raises(DBAPIError):
+        await db_session.execute(text("UPDATE core.notifications SET body = 'something else'"))

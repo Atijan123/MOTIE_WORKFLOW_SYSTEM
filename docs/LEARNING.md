@@ -16,6 +16,23 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 8m — Sent emails lose their password link (2026-10-25)
+A follow-up to 8j.
+
+**Built:**
+- **Once a "set your password" email is sent, its stored copy no longer has the link.** A database trigger on `core.notifications` (`notifications_scrub_link_on_send`) replaces the link with "[link removed after sending]" in the same UPDATE that marks the row sent. The applicant's email went out with the working link; only the database's copy changes.
+- **Waiting or failed emails keep the link**, so a retry still sends one that works.
+- **Unsent emails whose link has expired are scrubbed too** ("[link removed after it expired]"), by the function `core.scrub_expired_password_links()`. The worker calls it at the start of each round (`scrub_expired_links()`), and no longer sends such emails: an expired link is no use to anyone.
+- `core.notifications.password_link_id` says which link an email carries, so the database knows which rows to scrub. Migration 0038 fills it in for links sent before, and scrubs those already sent.
+- **The app still can't rewrite an email.** It has no UPDATE on `body`. The trigger and the function belong to the schema owner and can only remove a link.
+
+**Files:** backend/alembic/versions/0038_scrub_sent_links.py, backend/app/core/notifications/worker.py (`scrub_expired_links()`, `send_pending()`), backend/app/core/notifications/models.py, backend/app/core/identity/password_links.py (`issue_link()`), backend/tests/core/test_password_links.py
+**Try it:**
+- Open a walk-in with a new email as `records@motie.test`. `SELECT body FROM core.notifications ORDER BY id DESC LIMIT 1;` shows the link.
+- `docker compose run --rm tools python -m app.core.notifications.worker --once`; the log shows the email went (the fake sender), and the same SELECT now shows "[link removed after sending]".
+- `docker compose run --rm tools pytest tests/core/test_password_links.py -v`
+**New concepts:** SECURITY DEFINER functions
+
 ### Step 8l — The desk may return a flagged case, not only reject it (2026-10-25)
 A change to chunk 2, step 4 (8d). `[CONFIRM]` with the ETLS desk.
 
@@ -1281,6 +1298,11 @@ Because the token is 256 random bits, a plain SHA-256 hash is enough. Passwords 
 **Here:** `issue_link()` and `set_password()` in backend/app/core/identity/password_links.py; the table in backend/alembic/versions/0035_password_links.py; `POST /auth/set-password` in backend/app/core/identity/router.py.
 **Learn more:** [OWASP Forgot Password Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Forgot_Password_Cheat_Sheet.html) (the "URL tokens" part)
 
+### SECURITY DEFINER functions
+**What:** normally a database function runs with the rights of whoever calls it. A `SECURITY DEFINER` function runs with the rights of the user who *owns* it, like a small, fixed door through a wall. Here the app has no right to change an email's text, but it may call `core.scrub_expired_password_links()`, owned by `motie_owner`, which can do exactly one thing: remove expired links. Two habits make it safe: give the function a fixed `search_path`, so a caller can't trick it into using their own tables or functions of the same name, and `REVOKE EXECUTE ... FROM PUBLIC`, then grant it only to whoever needs it.
+**Here:** backend/alembic/versions/0038_scrub_sent_links.py; called from `scrub_expired_links()` in backend/app/core/notifications/worker.py.
+**Learn more:** [PostgreSQL docs: CREATE FUNCTION, "Writing SECURITY DEFINER Functions Safely"](https://www.postgresql.org/docs/16/sql-createfunction.html#SQL-CREATEFUNCTION-SECURITY)
+
 ### Background workers
 **What:** a separate process that does slow or unreliable work away from web requests: here, sending emails. It loops: find what's due, do it, record the result, sleep, repeat. Two habits make it safe. **Lock what you're working on, and skip what others have locked** (`SELECT ... FOR UPDATE SKIP LOCKED`), so two workers never take the same job. **Retry with a growing wait** (1, 2, 4… minutes), so a mail server that's down for an hour isn't hammered, then give up and leave the error for a person to see. In Compose it's one more service built from the same image, with a different command.
 **Here:** backend/app/core/notifications/worker.py (`send_pending()`, `MAX_ATTEMPTS`, `main()`); the `notifier` service in docker-compose.yml.
@@ -1563,7 +1585,7 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-25 | A walk-in account has no password (`password_hash` empty) until the applicant sets one | keep the random password | "Nobody can log in" is then visible in the data and checked by login, instead of resting on a secret nobody holds. The link step needs to know "has no password yet" anyway. |
 | 2026-10-25 | Links store only the token's SHA-256 hash | store the token; sign it as a JWT | Someone reading the table or a backup can't use a link. A plain hash (no salt, no Argon2) is enough because the token is 256 random bits: there's nothing to guess. A JWT couldn't be made single-use without a table anyway. |
 | 2026-10-25 | The token is in the link's fragment (`#token=`) | in the query string (`?token=`) | Browsers don't send the fragment to servers, so it never appears in access logs, proxies or Referer headers. The page reads it with JavaScript. |
-| 2026-10-25 | The plain token stays in the email body in `core.notifications` | blank the body after sending | The app can't change what an email says (0033's column grants), on purpose. Any mail server keeps a copy of a sent email too. The link works once and expires, so an old row is useless. |
+| 2026-10-25 | The link is taken out of the outbox's copy once the email is sent, or once the link expires (8m) | keep the email exactly as sent (8j's choice); give the app UPDATE on `body` | You asked for it, and it's safer: a backup no longer holds working links. A trigger does it in the same statement that marks the email sent, so it can't be forgotten, and the app still can't change an email's text: the database code can only remove a link. The record of *what* was sent stays in the audit row (`user.password_link_sent`, without the token). |
 | 2026-10-25 | A newer link ends the older ones; a walk-in for an account with no password sends a fresh link | many valid links; never resend | Only the latest email works, so a forwarded or old one is harmless, and Records can "resend" just by serving them again. A resend button can come with the frontend. |
 | 2026-10-25 | Links expire after 72 hours (`PASSWORD_LINK_HOURS`) | 1 hour (usual for resets); 7 days | An applicant who came in person may not check email at once; 72 hours covers a weekend and is short enough that an old email is useless. `[CONFIRM]` |
 | 2026-10-25 | A too-short password doesn't use up the link | check after marking it used | Otherwise one typo would mean another trip to Records. |
@@ -1575,6 +1597,8 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-25 | The preview prints "[REGISTRY FILE REFERENCE NOT SET]" instead of refusing | refuse the preview too | The PS can still check the wording while ICT fixes the setting; the gap is plain on the page. |
 | 2026-10-25 | Tests set the example reference in an autouse fixture | read `.env` | The suite must give the same result on your machine, ICT's, or a CI server. |
 | 2026-10-25 | A return while held resolves the flag with its reason, like Reject | leave the flag open while the case is with the applicant | An open flag on a case nobody at the desk can act on would look like work waiting. The duplicate check runs again at resubmission, so the desk sees the question again if it still applies, against the application as it is then. |
+| 2026-10-25 | The send-time scrub is a trigger; the expiry scrub is a SECURITY DEFINER function the worker calls | the worker edits the body itself (needs UPDATE on body); a cron job in Postgres (pg_cron, a new extension) | Both keep the "app can't rewrite an email" rule. Nothing new to install: the worker already runs every 30 seconds. |
+| 2026-10-25 | An unsent email whose link has expired is never sent | send it with "[link removed]" | It would only confuse the applicant; Records can serve them again for a fresh link. |
 | 2026-10-25 | Emails are plain text, English only | HTML; French as well | Plain text reads everywhere and can't hide anything. `[CONFIRM]` wording and languages with the Ministry. |
 
 ## 4. Open questions
@@ -1634,6 +1658,16 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 
 Questions per step. Try to answer before reading the answers.
 
+### Step 8m
+1. The mail server is down for a day. A walk-in's link email fails every few minutes. What does its stored copy hold during that time, and after the link expires?
+2. Why can't someone with the app's database login use the scrub function to change what an email says?
+3. The worker marks an email sent. Which code removes the link, and why does that mean nobody can forget to?
+
+#### Show answers
+1. While it's waiting or failing, the working link: a retry must send one that works. Once `expires_at` passes, `core.scrub_expired_password_links()` (called by the worker each round) replaces it with "[link removed after it expired]", and `send_pending()` no longer picks it up.
+2. The function takes no text: it only runs one fixed `regexp_replace` that swaps the link for a fixed phrase. The app has no UPDATE on `body` (0033's grants), and the function's `search_path` is fixed, so it can't be pointed at other tables or functions.
+3. The trigger `notifications_scrub_link_on_send` (migration 0038), which runs inside the very UPDATE that sets `sent_at`. Any code that marks an email sent, now or later, sets off the trigger; there's no separate step to remember.
+
 ### Step 8l
 1. The desk returns a flagged case with the minute "Ask for the right certificate" and a message to the applicant. What does the flag's resolution say, and what does the applicant see?
 2. The applicant resubmits without changing anything. Is the case held again? Which code decides, and at which moment?
@@ -1660,7 +1694,7 @@ Questions per step. Try to answer before reading the answers.
 3. Records opens a walk-in for Lamin, who has no email. Lamin's case is returned. Who tells him, and how does the Records screen know it has to?
 
 #### Show answers
-1. Not from `core.password_links`: it holds only `token_sha256`, and a 256-bit token can't be worked back from its hash. But the plain link is in the email's body in `core.notifications` (the outbox keeps what was sent). So until the link is used or expires, a backup is as sensitive as the applicant's mailbox. One more reason to protect backups (see the security to-do in Open questions).
+1. No. `core.password_links` holds only `token_sha256`, and a 256-bit token can't be worked back from its hash. Since 8m, a sent email's stored copy says "[link removed after sending]". The only working links left in the database are in emails not yet sent (waiting or failing), and only until they expire.
 2. `set_password()` calls `check_password_strength()` *before* it looks up or marks the link, so the short one is refused with 422 and the link stays unused.
 3. Records, in person or by phone. His account has no email, so `notify_applicant()` writes no email (`applicant.email is None`). `GET /cases/{id}` gives staff `applicant_emailed: false` (`_applicant_emailed()` in backend/app/core/workflow/router.py).
 

@@ -97,6 +97,8 @@ async def issue_link(session: AsyncSession, *, user: User, actor: User | None) -
             subject="Set your password for the Ministry's online services",
             body=body,
             audit_event_id=event.id,
+            # The database takes the link out of this copy once it's sent (0038).
+            password_link_id=link.id,
         )
     )
     return link

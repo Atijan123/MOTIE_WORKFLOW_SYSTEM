@@ -15,11 +15,12 @@ import asyncio
 import logging
 from datetime import timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.models  # noqa: F401  (every table: the outbox's foreign keys point at audit_log, cases, users)
 from app.core.config import settings
+from app.core.identity.models import PasswordLink
 from app.core.notifications.models import Notification
 from app.core.notifications.sender import Email, Sender, get_sender
 
@@ -28,8 +29,24 @@ logger = logging.getLogger(__name__)
 MAX_ATTEMPTS = 8  # the last wait is 2**7 = 128 minutes; about 4 hours in all
 
 
+async def scrub_expired_links(session: AsyncSession) -> int:
+    """Take expired "set your password" links out of unsent emails (0038).
+    Returns how many emails were changed. Commits."""
+    count = await session.scalar(text("SELECT core.scrub_expired_password_links()"))
+    await session.commit()
+    return count
+
+
 async def send_pending(session: AsyncSession, sender: Sender, *, limit: int = 50) -> int:
-    """Send up to `limit` due emails, one at a time. Returns how many were sent."""
+    """Send up to `limit` due emails, one at a time. Returns how many were sent.
+
+    Marking a row sent also makes the database take any password link out
+    of its stored copy (a trigger, 0038); the email itself went with it."""
+    await scrub_expired_links(session)
+    # An email whose link has expired is no use to anyone; leave it unsent.
+    link_expired = exists().where(
+        PasswordLink.id == Notification.password_link_id, PasswordLink.expires_at <= func.now()
+    )
     sent = 0
     for _ in range(limit):
         notification = await session.scalar(
@@ -38,6 +55,7 @@ async def send_pending(session: AsyncSession, sender: Sender, *, limit: int = 50
                 Notification.sent_at.is_(None),
                 Notification.next_attempt_at <= func.now(),
                 Notification.attempts < MAX_ATTEMPTS,
+                ~link_expired,
             )
             .order_by(Notification.id)
             .limit(1)
