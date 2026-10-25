@@ -35,6 +35,10 @@ services:
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env (see .env.example)}
       # File-change events from a Windows bind mount often don't reach the container; poll instead.
       WATCHFILES_FORCE_POLLING: "true"
+      # "development" only on your own machine. Unset means "production": e.g.
+      # signing then waits for FACILITY_LETTER_REFERENCE_FORMAT (see .env.example).
+      APP_ENV: ${APP_ENV:-production}
+      FACILITY_LETTER_REFERENCE_FORMAT: ${FACILITY_LETTER_REFERENCE_FORMAT:-}
       # The start of links in emails ("set your password"); see .env.example.
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3000}
       PASSWORD_LINK_HOURS: ${PASSWORD_LINK_HOURS:-72}

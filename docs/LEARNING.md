@@ -16,6 +16,27 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 8k — A real server can't sign until the registry reference is set (2026-10-25)
+A fix to chunk 2, step 5 (8e).
+
+**Built:**
+- **`FACILITY_LETTER_REFERENCE_FORMAT` has no default any more.** Read it through `settings.registry_reference_format()` in backend/app/core/config.py:
+  - if it's set, that's it;
+  - if not, and `APP_ENV=development`, the spec's example `ADM 151/420/01/PART IV` (`DEV_REGISTRY_REFERENCE`), as before;
+  - if not, and `APP_ENV=production`, nothing.
+  An empty value counts as not set.
+- **Signing is blocked on a production server without it.** The new check `etls_registry_reference_set` on the PS's Sign move (migration 0036) shows in the Sign action's `blocked_by`: "the Ministry's registry file reference isn't set on this server (FACILITY_LETTER_REFERENCE_FORMAT); ask the system administrator". The move itself gets 409 with the same text. `file_reference()` refuses too, as a last guard.
+- The **preview** still works, printing "[REGISTRY FILE REFERENCE NOT SET]" where the reference goes, so the PS can read the letter meanwhile.
+- **Found while building, and fixed:** the `api` container never received `APP_ENV` from `.env`, so it always ran as "production". docker-compose.yml now passes `APP_ENV` and `FACILITY_LETTER_REFERENCE_FORMAT` to it. Check with `docker compose config api`.
+- Tests no longer depend on your `.env`: an autouse fixture `registry_reference` in backend/tests/conftest.py sets the example reference, and backend/tests/modules/etls/test_registry_reference.py tests the production behaviour explicitly.
+
+**Files:** backend/alembic/versions/0036_registry_reference_check.py, backend/app/core/config.py (`registry_reference_format()`, `DEV_REGISTRY_REFERENCE`), backend/app/modules/etls/letter.py (`file_reference()`, `_check_registry_reference_set()`), docker-compose.yml, .env.example, backend/tests/conftest.py, backend/tests/modules/etls/test_registry_reference.py
+**Try it:**
+- Set `APP_ENV=production` in `.env` (dev only, and put it back afterwards!), leave `FACILITY_LETTER_REFERENCE_FORMAT` empty, `docker compose up -d api`. Take a case to "Verified": as `ps@motie.test`, `GET /cases/{id}` shows the reason on Sign.
+- Add `FACILITY_LETTER_REFERENCE_FORMAT=ADM 151/420/01/PART IV` to `.env`, `docker compose up -d api` again, and Sign works.
+- `docker compose run --rm tools pytest tests/modules/etls/test_registry_reference.py -v`
+**New concepts:** none; it's [Blocking checks and warnings](#blocking-checks-and-warnings) again, with a setting as what's checked.
+
 ### Step 8j — Walk-in applicants set their own password from an emailed link (2026-10-25)
 A fix to chunk 2, step 7 (8g).
 
@@ -1494,7 +1515,7 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-25 | "Correction" is a property of a move (`is_correction`): may leave a final status, never in a queue | keep `sent_to_gra` non-final; a separate "reopen" mechanism | Final means "nobody needs to act". A correction is the exception that proves it, and it shouldn't fill queues with every signed letter. |
 | 2026-10-25 | The corrected wording is a status column (`applicant_label_corrected`), used after any hidden move away from that status | hard-code "Corrected letter issued" for sent_to_gra in the timeline | Workflows are data; the CO workflow will have the same "reissued" case. |
 | 2026-10-25 | Migration 0030 refuses when a case is in `closed` | move those cases to `sent_to_gra` | Rewriting a case's status without an audit row would break the history. Only dev data can be there; `scripts/reset-dev.sh` clears it. (As planned in GAPS.md C9.) |
-| 2026-10-25 | The registry reference default is the example from the spec, `ADM 151/420/01/PART IV`, the same on every letter | keep the old case-reference-like default | The case reference is the tracking number (C6); printing a look-alike would confuse. `[CONFIRM]` with the desk what the parts mean. The setting keeps its name, so `.env` files keep working. |
+| 2026-10-25 | The registry reference default is the example from the spec, `ADM 151/420/01/PART IV`, the same on every letter (**since 8k, on a developer's machine only**) | keep the old case-reference-like default | The case reference is the tracking number (C6); printing a look-alike would confuse. `[CONFIRM]` with the desk what the parts mean. The setting keeps its name, so `.env` files keep working. |
 | 2026-10-25 | Download names use the case reference | the registry reference | That's the same on every letter, so every download would have the same name. |
 | 2026-10-25 | The preview is rendered on request and never stored, with a printed mark and a "no-store" header | store previews; watermark diagonally over the page | Only signing issues a letter (step 6f). A boxed line at the top is easy to see on any printout; a diagonal watermark needs drawing code fpdf2 makes fiddly. |
 | 2026-10-25 | The preview's signature is the Sign move's post title, with no name | the viewer's name; "[signature]" | Nobody has signed; showing the viewer's name would make a printout look like their letter. Reading the post from the workflow keeps posts out of module code. |
@@ -1531,6 +1552,10 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-25 | Every bad link gets one 400 message | say "expired" or "used" | Like login (step 2c): someone trying tokens learns nothing. A real applicant's next step is the same anyway: ask for a new link. |
 | 2026-10-25 | A walk-in may have no email; the account then has no email and no password, and gets no emails | require an email; a phone number instead | The spec says Records handles them. `core.users.email` became nullable (still unique when given). A phone number is a question for the Ministry (Open questions). |
 | 2026-10-25 | Staff see `applicant_emailed` on the case | leave it to the screen to work out | Only the server knows whether the applicant has a usable email; Records must know to phone or tell them in person. |
+| 2026-10-25 | Without a registry reference, a production server blocks Sign with a check | refuse to start the API; print the example anyway | Refusing to start would stop everything else (Records, the desk) over one setting. A check shows the reason on the PS's button, which is where someone will notice, and nothing else is held up. |
+| 2026-10-25 | The dev default comes from `APP_ENV=development`, read in `registry_reference_format()` | keep a default and warn in the log | A warning in a log nobody reads would let letters go out with the example reference. `APP_ENV` already defaults to production, so a server that forgets it is safe. |
+| 2026-10-25 | The preview prints "[REGISTRY FILE REFERENCE NOT SET]" instead of refusing | refuse the preview too | The PS can still check the wording while ICT fixes the setting; the gap is plain on the page. |
+| 2026-10-25 | Tests set the example reference in an autouse fixture | read `.env` | The suite must give the same result on your machine, ICT's, or a CI server. |
 | 2026-10-25 | Emails are plain text, English only | HTML; French as well | Plain text reads everywhere and can't hide anything. `[CONFIRM]` wording and languages with the Ministry. |
 
 ## 4. Open questions
@@ -1561,7 +1586,6 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 - [ ] **Duplicate certificates:** does a number from a *rejected* case count as used? (Right now every earlier use counts.) May anyone besides the ETLS desk clear the flag?
 - [ ] **Originals:** besides the certificate of origin, must any other paper original be seen in person (e.g. the invoice)? It's one column per document (`original_required`).
 - [ ] **Facility letter layout:** the wording is in (step 6i). Still to check: the letterhead (printed paper, or a logo and address we should add?); whether the subject line is bold; and what the signature line says when someone acts for the PS (now "For: Permanent Secretary", no name). See backend/app/modules/etls/templates/facility_letter.txt.
-- [ ] **File reference format:** what is the Ministry's real format? Placeholder `MOTIE/ETLS/FL/{year}/{case_id:05d}` (`FACILITY_LETTER_REFERENCE_FORMAT`).
 - [ ] **Issued letters:** storing (step 6f) and cancel-and-correct (step 6l) are built. Still open: may the importer download it? Does a corrected letter get a new file reference? Should the case go back to the desk (now) or straight to the PS? Is cancelling allowed after "Sent to GRA" (now yes), and must GRA be told in writing when a letter they hold is cancelled?
 - [ ] **The cement receipt:** which receipt is it (e.g. a payment receipt for a cement levy)? Is "HS heading 2523" the right trigger, or only some subheadings (e.g. 2523.29 Portland cement, not 2523.10 clinker)? Are other headings subject to receipts too? See backend/alembic/versions/0020_facility_letter_hs_code.py.
 - [ ] **HS code:** it's optional for applicants now (step 6k). Which officer enters or confirms it: the ETLS desk (placeholder) or someone else? How many digits does GRA use (we accept 6, 8 or 10)?
@@ -1577,7 +1601,7 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 - [ ] **Drafts:** may staff see an applicant's unsubmitted draft (now yes, like every case)? Should old drafts be deleted after some time, and how long?
 - [ ] **ECOWAS list checks:** is the wording of the two ticks right ("The exporter's ETLS approval number is on the ECOWAS ETLS list"; "On the ECOWAS ETLS list, the product approval covers these goods")? Any other checks the desk does by hand? See backend/alembic/versions/0029_desk_checks.py.
 - [ ] **Holds:** may the desk also *return* (not only reject) while a duplicate flag is open? Now it must resolve the flag first.
-- [ ] **Registry file reference:** is `ADM 151/420/01/PART IV` the same on every facility letter, or does part of it change (the year, a folio number, a new "PART" when a file fills up)? It's `FACILITY_LETTER_REFERENCE_FORMAT` in backend/app/core/config.py.
+- [ ] **Registry file reference:** is `ADM 151/420/01/PART IV` the same on every facility letter, or does part of it change (the year, a folio number, a new "PART" when a file fills up)? It's `FACILITY_LETTER_REFERENCE_FORMAT` in backend/app/core/config.py. A production server must have it set before the PS can sign (step 8k).
 - [ ] **GRA and certificate validity:** must the certificate of origin still be valid on the day GRA clears the goods (not only when the desk verifies)? If yes, the letter may need a "use by" date, or the desk a stricter check. Wrongly marked as confirmed until 2026-10-25. See `_check_certificates_valid()` in backend/app/modules/etls/service.py.
 - [ ] **GRA:** does GRA ever report back about a letter (received, used at clearance)? If so, a step after "Sent to GRA" may be needed again (C9).
 - [ ] **Walk-in applicants:** how they get into their account is decided (an emailed "set your password" link, step 8j). Still open: may Records enter a phone number for an applicant with no email (for SMS later, or so Records can call)? How should Records find an earlier no-email applicant (now each walk-in without email is a new account)? See `open_walk_in()` in backend/app/modules/etls/service.py.
@@ -1590,6 +1614,16 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 8k
+1. ICT installs the system on the Ministry server and forgets `FACILITY_LETTER_REFERENCE_FORMAT`. What does the PS see, and what can Records and the desk still do?
+2. On your laptop `.env` says `APP_ENV=development` and the setting is empty. Which reference is printed, and which function decides?
+3. Why does `test_letter.py` still find "ADM 151/420/01/PART IV" on a letter even if your `.env` says `APP_ENV=production`?
+
+#### Show answers
+1. The Sign action's `blocked_by` says the registry file reference isn't set (`etls_registry_reference_set`, migration 0036), and Sign gets 409. Everything else works: only the Sign move carries the check. The preview shows "[REGISTRY FILE REFERENCE NOT SET]".
+2. `ADM 151/420/01/PART IV` (`DEV_REGISTRY_REFERENCE`): `settings.registry_reference_format()` in backend/app/core/config.py falls back to it only when `app_env == "development"`.
+3. The autouse fixture `registry_reference` in backend/tests/conftest.py sets the setting to the example for every test. Only test_registry_reference.py turns it off, to test production.
 
 ### Step 8j
 1. Someone steals a database backup taken an hour after a walk-in. Can they set that applicant's password? What would they need, and where is it?

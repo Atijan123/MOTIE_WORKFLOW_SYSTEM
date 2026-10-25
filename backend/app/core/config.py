@@ -6,6 +6,9 @@ from pydantic_settings import BaseSettings
 
 # The only placeholders a file reference format may use.
 REFERENCE_FIELDS = {"year", "case_id"}
+# The registry file reference from the spec's example. Used on a developer's
+# machine only: a real server must be told the Ministry's own.
+DEV_REGISTRY_REFERENCE = "ADM 151/420/01/PART IV"
 
 
 class Settings(BaseSettings):
@@ -50,17 +53,28 @@ class Settings(BaseSettings):
     # (MOTIE/ETLS/FL/2026/0001), which is the tracking number. [CONFIRM] what
     # its parts mean, and whether any part changes per letter. Placeholders
     # {year} and {case_id} are allowed, e.g. "ADM 151/420/01/{year}".
-    facility_letter_reference_format: str = "ADM 151/420/01/PART IV"
+    # Empty = not set. Read it through registry_reference_format().
+    facility_letter_reference_format: str | None = None
 
     @field_validator("facility_letter_reference_format")
     @classmethod
-    def _only_known_placeholders(cls, value: str) -> str:
+    def _only_known_placeholders(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return None  # Compose passes an empty value when .env leaves it out
         # str.format() can reach into objects ("{case_id.__class__}"), so allow
         # plain known names only, and fail at startup rather than on a letter.
         for _, field, _, _ in Formatter().parse(value):
             if field is not None and field not in REFERENCE_FIELDS:
                 raise ValueError(f"unknown placeholder {{{field}}}; use only {sorted(REFERENCE_FIELDS)}")
-        return value
+        return value.strip()
+
+    def registry_reference_format(self) -> str | None:
+        """The reference to print, or None when a real server hasn't been told
+        it. Signing is then blocked (check etls_registry_reference_set), so no
+        letter goes out with the example reference."""
+        if self.facility_letter_reference_format:
+            return self.facility_letter_reference_format
+        return DEV_REGISTRY_REFERENCE if self.app_env == "development" else None
 
 
 settings = Settings()

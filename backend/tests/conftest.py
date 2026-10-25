@@ -32,7 +32,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from app.core.config import settings
+from app.core.config import DEV_REGISTRY_REFERENCE, settings
 from app.core.identity.security import create_access_token
 from app.core.identity.service import assign_position, create_user
 from app.db.session import get_session
@@ -102,6 +102,13 @@ def document_storage(tmp_path, monkeypatch):
     """Every test stores uploads in its own temporary folder, never the real volume."""
     monkeypatch.setattr(settings, "document_storage_dir", str(tmp_path / "documents"))
     return tmp_path / "documents"
+
+
+@pytest.fixture(autouse=True)
+def registry_reference(monkeypatch):
+    """Letters can be signed whatever APP_ENV your .env says: without a
+    reference set, a production server blocks signing (test_registry_reference.py)."""
+    monkeypatch.setattr(settings, "facility_letter_reference_format", DEV_REGISTRY_REFERENCE)
 
 
 @pytest.fixture

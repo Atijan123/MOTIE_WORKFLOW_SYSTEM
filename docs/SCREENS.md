@@ -16,7 +16,7 @@ Items marked `[CONFIRM]` are assumptions still to check with the ETLS desk.
 - **Case history is newest first**, with the actor's name and post title, and absence or delegation dates when someone acted for another post.
 - **Dates** in the Ministry format: "16th October, 2026".
 - **Case reference numbers** per service, a sequence per service per year, assigned when the applicant submits: `MOTIE/ETLS/FL/2026/0001` (facility letter), `MOTIE/ETLS/AP/…` (approval), `MOTIE/ETLS/CO/…` (certificate of origin). This is the tracking number shown to applicants and staff.
-- **The Ministry's registry file reference** (e.g. `ADM 151/420/01/PART IV`) is separate: it is what the facility letter prints at the top. Kept as a setting until the desk explains its parts `[CONFIRM]`.
+- **The Ministry's registry file reference** (e.g. `ADM 151/420/01/PART IV`) is separate: it is what the facility letter prints at the top. Kept as a setting until the desk explains its parts `[CONFIRM]`. A real server must have it set: until then the PS's Sign is disabled, saying why.
 - **Uploads:** PDF, PNG or JPEG, max 10 MB, type checked from content.
 - **Notifications:** applicants are emailed at each status change and when a case is returned.
 - **Queues** show how long each case has waited at its current step.

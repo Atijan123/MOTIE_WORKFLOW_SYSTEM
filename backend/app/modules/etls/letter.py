@@ -48,6 +48,11 @@ KIND = "etls_facility_letter"  # core.issued_documents.kind
 ISSUE_EFFECT = "issue_facility_letter"  # core.transition_effects.effect_code
 CANCEL_EFFECT = "cancel_facility_letter"
 DISPATCH_RECORDED = "etls_dispatch_recorded"  # check on "Mark sent to GRA"
+REFERENCE_SET = "etls_registry_reference_set"  # check on "Sign"
+REFERENCE_NOT_SET = (
+    "the Ministry's registry file reference isn't set on this server "
+    "(FACILITY_LETTER_REFERENCE_FORMAT); ask the system administrator"
+)
 # The letter exists once the PS (or someone acting for them) has signed.
 SIGNED_STATUSES = {"signed", "sent_to_gra"}
 
@@ -100,9 +105,15 @@ def load_template(path: Path | None = None) -> LetterTemplate:
     return LetterTemplate("\n".join(body), version, hashlib.sha256(raw).hexdigest())
 
 
-def file_reference(case_id: int, year: int) -> str:
+def file_reference(case_id: int, year: int, *, preview: bool = False) -> str:
     # The format is checked at startup to use only {year} and {case_id}.
-    return settings.facility_letter_reference_format.format(year=year, case_id=case_id)
+    reference = settings.registry_reference_format()
+    if reference is None:
+        if preview:
+            return "[REGISTRY FILE REFERENCE NOT SET]"
+        # The Sign move's check stops this first; this is the last guard.
+        raise workflow.NotReady("Not ready: " + REFERENCE_NOT_SET)
+    return reference.format(year=year, case_id=case_id)
 
 
 def download_name(reference: str, number: int = 1) -> str:
@@ -177,7 +188,7 @@ async def preview_fields(session: AsyncSession, case: Case) -> LetterFields:
         .where(WorkflowTransition.workflow_id == case.workflow_id, WorkflowStatus.code == "signed")
     )
     return LetterFields(
-        file_reference=file_reference(case.id, today().year),
+        file_reference=file_reference(case.id, today().year, preview=True),
         date=long_date(today()),
         **_form_fields(letter),
         signer_name="",
@@ -350,6 +361,12 @@ async def preview(session: AsyncSession, case_id: int, user: User) -> bytes:
     return render_pdf(await preview_fields(session, case), preview=True)
 
 
+async def _check_registry_reference_set(session: AsyncSession, case: Case) -> list[str]:
+    """Blocks Sign on a server whose registry reference was never set: a
+    letter must not go out with the developers' example reference."""
+    return [] if settings.registry_reference_format() else [REFERENCE_NOT_SET]
+
+
 async def _check_dispatch_recorded(session: AsyncSession, case: Case) -> list[str]:
     current = await issued.get_current(session, case.id, KIND)
     if current is not None and await session.scalar(
@@ -368,6 +385,7 @@ async def dispatches(session: AsyncSession, case_id: int) -> dict[int, FacilityL
 effects.register(ISSUE_EFFECT, issue_letter)
 effects.register(CANCEL_EFFECT, cancel_letter)
 checks.register(DISPATCH_RECORDED, _check_dispatch_recorded)
+checks.register(REFERENCE_SET, _check_registry_reference_set)
 
 
 async def _staff_case(session: AsyncSession, case_id: int, user: User):
