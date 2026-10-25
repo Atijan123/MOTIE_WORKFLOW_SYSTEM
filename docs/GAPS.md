@@ -130,10 +130,10 @@ Built route (0015–0030): `draft` →(applicant: Submit)→ `submitted` →(Rec
 | Item | Status | Backed by / what's missing |
 | --- | --- | --- |
 | Letters awaiting signature | **Built** | `GET /cases/queue` for the PS (`?status=verified` narrows it). |
-| Summary of checks done | **Partial** | Available piecemeal (documents' `original_seen_at`, flags). No ticks; no summary endpoint. |
-| Letter preview in the Ministry's wording | **Missing** | `render_pdf()` exists; a preview must never be stored and must be marked as a draft. |
+| Summary of checks done | **Built** | 8f: `GET /etls/facility-letters/{id}/checks` (originals seen, ECOWAS ticks, duplicate flags, HS code, certificate validity, missing documents). |
+| Letter preview in the Ministry's wording | **Built** | 8f: `GET /etls/facility-letters/{id}/letter-preview.pdf`: rendered on request, never stored, marked "DRAFT FOR CHECKING - NOT SIGNED". |
 | Sign (stores the letter) | **Built** | `verified → signed`, effect `issue_facility_letter` (core/documents/issued.py). |
-| Return to desk | **Missing** | No `verified → originals_received` move for the PS. |
+| Return to desk | **Built** | 8f: "Return to the desk" (`verified → originals_received`, PS, minute required; 0031). |
 | Cancel and reissue | **Built** | "Cancel the signed letter" (0022); `.../letters`, `.../letters/{letter_id}/file`. The timeline hides the cancel move (7e). Since 8e it's a correction move (`is_correction`), so it puts no letter in the PS's queue. |
 
 ### S11. Absences and delegations (all staff)

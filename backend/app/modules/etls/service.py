@@ -8,8 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.audit.service import record_event
 from app.core.dates import add_months, long_date
 from app.core.documents import facts
+from app.core.documents import service as documents
 from app.core.identity.models import User
-from app.core.workflow import checks, effects, flags, summaries
+from app.core.workflow import checklist, checks, effects, flags, summaries
 from app.core.workflow import service as workflow
 from app.core.workflow.delegation import today
 from app.core.workflow.models import Case, WorkflowStatus
@@ -240,6 +241,58 @@ async def other_uses(session: AsyncSession, case_id: int, user: User) -> dict[st
     for number, case, status, importer in rows:
         found.setdefault(number, []).append((case, status, importer))
     return found
+
+
+async def checks_summary(session: AsyncSession, case_id: int, user: User) -> dict:
+    """Every check made on the application so far, for the PS before signing
+    (SCREENS.md S3) and the desk: originals seen, the ECOWAS list ticks, the
+    duplicate flags, the confirmed HS code, certificate validity and
+    documents. Read from the same records the moves check."""
+    letter = await get_facility_letter(session, case_id, user)
+    if not workflow.is_staff(user):
+        raise workflow.NotPermitted("Only Ministry staff can see the checks.")
+    case = await workflow.get_case(session, case_id, user)
+    requirements = await documents.checklist(session, case)
+    ticks = await checklist.checklist(session, case)
+    case_flags = [f for f in await flags.case_flags(session, case.id) if f.code == DUPLICATE_CERTIFICATE]
+
+    user_ids = {letter.hs_code_confirmed_by, *(t.ticked_by for t in ticks)}
+    user_ids |= {s.documents[0].original_seen_by for s in requirements if s.requirement.original_required and s.documents}
+    names = {
+        u.id: u.full_name for u in await session.scalars(select(User).where(User.id.in_({i for i in user_ids if i})))
+    }
+    return {
+        "originals": [
+            {
+                "document": s.requirement.document_type.name,
+                "seen": not s.original_pending,
+                "seen_at": s.documents[0].original_seen_at if s.documents else None,
+                "seen_by": names.get(s.documents[0].original_seen_by) if s.documents else None,
+            }
+            for s in requirements
+            if s.applies is True and s.requirement.original_required
+        ],
+        "checklist": [
+            {"label": t.item.label, "ticked": t.ticked, "ticked_at": t.ticked_at, "ticked_by": names.get(t.ticked_by)}
+            for t in ticks
+        ],
+        "duplicate_flags": [
+            {"message": f.message, "resolved": f.resolved_at is not None, "resolution": f.resolution}
+            for f in case_flags
+        ],
+        "hs_code_confirmed": letter.hs_code_confirmed,
+        "hs_code_confirmed_by": names.get(letter.hs_code_confirmed_by),
+        "certificates": [
+            {
+                "number": c.number,
+                "issued_on": c.issued_on,
+                "expires_on": certificate_expiry(c),
+                "valid_today": certificate_expiry(c) is not None and today() <= certificate_expiry(c),
+            }
+            for c in letter.certificates
+        ],
+        "documents_missing": [s.requirement.document_type.name for s in requirements if s.missing],
+    }
 
 
 async def get_facility_letter(session: AsyncSession, case_id: int, user: User) -> FacilityLetter:

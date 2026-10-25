@@ -13,6 +13,7 @@ from app.modules.etls.models import FacilityLetter
 from app.core.documents.models import IssuedDocument
 from app.modules.etls.schemas import (
     CertificateOut,
+    ChecksSummaryOut,
     DispatchRequest,
     DuplicateNumberOut,
     OtherCaseOut,
@@ -83,6 +84,42 @@ async def get_facility_letter(
     session: AsyncSession = Depends(get_session),
 ):
     return await _out(session, await service.get_facility_letter(session, case_id, user), user)
+
+
+@router.get("/facility-letters/{case_id}/checks", response_model=ChecksSummaryOut)
+async def checks_summary(
+    case_id: int,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Everything checked so far, for the PS before signing (staff only)."""
+    return await service.checks_summary(session, case_id, user)
+
+
+@router.get(
+    "/facility-letters/{case_id}/letter-preview.pdf",
+    response_class=Response,
+    responses={200: {"content": {"application/pdf": {}}}},
+)
+async def preview_facility_letter(
+    case_id: int,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """The letter as it would read if signed today, marked as a draft at the
+    top. Never stored; only signing issues the letter (staff only)."""
+    content = await facility_letter.preview(session, case_id, user)
+    return Response(
+        content=content,
+        media_type="application/pdf",
+        headers={
+            # Shown in the browser, not saved by default; never cached.
+            "Content-Disposition": 'inline; filename="facility-letter-preview.pdf"',
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+            "X-Letter-Status": "preview",
+        },
+    )
 
 
 @router.get("/facility-letters/{case_id}/duplicates", response_model=list[DuplicateNumberOut])

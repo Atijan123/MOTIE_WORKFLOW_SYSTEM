@@ -39,7 +39,7 @@ from app.core.identity.models import Position, User
 from app.core.workflow import checks, effects
 from app.core.workflow import service as workflow
 from app.core.workflow.delegation import today
-from app.core.workflow.models import Case
+from app.core.workflow.models import Case, WorkflowStatus, WorkflowTransition
 from app.modules.etls.models import FacilityLetter, FacilityLetterDispatch
 from app.modules.etls.service import FACILITY_LETTER
 
@@ -126,6 +126,24 @@ async def _position_title(session: AsyncSession, code: str) -> str:
     return await session.scalar(select(Position.title).where(Position.code == code)) or code
 
 
+def _form_fields(letter: FacilityLetter) -> dict:
+    """The fields that come from the application itself."""
+    return dict(
+        importer_name=letter.importer_name,
+        importer_name_upper=letter.importer_name.upper(),
+        importer_address=letter.importer_address,
+        product=letter.product,
+        hs_code=_hs_code(letter.hs_code_confirmed or letter.hs_code or ""),
+        quantity=_quantity(letter),
+        unit=letter.unit,
+        exporter_name=letter.exporter_name,
+        exporter_country=letter.exporter_country,
+        exporter_approval_number=letter.exporter_etls_approval_number,
+        product_approval_numbers=", ".join(a.number for a in letter.product_approvals),
+        certificate_numbers=", ".join(c.number for c in letter.certificates),
+    )
+
+
 async def build_fields(session: AsyncSession, case_id: int, signing: AuditEvent) -> LetterFields:
     """The letter's fields. Who signed, and as what, comes from `signing`, the
     audit row of the "signed" move: the same record that shows whether they
@@ -140,22 +158,32 @@ async def build_fields(session: AsyncSession, case_id: int, signing: AuditEvent)
     return LetterFields(
         file_reference=file_reference(case_id, signed_on.year),
         date=long_date(signed_on),
-        importer_name=letter.importer_name,
-        importer_name_upper=letter.importer_name.upper(),
-        importer_address=letter.importer_address,
-        product=letter.product,
-        hs_code=_hs_code(letter.hs_code_confirmed or letter.hs_code or ""),
-        quantity=_quantity(letter),
-        unit=letter.unit,
-        exporter_name=letter.exporter_name,
-        exporter_country=letter.exporter_country,
-        exporter_approval_number=letter.exporter_etls_approval_number,
-        product_approval_numbers=", ".join(a.number for a in letter.product_approvals),
-        certificate_numbers=", ".join(c.number for c in letter.certificates),
+        **_form_fields(letter),
         signer_name=signer.full_name,
         signer_title=await _position_title(session, signing.details["as_position"]),
         acting_for=f"for the {signing_post}" if acting_for else "",
         signature_title=f"For: {signing_post}" if acting_for else signing_post,
+    )
+
+
+async def preview_fields(session: AsyncSession, case: Case) -> LetterFields:
+    """The letter as it would read if signed today by the post whose move
+    signing is (the PS). Nobody's name: nobody has signed."""
+    letter = await session.get(FacilityLetter, case.id)
+    signing_post = await session.scalar(
+        select(Position.title)
+        .join(WorkflowTransition, WorkflowTransition.required_position_id == Position.id)
+        .join(WorkflowStatus, WorkflowStatus.id == WorkflowTransition.to_status_id)
+        .where(WorkflowTransition.workflow_id == case.workflow_id, WorkflowStatus.code == "signed")
+    )
+    return LetterFields(
+        file_reference=file_reference(case.id, today().year),
+        date=long_date(today()),
+        **_form_fields(letter),
+        signer_name="",
+        signer_title=signing_post,
+        acting_for="",
+        signature_title=signing_post,
     )
 
 
@@ -166,11 +194,21 @@ def _latin1(text: str) -> str:
     return text.encode("latin-1", "replace").decode("latin-1")
 
 
+PREVIEW_MARK = "DRAFT FOR CHECKING - NOT SIGNED - NOT VALID AS A FACILITY LETTER"
+
+
 def render_pdf(
-    fields: LetterFields, template: LetterTemplate | None = None, *, issue: int = 1, compress: bool = True
+    fields: LetterFields,
+    template: LetterTemplate | None = None,
+    *,
+    issue: int = 1,
+    compress: bool = True,
+    preview: bool = False,
 ) -> bytes:
     """Lay the letter out on an A4 page. compress=False keeps the text readable
-    in the raw PDF bytes, which tests use to check what was printed."""
+    in the raw PDF bytes, which tests use to check what was printed. A
+    preview carries PREVIEW_MARK at the top, so a printout can't pass for
+    the real letter."""
     template = template or load_template()
     values = asdict(fields)
 
@@ -185,9 +223,15 @@ def render_pdf(
     # Which issue this is (2 = the first correction). Not printed, but part of
     # the file, so a correction never has the same checksum as the letter it
     # replaces, even when nothing printed changed.
-    pdf.set_subject(f"Issue {issue}")
+    pdf.set_subject("Preview, not issued" if preview else f"Issue {issue}")
     pdf.set_margins(left=25, top=25, right=25)
     pdf.add_page()
+    if preview:
+        pdf.set_font("Helvetica", style="B", size=12)
+        pdf.set_text_color(200, 0, 0)
+        pdf.multi_cell(w=0, h=8, text=PREVIEW_MARK, align="C", border=1, new_x="LMARGIN", new_y="NEXT")
+        pdf.set_text_color(0, 0, 0)
+        pdf.ln(4)
     # The layout marks (** and " >> ") are read from the template line *before*
     # the fields are filled in, so an importer called "A >> B" can't move text.
     for line in template.body.splitlines():
@@ -290,6 +334,16 @@ async def mark_sent_to_gra(session: AsyncSession, *, case_id: int, actor: User, 
         # session for a later commit to save.
         await session.rollback()
         raise
+
+
+async def preview(session: AsyncSession, case_id: int, user: User) -> bytes:
+    """The letter as it would be signed now, for the PS to read before signing
+    (SCREENS.md S3). Made fresh on each request and never stored: only the
+    signing move issues a letter."""
+    case = await _staff_case(session, case_id, user)
+    if await issued.get_current(session, case.id, KIND):
+        raise workflow.NotReady("The letter is signed; download it from letter.pdf.")
+    return render_pdf(await preview_fields(session, case), preview=True)
 
 
 async def _check_dispatch_recorded(session: AsyncSession, case: Case) -> list[str]:

@@ -16,6 +16,30 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 8f — What the PS needs before signing (2026-10-25)
+Chunk 2, step 6.
+
+**Built:**
+- **`GET /etls/facility-letters/{id}/checks`** (staff): everything checked so far, read from the same records the moves check:
+  - which originals were seen, by whom and when;
+  - the ECOWAS list ticks, by whom;
+  - the duplicate flags and their findings (empty when no number was used before);
+  - the confirmed HS code and who confirmed it;
+  - each certificate's expiry and whether it's valid today;
+  - any document still missing.
+
+  It's the "summary of checks done" on S3, and useful to the desk too.
+- **`GET /etls/facility-letters/{id}/letter-preview.pdf`** (staff): the letter in the Ministry's wording as it would read if signed today. The signature line is the signing post (taken from the workflow's Sign move, not named in code) and no person's name. A boxed red line at the top says "DRAFT FOR CHECKING - NOT SIGNED - NOT VALID AS A FACILITY LETTER", and the PDF's subject says "Preview, not issued". It's made fresh on each request and **never stored**; the response says `Cache-Control: no-store` and `X-Letter-Status: preview`. Once a letter is signed, the preview refuses (409) and points to `letter.pdf`.
+- **"Return to the desk"** (`verified → originals_received`) for the PS or whoever acts for the PS, with a required internal minute. Nothing is signed yet, so there's nothing to cancel. The desk's ticks stay, because the application didn't change.
+- `build_fields()` in backend/app/modules/etls/letter.py was split so the signed letter and the preview share `_form_fields()`: a preview can never show different goods from what would be signed.
+
+**Files:** backend/alembic/versions/0031_ps_return_to_desk.py, backend/app/modules/etls/letter.py (`preview()`, `preview_fields()`, `render_pdf(preview=True)`, `PREVIEW_MARK`), backend/app/modules/etls/service.py (`checks_summary()`), backend/app/modules/etls/router.py, backend/app/modules/etls/schemas.py (`ChecksSummaryOut`), backend/tests/modules/etls/test_ps_support.py
+**Try it:**
+- Take a case to "Verified". As `ps@motie.test`, `GET /etls/facility-letters/{id}/checks`, then open `/etls/facility-letters/{id}/letter-preview.pdf` in the browser (with your token): red box at the top.
+- `POST /cases/{id}/status` with `{"to_status": "originals_received", "comment": "Check the quantity"}` returns it to the desk's queue.
+- `docker compose run --rm tools pytest tests/modules/etls/test_ps_support.py -v`
+**New concepts:** none.
+
 ### Step 8e — Records sends letters to GRA; "Sent to GRA" is final (2026-10-25)
 Chunk 2, step 5.
 
@@ -1364,6 +1388,12 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-25 | Migration 0030 refuses when a case is in `closed` | move those cases to `sent_to_gra` | Rewriting a case's status without an audit row would break the history. Only dev data can be there; `scripts/reset-dev.sh` clears it. (As planned in GAPS.md C9.) |
 | 2026-10-25 | The registry reference default is the example from the spec, `ADM 151/420/01/PART IV`, the same on every letter | keep the old case-reference-like default | The case reference is the tracking number (C6); printing a look-alike would confuse. `[CONFIRM]` with the desk what the parts mean. The setting keeps its name, so `.env` files keep working. |
 | 2026-10-25 | Download names use the case reference | the registry reference | That's the same on every letter, so every download would have the same name. |
+| 2026-10-25 | The preview is rendered on request and never stored, with a printed mark and a "no-store" header | store previews; watermark diagonally over the page | Only signing issues a letter (step 6f). A boxed line at the top is easy to see on any printout; a diagonal watermark needs drawing code fpdf2 makes fiddly. |
+| 2026-10-25 | The preview's signature is the Sign move's post title, with no name | the viewer's name; "[signature]" | Nobody has signed; showing the viewer's name would make a printout look like their letter. Reading the post from the workflow keeps posts out of module code. |
+| 2026-10-25 | The preview is refused once a letter is signed | show a preview anyway | After signing, the stored letter is the only true version; a fresh render might differ (e.g. a later template). |
+| 2026-10-25 | "Return to the desk" needs an internal minute, and is visible on the applicant's timeline ("Being verified") | hide it like the cancel | Nothing was issued, so it's an ordinary step back, and "Being verified" is true. |
+| 2026-10-25 | The desk's ticks survive a return from the PS | clear them as on a return to the applicant | The application didn't change, so the desk's statements still hold. The desk can untick if the PS's minute calls for it. |
+| 2026-10-25 | One checks summary endpoint for S3 | the frontend calls the five endpoints it's built from | One request for the PS's screen, and the summary can't disagree with the moves' own checks because it reads the same functions. |
 
 ## 4. Open questions
 
@@ -1415,6 +1445,16 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 8f
+1. Someone prints the preview and tries to pass it off as the signed letter. What on the page and in the file gives it away?
+2. Why does the PS's "Return to the desk" keep the ECOWAS ticks, while "Return to applicant" clears them?
+3. Could the preview show a different quantity from the letter that's signed a minute later? Why not?
+
+#### Show answers
+1. The boxed red `PREVIEW_MARK` line at the top ("DRAFT FOR CHECKING - NOT SIGNED - NOT VALID AS A FACILITY LETTER"), no signer's name, and the PDF subject "Preview, not issued". And no issued letter with its checksum exists for it in `core.issued_documents`.
+2. Only the return moves to the applicant carry the `clear_checklist` effect (migration 0029). The applicant can change the application after a return; the PS can't, so the desk's statements still describe the same application.
+3. No. Both are built from `_form_fields()` in backend/app/modules/etls/letter.py, reading the same form rows, and the form can't be edited once submitted unless the case is returned to the applicant.
 
 ### Step 8e
 1. Why does the "Mark sent to GRA" action show `blocked_by: []` even though the date hasn't been entered, and what stops someone making the move without one?

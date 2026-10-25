@@ -107,6 +107,45 @@ class DuplicateNumberOut(BaseModel):
     other_cases: list[OtherCaseOut]  # oldest first
 
 
+class OriginalSeenOut(BaseModel):
+    document: str
+    seen: bool  # the newest upload's paper original has been seen
+    seen_at: datetime | None
+    seen_by: str | None  # name
+
+
+class TickSummaryOut(BaseModel):
+    label: str
+    ticked: bool
+    ticked_at: datetime | None
+    ticked_by: str | None  # name
+
+
+class FlagSummaryOut(BaseModel):
+    message: str
+    resolved: bool
+    resolution: str | None  # the finding, e.g. "Same shipment, split in two"
+
+
+class CertificateCheckOut(BaseModel):
+    number: str
+    issued_on: date | None
+    expires_on: date | None
+    valid_today: bool
+
+
+class ChecksSummaryOut(BaseModel):
+    """What has been checked on the application (SCREENS.md S3)."""
+
+    originals: list[OriginalSeenOut]
+    checklist: list[TickSummaryOut]  # the ECOWAS ETLS list ticks
+    duplicate_flags: list[FlagSummaryOut]  # empty: no certificate number was used before
+    hs_code_confirmed: str | None
+    hs_code_confirmed_by: str | None
+    certificates: list[CertificateCheckOut]
+    documents_missing: list[str]
+
+
 class DispatchRequest(BaseModel):
     dispatched_on: date  # the day the letter went to GRA
 

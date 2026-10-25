@@ -56,6 +56,7 @@ async def test_facility_letter_workflow_is_seeded(db_session):
         # Cancelling a signed letter so a corrected one can be issued (0022).
         ("signed", "originals_received", "permanent_secretary"),
         ("sent_to_gra", "originals_received", "permanent_secretary"),
+        ("verified", "originals_received", "permanent_secretary"),  # return to the desk (0031)
     }
 
 
