@@ -107,10 +107,17 @@ class WalkInApplication(BaseModel):
     """Records opens an application for an applicant who came in person."""
 
     # A loose shape check: the address is for notifications, and a typo shows
-    # up as an email that never arrives, which Records can correct.
+    # up as an email that never arrives, which Records can correct. Empty if
+    # the applicant has none: their account then can't log in or be emailed,
+    # and Records tells them of each step.
     applicant_email: Annotated[
-        str, StringConstraints(strip_whitespace=True, to_lower=True, max_length=254, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-    ]
+        Annotated[
+            str,
+            StringConstraints(strip_whitespace=True, to_lower=True, max_length=254, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$"),
+        ]
+        | None,
+        Blank,
+    ] = None
     applicant_name: ShortText
     form: FacilityLetterForm
 

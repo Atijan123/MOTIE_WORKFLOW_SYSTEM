@@ -16,6 +16,28 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 8j — Walk-in applicants set their own password from an emailed link (2026-10-25)
+A fix to chunk 2, step 7 (8g).
+
+**Built:**
+- **A walk-in account has no password at all** until the applicant sets one. Before, it got a random password nobody knew. Now `core.users.password_hash` is empty, so "can't log in" is a fact in the database, not a secret. Login refuses such an account, with the same 401 and the same timing as a wrong password. Migration 0035 empties the random passwords of walk-in accounts made before now (nobody ever knew them).
+- **"Set your password" links** (backend/app/core/identity/password_links.py):
+  - When Records opens a walk-in for an email with no account, or for an account that still has no password, `issue_link()` makes a random token. It stores only the token's **SHA-256 hash** in the new table `core.password_links`, and puts an email with the link in the outbox (`core.notifications`), in the same transaction as the case. The fake sender logs it as usual.
+  - The link is `PUBLIC_BASE_URL/set-password#token=...`. The token goes after `#`, so browsers never send it to a server: it can't end up in a log.
+  - **`POST /auth/set-password`** with `{"token", "password"}` (no login needed) sets the password; then the applicant logs in as usual. Returns 204.
+  - A link works **once** (`used_at`). It **expires** after `PASSWORD_LINK_HOURS` (72 by default) `[CONFIRM]`. A newer link for the same account **ends the older ones** (`revoked_at`). Unknown, used, replaced and expired links all get the same 400 ("This link doesn't work any more. Ask the Ministry for a new one."). A too-short password is refused (422) *before* the link is used up.
+  - Audit rows: `user.password_link_sent` (who sent it, where, until when; never the token) and `user.password_set`.
+- **Walk-ins with no email.** `applicant_email` may be left out or empty. The account then has no email and no password: it can't log in, and the engine writes no emails for it. Records finishes the application and tells the applicant of each step. Staff see **`applicant_emailed: false`** on `GET /cases/{id}`, so the screen can say "Tell the applicant yourself". There's nothing to match such applicants by, so each walk-in without email makes a new account.
+- `docker-compose.yml` now passes `PUBLIC_BASE_URL` and `PASSWORD_LINK_HOURS` to the API (see .env.example).
+
+**Files:** backend/alembic/versions/0035_password_links.py, backend/app/core/identity/password_links.py (`issue_link()`, `set_password()`), backend/app/core/identity/models.py (`PasswordLink`), backend/app/core/identity/service.py (`create_user()`, `authenticate()`, `check_password_strength()`), backend/app/core/identity/router.py, backend/app/core/identity/schemas.py, backend/app/core/notifications/service.py, backend/app/core/workflow/router.py (`case_out()`), backend/app/core/workflow/schemas.py, backend/app/core/config.py, backend/app/modules/etls/service.py (`open_walk_in()`), backend/app/modules/etls/schemas.py, docker-compose.yml, .env.example, backend/tests/core/test_password_links.py, backend/tests/modules/etls/test_walk_ins.py
+**Try it:**
+- As `records@motie.test`, `POST /etls/facility-letters/walk-in` with a new email. Read the link from the database: `SELECT body FROM core.notifications ORDER BY id DESC LIMIT 1;`
+- `POST /auth/set-password` with the part after `#token=` and a password of 12+ characters: 204. Log in with the email and that password. Try the same token again: 400.
+- Open a walk-in with `"applicant_email": null`: `GET /cases/{id}` as Records shows `"applicant_emailed": false`.
+- `docker compose run --rm tools pytest tests/core/test_password_links.py tests/modules/etls/test_walk_ins.py -v`
+**New concepts:** Single-use, expiring links
+
 ### Step 8i — Drafts can be saved half-filled (2026-10-25)
 A fix to chunk 2, step 1 (8a).
 
@@ -69,7 +91,7 @@ Chunk 2, step 7.
 - **`POST /etls/facility-letters/walk-in`** with `{"applicant_email", "applicant_name", "form": {...}}`: Records starts a draft for someone who came in person.
   - The case belongs to the **applicant's account** (`created_by`): it's in their `GET /cases`, they'll be emailed (8h), and they can carry on online.
   - The new column **`cases.entered_by`** records the Records officer who typed it in. The `case.created` audit row has Records as its actor and `walk_in_for_user_id`.
-  - If no account has that email, one is made with the applicant role and a random password nobody knows (audit row `user.created_for_walk_in`). An email belonging to staff, or to a deactivated account, is refused.
+  - If no account has that email, one is made with the applicant role and a random password nobody knows (audit row `user.created_for_walk_in`). *Since 8j: no password at all, and a "set your password" link is emailed.* An email belonging to staff, or to a deactivated account, is refused.
 - **Who may open walk-ins is data:** `workflows.walk_in_position_id` (the Records post for facility letters). Others get 403, *before* any account is made.
 - **Records can finish a walk-in.** `acts_as_applicant()` in backend/app/core/workflow/service.py now also lets holders of the walk-in post make the applicant's moves on a walk-in case (edit the draft, Submit, Resubmit), so a colleague can carry on. The move's audit row adds `for_applicant_user_id`. On an application the applicant started online, Records still can't edit or submit.
 - `GET /cases` (my cases) also lists the walk-ins I entered.
@@ -1210,6 +1232,16 @@ Two more ideas here:
 **Here:** `notify_applicant()` in backend/app/core/notifications/service.py, called from `change_status()` in backend/app/core/workflow/service.py; `send_pending()` in backend/app/core/notifications/worker.py.
 **Learn more:** [microservices.io: Transactional outbox](https://microservices.io/patterns/data/transactional-outbox.html)
 
+### Single-use, expiring links
+**What:** a way to let someone prove "I can read this mailbox" without a password. You email them a link with a long random **token** in it; whoever brings the token back is treated as the owner of the email. Three habits make it safe:
+- **Store only a hash of the token**, like a password. If someone copies the database, they can't use the links in it.
+- **Make it work once and expire.** A link found later in an old email, a forwarded message or a shared computer is useless.
+- **Keep it out of logs.** Put the token where browsers don't send it to servers (after `#`), and never write it in the audit log.
+
+Because the token is 256 random bits, a plain SHA-256 hash is enough. Passwords need slow hashing (Argon2) because people choose guessable ones; nobody can guess a random token.
+**Here:** `issue_link()` and `set_password()` in backend/app/core/identity/password_links.py; the table in backend/alembic/versions/0035_password_links.py; `POST /auth/set-password` in backend/app/core/identity/router.py.
+**Learn more:** [OWASP Forgot Password Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Forgot_Password_Cheat_Sheet.html) (the "URL tokens" part)
+
 ### Background workers
 **What:** a separate process that does slow or unreliable work away from web requests: here, sending emails. It loops: find what's due, do it, record the result, sleep, repeat. Two habits make it safe. **Lock what you're working on, and skip what others have locked** (`SELECT ... FOR UPDATE SKIP LOCKED`), so two workers never take the same job. **Retry with a growing wait** (1, 2, 4… minutes), so a mail server that's down for an hour isn't hammered, then give up and leave the error for a person to see. In Compose it's one more service built from the same image, with a different command.
 **Here:** backend/app/core/notifications/worker.py (`send_pending()`, `MAX_ATTEMPTS`, `main()`); the `notifier` service in docker-compose.yml.
@@ -1471,7 +1503,7 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-25 | The desk's ticks survive a return from the PS | clear them as on a return to the applicant | The application didn't change, so the desk's statements still hold. The desk can untick if the PS's minute calls for it. |
 | 2026-10-25 | One checks summary endpoint for S3 | the frontend calls the five endpoints it's built from | One request for the PS's screen, and the summary can't disagree with the moves' own checks because it reads the same functions. |
 | 2026-10-25 | A walk-in case belongs to the applicant's account; Records is `entered_by` | Records owns the case, with the applicant's name as text | The applicant then sees it, is notified, and can carry on online, and "my cases", notifications and permissions need no special path. |
-| 2026-10-25 | Records makes an account when the email has none, with a random password nobody knows | refuse until the applicant registers; give Records a password to hand over | No password is ever known to staff. The applicant can't log in until a "set your password" step exists (not built), but is still told of each step by email. |
+| 2026-10-25 | Records makes an account when the email has none, with a random password nobody knows | refuse until the applicant registers; give Records a password to hand over | No password is ever known to staff. **Changed in 8j:** no password at all, and an emailed link to set one. |
 | 2026-10-25 | The walk-in post is a workflow column (`walk_in_position_id`) | allow any staff; name Records in code | Workflows are data; another module may take walk-ins at a different desk. |
 | 2026-10-25 | Any holder of the walk-in post may make a walk-in's applicant moves; no delegation or succession | only the officer who entered it; follow acting rules | A colleague must be able to finish when the first officer is away. Acting rules belong to post moves; applicant moves never use them (8a). |
 | 2026-10-25 | Records can't edit or submit an application the applicant started online | let Records help with any draft | The spec's walk-in rule is about cases Records creates. An online draft is the applicant's own until they send it. |
@@ -1489,6 +1521,16 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-25 | The shape of what *is* given is still checked when saving | check everything only at Submit | The applicant hears about "quantity can't be 0" while typing, not days later. Only emptiness waits for Submit. |
 | 2026-10-25 | A certificate number is required per certificate row, the date isn't (on a draft) | allow a date with no number | The number is the row's identity (primary key, duplicate check). |
 | 2026-10-25 | Gaps are worded "X is missing", like the documents | "Please fill in X" | One list on the Submit button, read the same way. |
+| 2026-10-25 | A walk-in account has no password (`password_hash` empty) until the applicant sets one | keep the random password | "Nobody can log in" is then visible in the data and checked by login, instead of resting on a secret nobody holds. The link step needs to know "has no password yet" anyway. |
+| 2026-10-25 | Links store only the token's SHA-256 hash | store the token; sign it as a JWT | Someone reading the table or a backup can't use a link. A plain hash (no salt, no Argon2) is enough because the token is 256 random bits: there's nothing to guess. A JWT couldn't be made single-use without a table anyway. |
+| 2026-10-25 | The token is in the link's fragment (`#token=`) | in the query string (`?token=`) | Browsers don't send the fragment to servers, so it never appears in access logs, proxies or Referer headers. The page reads it with JavaScript. |
+| 2026-10-25 | The plain token stays in the email body in `core.notifications` | blank the body after sending | The app can't change what an email says (0033's column grants), on purpose. Any mail server keeps a copy of a sent email too. The link works once and expires, so an old row is useless. |
+| 2026-10-25 | A newer link ends the older ones; a walk-in for an account with no password sends a fresh link | many valid links; never resend | Only the latest email works, so a forwarded or old one is harmless, and Records can "resend" just by serving them again. A resend button can come with the frontend. |
+| 2026-10-25 | Links expire after 72 hours (`PASSWORD_LINK_HOURS`) | 1 hour (usual for resets); 7 days | An applicant who came in person may not check email at once; 72 hours covers a weekend and is short enough that an old email is useless. `[CONFIRM]` |
+| 2026-10-25 | A too-short password doesn't use up the link | check after marking it used | Otherwise one typo would mean another trip to Records. |
+| 2026-10-25 | Every bad link gets one 400 message | say "expired" or "used" | Like login (step 2c): someone trying tokens learns nothing. A real applicant's next step is the same anyway: ask for a new link. |
+| 2026-10-25 | A walk-in may have no email; the account then has no email and no password, and gets no emails | require an email; a phone number instead | The spec says Records handles them. `core.users.email` became nullable (still unique when given). A phone number is a question for the Ministry (Open questions). |
+| 2026-10-25 | Staff see `applicant_emailed` on the case | leave it to the screen to work out | Only the server knows whether the applicant has a usable email; Records must know to phone or tell them in person. |
 | 2026-10-25 | Emails are plain text, English only | HTML; French as well | Plain text reads everywhere and can't hide anything. `[CONFIRM]` wording and languages with the Ministry. |
 
 ## 4. Open questions
@@ -1538,13 +1580,26 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 - [ ] **Registry file reference:** is `ADM 151/420/01/PART IV` the same on every facility letter, or does part of it change (the year, a folio number, a new "PART" when a file fills up)? It's `FACILITY_LETTER_REFERENCE_FORMAT` in backend/app/core/config.py.
 - [ ] **GRA and certificate validity:** must the certificate of origin still be valid on the day GRA clears the goods (not only when the desk verifies)? If yes, the letter may need a "use by" date, or the desk a stricter check. Wrongly marked as confirmed until 2026-10-25. See `_check_certificates_valid()` in backend/app/modules/etls/service.py.
 - [ ] **GRA:** does GRA ever report back about a letter (received, used at clearance)? If so, a step after "Sent to GRA" may be needed again (C9).
-- [ ] **Walk-in applicants:** how will a walk-in applicant get into their account later (a "set your password" email, or Records hands them a one-time code)? Must a walk-in applicant have an email at all, or can Records enter a phone number instead? See `open_walk_in()` in backend/app/modules/etls/service.py.
+- [ ] **Walk-in applicants:** how they get into their account is decided (an emailed "set your password" link, step 8j). Still open: may Records enter a phone number for an applicant with no email (for SMS later, or so Records can call)? How should Records find an earlier no-email applicant (now each walk-in without email is a new account)? See `open_walk_in()` in backend/app/modules/etls/service.py.
+- [ ] **Password links:** is 72 hours right for a "set your password" link (`PASSWORD_LINK_HOURS`)? Is the email's wording right? See backend/app/core/identity/password_links.py.
+- [ ] **The site's address (ICT):** what is the public https address of the service? Links in emails start with `PUBLIC_BASE_URL`; on the server it must be that address, not localhost.
+- [ ] **Forgotten passwords:** the same links could serve "I forgot my password" for every applicant. Wanted? (Not built; it would need rate limiting so nobody can flood an inbox.)
 - [ ] **Email:** the Ministry's mail server (SMTP host, port, login) and sender address; the wording of the emails, and whether they should also be in French; whether staff should get emails too (e.g. a file waiting more than N days). See backend/app/core/notifications/.
 - [ ] **Email retries (ICT, not the Ministry):** is "8 attempts over about 4 hours, then stop" right, and who is told when an email is given up?
 
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 8j
+1. Someone steals a database backup taken an hour after a walk-in. Can they set that applicant's password? What would they need, and where is it?
+2. An applicant types a 6-character password on the set-password page, then a 14-character one. Why does the second attempt work, and which line makes sure?
+3. Records opens a walk-in for Lamin, who has no email. Lamin's case is returned. Who tells him, and how does the Records screen know it has to?
+
+#### Show answers
+1. Not from `core.password_links`: it holds only `token_sha256`, and a 256-bit token can't be worked back from its hash. But the plain link is in the email's body in `core.notifications` (the outbox keeps what was sent). So until the link is used or expires, a backup is as sensitive as the applicant's mailbox. One more reason to protect backups (see the security to-do in Open questions).
+2. `set_password()` calls `check_password_strength()` *before* it looks up or marks the link, so the short one is refused with 422 and the link stays unused.
+3. Records, in person or by phone. His account has no email, so `notify_applicant()` writes no email (`applicant.email is None`). `GET /cases/{id}` gives staff `applicant_emailed: false` (`_applicant_emailed()` in backend/app/core/workflow/router.py).
 
 ### Step 8i
 1. An applicant saves `{"quantity": "0"}` and, separately, `{"quantity": ""}`. What happens to each, and why the difference?
@@ -1572,7 +1627,7 @@ Questions per step. Try to answer before reading the answers.
 3. Why does the walk-in endpoint check the post before looking up the email?
 
 #### Show answers
-1. `created_by` is Fatou's new applicant account; the audit actor is the Records officer, and the row has `walk_in_for_user_id`. Nobody can log in as her: her password is a random string (`secrets.token_urlsafe(32)`) that was never shown to anyone.
+1. `created_by` is Fatou's new applicant account; the audit actor is the Records officer, and the row has `walk_in_for_user_id`. Nobody can log in as her: since 8j her account has no password at all (`password_hash` is empty) until she uses the emailed link, and `authenticate()` refuses an account without one.
 2. Yes, any holder of the workflow's walk-in post (`walk_in_position_id`, Records); no, the desk doesn't hold it. `acts_as_applicant()` in backend/app/core/workflow/service.py.
 3. Otherwise anyone could create applicant accounts for any email just by trying; `open_walk_in()` refuses with 403 before `create_user()` runs, which the test `test_only_records_opens_walk_ins` checks.
 

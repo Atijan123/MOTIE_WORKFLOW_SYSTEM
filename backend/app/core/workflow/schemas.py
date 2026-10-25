@@ -64,6 +64,9 @@ class CaseOut(BaseModel):
     # True while an open blocking flag holds the case. None for applicants:
     # a flag can be a fraud suspicion, which isn't theirs to see.
     on_hold: bool | None
+    # Staff only: false when the applicant has no email (a walk-in), so the
+    # Ministry's emails can't reach them and Records must tell them instead.
+    applicant_emailed: bool | None
 
 
 class CaseSummaryOut(BaseModel):

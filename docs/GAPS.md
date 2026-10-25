@@ -31,7 +31,7 @@ Two things apply to every screen and aren't repeated below:
 | Uploads: PDF/PNG/JPEG, max 10 MB, type from content | **Built** | core/documents/storage.py `save()`, `POST /cases/{id}/documents/{type}`, `MAX_UPLOAD_BYTES`. |
 | Notifications: email at each status change and on return | **Built** (fake sender) | 8h: `core.notifications` outbox written with each applicant-visible move (core/notifications/service.py); the `notifier` worker sends it. Only a fake sender (logs) until the mail server is known `[CONFIRM]`. |
 | Queues show how long each case has waited at its current step | **Built** | `GET /cases/queue`: `status_since`, `days_waiting` (core/workflow/queues.py, `cases.status_changed_at` from 0025). |
-| Walk-ins: Records creates any application for an applicant, recorded as such | **Built** (facility letters) | 8g: `POST /etls/facility-letters/walk-in`; `cases.entered_by`, `workflows.walk_in_position_id` (0032); Records may make the walk-in's applicant moves. Approvals and COs get the same when they're built. |
+| Walk-ins: Records creates any application for an applicant, recorded as such | **Built** (facility letters) | 8g: `POST /etls/facility-letters/walk-in`; `cases.entered_by`, `workflows.walk_in_position_id` (0032); Records may make the walk-in's applicant moves. 8j: a new account has no password and is emailed a single-use, expiring "set your password" link (`core.password_links`, `POST /auth/set-password`); with no email the account can't log in or be emailed and Records tells the applicant (`applicant_emailed: false`). Approvals and COs get the same when they're built. Frontend: a `/set-password` page that reads `#token=`. |
 
 ---
 

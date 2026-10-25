@@ -1,12 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.identity import password_links
 from app.core.identity.deps import get_current_user
 from app.core.identity.models import User
-from app.core.identity.schemas import LoginRequest, TokenResponse, UserOut
+from app.core.identity.schemas import LoginRequest, SetPasswordRequest, TokenResponse, UserOut
 from app.core.identity.security import create_access_token
-from app.core.identity.service import authenticate
+from app.core.identity.service import WeakPassword, authenticate
 from app.db.session import get_session
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -36,3 +37,16 @@ async def me(user: User = Depends(get_current_user)):
         roles=sorted(user.role_codes),
         positions=sorted(user.position_codes),
     )
+
+
+@router.post("/set-password", status_code=status.HTTP_204_NO_CONTENT)
+async def set_password(body: SetPasswordRequest, session: AsyncSession = Depends(get_session)):
+    """Set a password with the token from an emailed link, then log in as usual.
+    No login needed: the token is the proof. Each link works once."""
+    try:
+        await password_links.set_password(session, token=body.token, password=body.password)
+    except WeakPassword as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
+    except password_links.InvalidLink as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

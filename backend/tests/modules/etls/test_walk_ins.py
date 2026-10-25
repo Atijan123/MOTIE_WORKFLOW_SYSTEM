@@ -5,7 +5,8 @@ import pytest
 from sqlalchemy import select
 
 from app.core.audit.models import AuditEvent
-from app.core.identity.models import User
+from app.core.identity.models import PasswordLink, User
+from app.core.notifications.models import Notification
 from tests.support import create_draft, facility_letter_form, submit, upload_required
 
 pytestmark = pytest.mark.anyio
@@ -107,6 +108,57 @@ async def test_a_staff_email_is_refused(act, people):
     assert "can't apply" in response.json()["detail"]
 
 
-@pytest.mark.parametrize("email", ["not-an-email", "a@b", "two@@example.gm", ""])
+@pytest.mark.parametrize("email", ["not-an-email", "a@b", "two@@example.gm"])
 async def test_a_malformed_email_is_refused(act, people, email):
     assert (await act(people["records_officer"], "post", URL, json=_walk_in(email=email))).status_code == 422
+
+
+@pytest.mark.parametrize("email", [None, "", "  "])
+async def test_an_applicant_with_no_email(act, people, db_session, email):
+    body = _walk_in(name="Lamin Sowe")
+    body["applicant_email"] = email
+    response = await act(people["records_officer"], "post", URL, json=body)
+    assert response.status_code == 201, response.text
+    case_id = response.json()["case_id"]
+
+    # An account that can't log in or be emailed: no email, no password, no link.
+    case = (await act(people["records_officer"], "get", f"/cases/{case_id}")).json()
+    applicant = await db_session.get(User, case["created_by"])
+    assert (applicant.email, applicant.password_hash, applicant.full_name) == (None, None, "Lamin Sowe")
+    assert await db_session.scalar(select(PasswordLink).where(PasswordLink.user_id == applicant.id)) is None
+    # Staff are told the Ministry's emails won't reach them.
+    assert case["applicant_emailed"] is False
+
+    # Records carries it through; no email is written for any step.
+    await upload_required(act, people["records_officer"], case_id)
+    assert (await submit(act, people["records_officer"], case_id)).status_code == 200
+    assert await db_session.scalar(select(Notification).where(Notification.user_id == applicant.id)) is None
+
+
+async def test_two_walk_ins_without_email_are_two_accounts(act, people):
+    body = _walk_in()
+    body["applicant_email"] = None
+    first = (await act(people["records_officer"], "post", URL, json=body)).json()["case_id"]
+    second = (await act(people["records_officer"], "post", URL, json=body)).json()["case_id"]
+    owners = [(await act(people["records_officer"], "get", f"/cases/{c}")).json()["created_by"] for c in (first, second)]
+    assert owners[0] != owners[1]  # nothing to match them by
+
+
+async def test_a_new_applicant_is_emailed_a_link_and_cannot_log_in_before(act, people, db_session, client):
+    response = await act(people["records_officer"], "post", URL, json=_walk_in(email="link@example.gm"))
+    assert response.status_code == 201, response.text
+    applicant = await db_session.scalar(select(User).where(User.email == "link@example.gm"))
+    assert applicant.password_hash is None
+    [email] = list(await db_session.scalars(select(Notification).where(Notification.user_id == applicant.id)))
+    assert email.subject == "Set your password for the Ministry's online services"
+    assert "/set-password#token=" in email.body
+    assert (await act(people["records_officer"], "get", f"/cases/{response.json()['case_id']}")).json()["applicant_emailed"]
+
+    login = await client.post("/auth/login", json={"email": "link@example.gm", "password": "anything at all 123"})
+    assert login.status_code == 401
+
+
+async def test_an_applicant_who_already_has_a_password_gets_no_link(act, people, db_session):
+    email = people["applicant"].email
+    assert (await act(people["records_officer"], "post", URL, json=_walk_in(email=email))).status_code == 201
+    assert await db_session.scalar(select(PasswordLink).where(PasswordLink.user_id == people["applicant"].id)) is None

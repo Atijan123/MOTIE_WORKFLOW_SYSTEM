@@ -41,18 +41,26 @@ async def get_user_by_email(session: AsyncSession, email: str) -> User | None:
     return await session.scalar(select(User).where(User.email == normalize_email(email)))
 
 
+def check_password_strength(password: str) -> None:
+    if len(password) < MIN_PASSWORD_LENGTH:
+        raise WeakPassword(f"Password must be at least {MIN_PASSWORD_LENGTH} characters.")
+
+
 async def create_user(
     session: AsyncSession,
     *,
-    email: str,
+    email: str | None,
     full_name: str,
-    password: str,
+    password: str | None,
     role_codes: list[str],
 ) -> User:
-    email = normalize_email(email)
-    if len(password) < MIN_PASSWORD_LENGTH:
-        raise WeakPassword(f"Password must be at least {MIN_PASSWORD_LENGTH} characters.")
-    if await get_user_by_email(session, email):
+    """`password=None` makes an account nobody can log in to until a password
+    is set (a walk-in applicant, see password_links.py). `email=None` only for
+    a walk-in applicant who has none."""
+    email = normalize_email(email) if email is not None else None
+    if password is not None:
+        check_password_strength(password)
+    if email is not None and await get_user_by_email(session, email):
         raise UserAlreadyExists(f"A user with email {email} already exists.")
 
     roles = (await session.scalars(select(Role).where(Role.code.in_(role_codes)))).all()
@@ -63,7 +71,7 @@ async def create_user(
     user = User(
         email=email,
         full_name=full_name.strip(),
-        password_hash=hash_password(password),
+        password_hash=hash_password(password) if password is not None else None,
         roles=list(roles),
     )
     session.add(user)
@@ -87,9 +95,10 @@ async def authenticate(session: AsyncSession, email: str, password: str) -> User
     stops an attacker learning which emails have accounts.
     """
     user = await get_user_by_email(session, email)
-    if user is None:
-        # Still run a hash check, so "no such email" takes as long as "wrong
-        # password". Otherwise response time would reveal which emails exist.
+    if user is None or user.password_hash is None:
+        # Still run a hash check, so "no such email" (or "no password set
+        # yet") takes as long as "wrong password". Otherwise response time
+        # would reveal which emails exist.
         verify_password(password, _dummy_hash())
         return None
     if not verify_password(password, user.password_hash) or not user.is_active:

@@ -39,6 +39,12 @@ class Settings(BaseSettings):
     # How often the notification worker looks for emails to send.
     notification_poll_seconds: int = 30
 
+    # Where people open the site; links in emails start with it.
+    # [CONFIRM] the Ministry's address for the service.
+    public_base_url: str = "http://localhost:3000"
+    # How long a "set your password" link works. [CONFIRM] with the Ministry.
+    password_link_hours: int = Field(default=72, gt=0, le=24 * 14)
+
     # The Ministry's registry file reference, printed at the top of each ETLS
     # facility letter (SCREENS.md global rules). Not the case reference
     # (MOTIE/ETLS/FL/2026/0001), which is the tracking number. [CONFIRM] what

@@ -35,6 +35,9 @@ services:
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env (see .env.example)}
       # File-change events from a Windows bind mount often don't reach the container; poll instead.
       WATCHFILES_FORCE_POLLING: "true"
+      # The start of links in emails ("set your password"); see .env.example.
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3000}
+      PASSWORD_LINK_HOURS: ${PASSWORD_LINK_HOURS:-72}
     volumes:
       # Dev only: mount the source so edits reload without rebuilding the image.
       - ./backend:/app

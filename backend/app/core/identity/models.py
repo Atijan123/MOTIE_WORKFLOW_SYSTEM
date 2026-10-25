@@ -93,9 +93,13 @@ class User(Base):
     __mapper_args__ = {"eager_defaults": True}
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
-    email: Mapped[str] = mapped_column(Text, unique=True)
+    # Empty only for a walk-in applicant who gave no email (0035): they can't
+    # log in or be emailed, and Records tells them of each step.
+    email: Mapped[str | None] = mapped_column(Text, unique=True)
     full_name: Mapped[str] = mapped_column(Text)
-    password_hash: Mapped[str] = mapped_column(Text)
+    # Empty until the person sets a password (a walk-in applicant, from the
+    # emailed link). Nobody can log in to an account without one.
+    password_hash: Mapped[str | None] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(Boolean, server_default=true())
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -114,3 +118,27 @@ class User(Base):
     @property
     def position_codes(self) -> set[str]:
         return {position.code for position in self.positions}
+
+
+class PasswordLink(Base):
+    """A "set your password" link (0035). Only the token's hash is stored, so
+    reading this table doesn't let anyone use a link. Created and used through
+    identity/password_links.py."""
+
+    __tablename__ = "password_links"
+    __table_args__ = (
+        CheckConstraint("expires_at > created_at", name="password_links_expire_later"),
+        CheckConstraint("used_at IS NULL OR revoked_at IS NULL", name="password_links_used_or_revoked"),
+        Index("password_links_user_idx", "user_id"),
+        {"schema": "core"},
+    )
+    __mapper_args__ = {"eager_defaults": True}
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("core.users.id"))
+    token_sha256: Mapped[str] = mapped_column(Text, unique=True)
+    created_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("core.users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

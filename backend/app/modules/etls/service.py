@@ -1,6 +1,5 @@
 """ETLS facility letters: the form (a draft until submitted), the duplicate check, and the HS code."""
 
-import secrets
 from datetime import date
 
 from sqlalchemy import delete, func, select
@@ -10,6 +9,7 @@ from app.core.audit.service import record_event
 from app.core.dates import add_months, long_date
 from app.core.documents import facts
 from app.core.documents import service as documents
+from app.core.identity import password_links
 from app.core.identity import service as identity
 from app.core.identity.models import User
 from app.core.workflow import checklist, checks, effects, flags, summaries
@@ -136,26 +136,29 @@ async def _reloaded(session: AsyncSession, case_id: int) -> FacilityLetter:
 
 
 async def open_walk_in(
-    session: AsyncSession, *, actor: User, email: str, full_name: str, form: FacilityLetterForm
+    session: AsyncSession, *, actor: User, email: str | None, full_name: str, form: FacilityLetterForm
 ) -> FacilityLetter:
     """Records opens a draft for an applicant who came in person.
 
     The case belongs to the applicant's account, found by email, or made now
-    if they have none. A new account gets a random password nobody knows, so
-    nobody can log in to it until a "set your password" step exists; the
-    applicant can still be told of each step by email, and Records can finish
-    the application for them.
+    if they have none. A new account has no password: nobody can log in to
+    it until the applicant sets one with the link emailed now (with the
+    case, in one transaction). An account that still has no password gets a
+    fresh link on each walk-in, which ends the older one.
+
+    With no email, a new account is made each time, which can't log in or be
+    emailed: Records finishes the application and tells them of each step.
     """
     if not await workflow.may_open_walk_in(session, FACILITY_LETTER, actor):
         # Checked before an account might be made.
         raise workflow.NotPermitted("Your post can't open applications for walk-in applicants.")
-    applicant = await identity.get_user_by_email(session, email)
+    applicant = await identity.get_user_by_email(session, email) if email else None
     if applicant is None:
         applicant = await identity.create_user(
             session,
             email=email,
             full_name=full_name,
-            password=secrets.token_urlsafe(32),
+            password=None,
             role_codes=["applicant"],
         )
         record_event(
@@ -169,6 +172,8 @@ async def open_walk_in(
     elif not applicant.is_active or applicant.role_codes != {"applicant"}:
         # Never attach an application to a staff member's or a closed account.
         raise workflow.NotPermitted("That email belongs to an account that can't apply.")
+    if applicant.email is not None and applicant.password_hash is None:
+        await password_links.issue_link(session, user=applicant, actor=actor)
     return await create_draft(session, actor=actor, form=form, applicant=applicant)
 
 

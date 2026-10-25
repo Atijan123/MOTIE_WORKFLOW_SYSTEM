@@ -107,7 +107,13 @@ async def case_out(session: AsyncSession, case: Case, user: User) -> CaseOut:
         on_hold=bool(await flags.open_flags(session, case.id, blocking_only=True))
         if service.is_staff(user)
         else None,
+        applicant_emailed=await _applicant_emailed(session, case) if service.is_staff(user) else None,
     )
+
+
+async def _applicant_emailed(session: AsyncSession, case: Case) -> bool:
+    applicant = await session.get(User, case.created_by)
+    return applicant is not None and applicant.is_active and applicant.email is not None
 
 
 @router.post("", response_model=CaseOut, status_code=status.HTTP_201_CREATED)

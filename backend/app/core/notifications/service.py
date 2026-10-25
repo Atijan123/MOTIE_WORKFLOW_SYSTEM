@@ -28,7 +28,8 @@ async def notify_applicant(session: AsyncSession, case: Case, event: AuditEvent)
         return None  # hidden, or the same step again in other words (no news for the applicant)
     entry = entries[-1]
     applicant = await session.get(User, case.created_by)
-    if applicant is None or not applicant.is_active:
+    if applicant is None or not applicant.is_active or applicant.email is None:
+        # No email (a walk-in who has none): Records tells them instead.
         return None
     status = await session.get(WorkflowStatus, case.current_status_id)
 
