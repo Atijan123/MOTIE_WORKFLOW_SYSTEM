@@ -16,6 +16,25 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 8i — Drafts can be saved half-filled (2026-10-25)
+A fix to chunk 2, step 1 (8a).
+
+**Built:**
+- **Any field may be empty on a draft.** `POST` and `PUT /etls/facility-letters` accept a form with gaps, even `{}`. An empty box (`""` or spaces) is saved as "not filled in" (`null`), not refused. What *is* given must still have the right shape: a quantity above 0 with at most 3 decimals, a real HS code, no number listed twice, no certificate dated in the future, no certificate date without its number. Those are still 422.
+- A certificate of origin on a draft may have its number but no issue date yet.
+- **Submit checks the form is complete.** The new check `etls_form_complete` on Submit and Resubmit lists every gap in the action's `blocked_by`, in the form's order, next to the missing documents: "Quantity is missing", "Issue date of certificate of origin CO-9 is missing", "Invoice is missing". The screen counts them, as before. Pressing Submit anyway gives 409 with the same list. The HS code is still not required: the applicant may leave it to the desk.
+- So nothing after Submit has an empty field: Records, the desk and the letter read a whole form, as before.
+- The goods line in lists says what there is ("Cement, tonnes"), or "Not filled in yet".
+- The letter preview refuses (409, with the gaps) on a half-filled draft, instead of failing.
+
+**Files:** backend/alembic/versions/0034_partial_drafts.py, backend/app/modules/etls/schemas.py (`FacilityLetterForm`, `Blank`), backend/app/modules/etls/service.py (`form_gaps()`, `_check_form_complete()`, `_goods()`), backend/app/modules/etls/models.py, backend/app/modules/etls/letter.py (`preview()`), backend/tests/modules/etls/test_partial_drafts.py, backend/tests/modules/etls/test_facility_letter.py, backend/tests/modules/etls/test_hs_code.py
+**Try it:**
+- As `applicant@motie.test`, `POST /etls/facility-letters` with `{"product": "Cement"}`: 201, a draft with mostly `null`s.
+- `GET /cases/{id}`: the Submit action's `blocked_by` lists each empty field and each missing document.
+- `PUT /etls/facility-letters/{id}` with the rest, upload the documents, and `blocked_by` is empty.
+- `docker compose run --rm tools pytest tests/modules/etls/test_partial_drafts.py -v`
+**New concepts:** none; it's [Drafts and submission](#drafts-and-submission) and [Blocking checks and warnings](#blocking-checks-and-warnings) used together.
+
 ### Docs — GRA and certificate validity at clearance is not confirmed (2026-10-25)
 **Built:** nothing; a correction. The docs said the Ministry had confirmed that GRA needs the certificate of origin still valid on the day goods are cleared. It hadn't. What *is* decided stays as built: the desk's Verify is blocked once a certificate is more than six months past its issue date, and the applicant is warned at submission if one expires within 30 days. Whether GRA's own rule needs more (say, refusing a letter whose certificate expires before the goods arrive) is now an open question `[CONFIRM]`. Nothing in the code depended on it.
 **Files:** docs/SCREENS.md (S2), docs/GAPS.md (C10, and the chunk 1 answers), docs/LEARNING.md (Decisions, Open questions)
@@ -1404,7 +1423,7 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-20 | `hs_code` is nullable in the database but required on new forms | `NOT NULL` with a made-up value for old rows | Old dev cases have no code, and inventing one would be false data. Their receipt rule fails closed. **Changed in step 6k: optional on the form; a missing code makes the rule "not known yet".** |
 | 2026-10-20 | Cases signed before step 6f get 404, not a freshly made letter | render one now for old cases | A letter made today isn't the one that was signed. Only your dev database has such cases. |
 | 2026-10-24 | The applicant's own moves are transitions with `by_applicant` and no post | an "applicant" position every applicant holds; a separate `POST /submit` endpoint outside the workflow | Submit stays data, with checks, effects and an audit row like every other move. A pretend post would let delegation or succession hand an applicant's case to someone else. |
-| 2026-10-24 | A draft needs a complete, valid form; editing replaces the whole form | allow half-filled drafts (every column nullable, a "form complete" check on Submit) | Documents attach to an existing case, so the case must exist early; requiring the fields keeps every database constraint (`NOT NULL`, quantity > 0) as it is. The screen keeps unsaved typing itself and shows the 422's field errors. Easy to loosen later. |
+| 2026-10-24 | A draft needs a complete, valid form; editing replaces the whole form | allow half-filled drafts (every column nullable, a "form complete" check on Submit) | **Replaced in step 8i** (you asked for half-filled drafts): the alternative is now built. Editing still replaces the whole form. |
 | 2026-10-24 | Whether the form can be changed is a status column (`applicant_editable`) | check for the status code `draft` in the module | "Returned" (8b) is editable too; a column covers both without code knowing status names. |
 | 2026-10-24 | The reference comes from an effect on Submit (`assign_reference`) | the engine numbers any case that leaves its initial status | Which move counts as submitting is then data. `open_case()` still numbers cases at once for a workflow with no editable first status (the old `etls_application`). |
 | 2026-10-24 | The duplicate check runs at Submit, and a draft's numbers don't count | at opening, as before; count drafts too | A draft isn't an application yet: someone's abandoned draft mustn't put a real submission on hold. Checking at Submit also catches a number typed in while editing. |
@@ -1465,6 +1484,11 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-25 | Retry after 1, 2, 4… minutes, give up after 8 attempts (about 4 hours) | retry forever; never retry | A mail server down for a morning recovers on its own; one that's broken for good leaves a visible error (`last_error`) instead of looping. `[CONFIRM]` with ICT. |
 | 2026-10-25 | Only a fake sender exists; it logs and keeps emails in memory | write an SMTP sender now | We don't know the Ministry's mail server (host, login, sender address). An SMTP sender with Python's own `smtplib` is a small addition once we do, with no new library. |
 | 2026-10-25 | A `notifier` service in Compose, using the API's database user | run sending inside the API process | A web server that also loops over emails is harder to restart and scale. The worker needs nothing the API can't already do. |
+| 2026-10-25 | Half-filled drafts: the form's columns are nullable, and a check `etls_form_complete` on Submit and Resubmit lists the gaps | a separate drafts table (JSON) copied into the real tables at Submit; keep the fields required | One set of tables from draft to letter, and the gaps appear in `blocked_by` like every other reason. A JSON drafts table would need its own validation and a copy step that could fail. The cost is that "not empty" is now enforced at Submit, not by `NOT NULL`. |
+| 2026-10-25 | An empty box (`""`, spaces) is saved as `null` | refuse it (422) as before | A screen sends empty strings for empty inputs; refusing them would make saving a half-filled form fail. |
+| 2026-10-25 | The shape of what *is* given is still checked when saving | check everything only at Submit | The applicant hears about "quantity can't be 0" while typing, not days later. Only emptiness waits for Submit. |
+| 2026-10-25 | A certificate number is required per certificate row, the date isn't (on a draft) | allow a date with no number | The number is the row's identity (primary key, duplicate check). |
+| 2026-10-25 | Gaps are worded "X is missing", like the documents | "Please fill in X" | One list on the Submit button, read the same way. |
 | 2026-10-25 | Emails are plain text, English only | HTML; French as well | Plain text reads everywhere and can't hide anything. `[CONFIRM]` wording and languages with the Ministry. |
 
 ## 4. Open questions
@@ -1521,6 +1545,16 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 8i
+1. An applicant saves `{"quantity": "0"}` and, separately, `{"quantity": ""}`. What happens to each, and why the difference?
+2. Where would you look to make "Exporter's country" no longer required at Submit, and does it need a migration?
+3. Why can the desk's code assume the importer's name is never empty, even though the column is nullable?
+
+#### Show answers
+1. `"0"` is refused (422): it's given but has the wrong shape (`gt=0` on `quantity` in backend/app/modules/etls/schemas.py). `""` is saved as `null` by the `Blank` validator: an empty box is "not filled in", which is allowed on a draft.
+2. `REQUIRED_FIELDS` in backend/app/modules/etls/service.py: remove the line. No migration: the column is already nullable since 0034. (Check the letter template copes with an empty value first.)
+3. The only ways out of a draft or a return are Submit and Resubmit, and both carry the `etls_form_complete` check (migration 0034), which refuses while any required field is empty. The form can't be edited after that unless the case is returned, and then it must pass the check again.
 
 ### Step 8h
 1. Records returns a case, but the commit fails (say, the database restarts). Does the applicant get an email? Why?

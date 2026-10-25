@@ -153,23 +153,22 @@ async def test_the_case_walks_the_whole_route(act, people):
     assert response.json()["status"]["is_final"] is True
 
 
+# Wrong shapes are refused even on a draft. Empty fields aren't: a draft may
+# be half-filled, and Submit says what's missing (test_partial_drafts.py).
 @pytest.mark.parametrize(
     "changes",
     [
-        {"product_approval_numbers": []},
-        {"certificates_of_origin": []},
         {"certificates_of_origin": [certificate("CO 1"), certificate("co1")]},  # the same number twice
-        {"certificates_of_origin": [{"number": "CO 1"}]},  # no issue date
         {"certificates_of_origin": [{"number": "CO 1", "issued_on": "2999-01-01"}]},
+        {"certificates_of_origin": [{"number": "  ", "issued_on": "2026-01-01"}]},  # a date with no number
         {"product_approval_numbers": ["PA-1", "PA-1"]},
         {"quantity": "0"},
         {"quantity": "1.2345"},  # more than 3 decimal places
-        {"importer_name": "   "},
+        {"hs_code": "25"},
         {"exporter_country": "x" * 201},
     ],
-    ids=["no-approvals", "no-certificates", "repeated-certificate", "no-issue-date", "issued-in-future",
-         "repeated-approval",
-         "zero-quantity", "too-precise", "blank-name", "too-long"],
+    ids=["repeated-certificate", "issued-in-future", "no-number", "repeated-approval",
+         "zero-quantity", "too-precise", "bad-hs-code", "too-long"],
 )
 async def test_invalid_forms_are_refused(act, people, changes):
     assert (await _submit(act, people["applicant"], **changes)).status_code == 422

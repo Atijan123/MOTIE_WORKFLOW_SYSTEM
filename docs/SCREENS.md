@@ -35,7 +35,7 @@ Items marked `[CONFIRM]` are assumptions still to check with the ETLS desk.
 - Goods: product, quantity (number), unit, HS code (optional).
 - Exporter: name, country, ETLS approval number, one or more product approval numbers, one or more certificates of origin, **each with its number and issue date** (so the system can check the six-month validity).
 - Documents checklist: business registration, annual returns certificate, certificate of origin (with note: bring the original to Records), invoice, export declaration, receipt (cement only, shown as "not known yet" until the **desk confirms** the HS code; a code the applicant declares does not decide it).
-- Save draft; Submit is disabled until required documents are uploaded, with a count of what is missing.
+- Save draft, with any fields still empty; Submit is disabled until the form is complete and the required documents are uploaded, with a count of what is missing.
 - **Certificate warning at submission:** if a certificate of origin expires (six months after its issue date) within 30 days, the applicant is warned but may still submit.
 - **Applicant labels (facility letter):** Draft → Submitted ("Bring the original certificate of origin to Records") → Originals checked → Being verified → Awaiting signature → Letter signed → Letter sent to GRA. Plus: Returned: action needed (with the message), Rejected (with the reason). Cancelling a signed letter is invisible to the applicant: the cancel itself is hidden and the case simply shows "Being verified" again. If the cancelled letter had already been sent to GRA, the corrected letter's "sent to GRA" shows as **"Corrected letter issued"** (decided 2026-10-24).
 

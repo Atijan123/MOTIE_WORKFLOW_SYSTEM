@@ -31,6 +31,7 @@ HS_CODE_CONFIRMED = "hs_code_confirmed"  # transition check, on the desk's "Veri
 CHECK_DUPLICATES = "etls_check_duplicate_certificates"  # transition effect, on "Submit"
 CERTIFICATES_VALID = "etls_certificates_valid"  # check on "Verify": none past six months
 CERTIFICATES_EXPIRING = "etls_certificates_expiring"  # warning on "Submit": one expires soon
+FORM_COMPLETE = "etls_form_complete"  # check on "Submit" and "Resubmit": nothing left empty
 VALID_MONTHS = 6
 WARN_DAYS = 30
 
@@ -100,7 +101,7 @@ def _children(case_id: int, form: FacilityLetterForm) -> list:
 def _snapshot(fields: dict, approvals: list[str], certificates: list) -> dict:
     """The form as plain JSON values, for comparing before and after an edit."""
     return {
-        **{k: format(v.normalize(), "f") if k == "quantity" else v for k, v in fields.items()},
+        **{k: format(v.normalize(), "f") if k == "quantity" and v is not None else v for k, v in fields.items()},
         "product_approval_numbers": approvals,
         "certificates_of_origin": [
             {"number": c.number, "issued_on": c.issued_on.isoformat() if c.issued_on else None}
@@ -221,6 +222,40 @@ async def update_form(
     )
     await session.commit()
     return await _reloaded(session, case.id)
+
+
+# What Submit needs filled in, in the form's order, as the applicant sees it.
+# The HS code isn't here: the applicant may leave it to the desk (step 6k).
+REQUIRED_FIELDS = {
+    "importer_name": "Importer's business name",
+    "importer_address": "Importer's address",
+    "product": "Product",
+    "quantity": "Quantity",
+    "unit": "Unit",
+    "exporter_name": "Exporter's name",
+    "exporter_country": "Exporter's country",
+    "exporter_etls_approval_number": "Exporter's ETLS approval number",
+}
+
+
+def form_gaps(letter: FacilityLetter) -> list[str]:
+    """What's still empty on the form, e.g. ["Quantity is missing", ...]."""
+    gaps = [f"{label} is missing" for column, label in REQUIRED_FIELDS.items() if getattr(letter, column) is None]
+    if not letter.product_approvals:
+        gaps.append("Product approval number is missing")
+    if not letter.certificates:
+        gaps.append("Certificate of origin number is missing")
+    gaps += [
+        f"Issue date of certificate of origin {c.number} is missing" for c in letter.certificates if c.issued_on is None
+    ]
+    return gaps
+
+
+async def _check_form_complete(session: AsyncSession, case: Case) -> list[str]:
+    """Blocks Submit and Resubmit until every required field is filled in, so
+    every step after Submit (Records, the desk, the letter) has a whole form."""
+    letter = await session.get(FacilityLetter, case.id)
+    return form_gaps(letter) if letter else ["The application form is missing"]
 
 
 async def check_duplicates(session: AsyncSession, move: effects.Move) -> None:
@@ -449,8 +484,16 @@ async def facility_letter_facts(session: AsyncSession, case_id: int) -> dict:
 async def facility_letter_summaries(session: AsyncSession, case_ids: list[int]) -> dict[int, str]:
     """The goods, for lists and queues: "Roofing sheets, 1200.5 tonnes"."""
     letters = await session.scalars(select(FacilityLetter).where(FacilityLetter.case_id.in_(case_ids)))
-    # normalize() drops NUMERIC's trailing zeros (1200.500 -> 1200.5).
-    return {l.case_id: f"{l.product}, {format(l.quantity.normalize(), 'f')} {l.unit}" for l in letters}
+    return {l.case_id: _goods(l) for l in letters}
+
+
+def _goods(letter: FacilityLetter) -> str:
+    # normalize() drops NUMERIC's trailing zeros (1200.500 -> 1200.5). A draft
+    # may have no product or quantity yet: show what there is.
+    amount = " ".join(
+        p for p in (format(letter.quantity.normalize(), "f") if letter.quantity else None, letter.unit) if p
+    )
+    return ", ".join(p for p in (letter.product, amount) if p) or "Not filled in yet"
 
 
 # Registered when the module is imported (main.py imports its router).
@@ -459,4 +502,5 @@ summaries.register(FACILITY_LETTER, facility_letter_summaries)
 checks.register(HS_CODE_CONFIRMED, _check_hs_code_confirmed)
 checks.register(CERTIFICATES_VALID, _check_certificates_valid)
 checks.register(CERTIFICATES_EXPIRING, _check_certificates_expiring)
+checks.register(FORM_COMPLETE, _check_form_complete)
 effects.register(CHECK_DUPLICATES, check_duplicates)

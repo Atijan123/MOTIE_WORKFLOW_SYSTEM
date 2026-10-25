@@ -36,8 +36,8 @@ class FacilityLetterCertificate(Base):
     )
     number: Mapped[str] = mapped_column(Text)  # as typed, for the letter
     number_normalized: Mapped[str] = mapped_column(Text, primary_key=True)  # for comparing
-    # Valid for six months from this date (0028). Empty only on applications
-    # from before then.
+    # Valid for six months from this date (0028). Empty on a draft not yet
+    # finished (0034), and on applications from before 0028.
     issued_on: Mapped[date | None] = mapped_column(Date)
 
 
@@ -79,14 +79,16 @@ class FacilityLetter(Base):
     )
 
     case_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("core.cases.id"), primary_key=True)
-    importer_name: Mapped[str] = mapped_column(Text)
-    importer_address: Mapped[str] = mapped_column(Text)
-    product: Mapped[str] = mapped_column(Text)
-    quantity: Mapped[Decimal] = mapped_column(Numeric(14, 3))
-    unit: Mapped[str] = mapped_column(Text)
-    exporter_name: Mapped[str] = mapped_column(Text)
-    exporter_country: Mapped[str] = mapped_column(Text)
-    exporter_etls_approval_number: Mapped[str] = mapped_column(Text)
+    # Empty only while a draft (0034): the check etls_form_complete on Submit
+    # makes sure a submitted application has them all.
+    importer_name: Mapped[str | None] = mapped_column(Text)
+    importer_address: Mapped[str | None] = mapped_column(Text)
+    product: Mapped[str | None] = mapped_column(Text)
+    quantity: Mapped[Decimal | None] = mapped_column(Numeric(14, 3))
+    unit: Mapped[str | None] = mapped_column(Text)
+    exporter_name: Mapped[str | None] = mapped_column(Text)
+    exporter_country: Mapped[str | None] = mapped_column(Text)
+    exporter_etls_approval_number: Mapped[str | None] = mapped_column(Text)
     # The HS code as the applicant declared it, and as an officer confirmed it
     # (digits only). Empty on cases submitted before 0020.
     hs_code: Mapped[str | None] = mapped_column(Text)

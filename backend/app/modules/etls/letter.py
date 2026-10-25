@@ -41,7 +41,7 @@ from app.core.workflow import service as workflow
 from app.core.workflow.delegation import today
 from app.core.workflow.models import Case, WorkflowStatus, WorkflowTransition
 from app.modules.etls.models import FacilityLetter, FacilityLetterDispatch
-from app.modules.etls.service import FACILITY_LETTER
+from app.modules.etls.service import FACILITY_LETTER, form_gaps
 
 TEMPLATE = Path(__file__).parent / "templates" / "facility_letter.txt"
 KIND = "etls_facility_letter"  # core.issued_documents.kind
@@ -343,6 +343,10 @@ async def preview(session: AsyncSession, case_id: int, user: User) -> bytes:
     case = await _staff_case(session, case_id, user)
     if await issued.get_current(session, case.id, KIND):
         raise workflow.NotReady("The letter is signed; download it from letter.pdf.")
+    gaps = form_gaps(await session.get(FacilityLetter, case.id))
+    if gaps:
+        # Only a draft can have gaps; there's no letter to show yet.
+        raise workflow.NotReady("The application form isn't complete: " + "; ".join(gaps))
     return render_pdf(await preview_fields(session, case), preview=True)
 
 

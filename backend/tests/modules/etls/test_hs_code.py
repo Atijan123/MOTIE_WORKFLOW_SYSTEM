@@ -49,7 +49,7 @@ async def test_the_hs_code_is_stored_as_digits(act, people, typed, stored):
     assert response.json()["hs_code_confirmed"] is None
 
 
-@pytest.mark.parametrize("bad", ["", "2523", "25232", "2523291", "2523-29", "25AB29", "２５２３２９"])
+@pytest.mark.parametrize("bad", ["2523", "25232", "2523291", "2523-29", "25AB29", "２５２３２９"])
 async def test_a_malformed_hs_code_is_refused(act, people, bad):
     assert (await _submit(act, people, hs_code=bad)).status_code == 422
 
@@ -58,6 +58,13 @@ def _form_without_hs_code(**changes) -> dict:
     form = facility_letter_form(**changes)
     del form["hs_code"]
     return form
+
+
+@pytest.mark.parametrize("blank", ["", "   "])
+async def test_an_empty_hs_code_box_means_no_code(act, people, blank):
+    response = await _submit(act, people, hs_code=blank)
+    assert response.status_code == 201, response.text
+    assert response.json()["hs_code"] is None
 
 
 async def test_the_applicant_may_leave_the_hs_code_out(act, people):

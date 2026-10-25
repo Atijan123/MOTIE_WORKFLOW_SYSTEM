@@ -1,9 +1,9 @@
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
-from typing import Annotated
+from typing import Annotated, Any
 
-from pydantic import AfterValidator, BaseModel, Field, StringConstraints, field_validator
+from pydantic import AfterValidator, BaseModel, BeforeValidator, Field, StringConstraints, field_validator
 
 from app.core.workflow.delegation import today
 
@@ -12,6 +12,16 @@ from app.core.workflow.delegation import today
 ShortText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
 LongText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)]
 Number = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=60)]
+
+
+def _blank_is_empty(value: Any) -> Any:
+    """A draft's empty box arrives as "" or "  ": store it as not filled in."""
+    return None if isinstance(value, str) and not value.strip() else value
+
+
+# A form field a draft may leave empty. Submit checks it's filled in
+# (etls_form_complete in service.py); its shape is checked whenever it's given.
+Blank = BeforeValidator(_blank_is_empty)
 
 
 def normalize_hs_code(code: str) -> str:
@@ -35,30 +45,41 @@ def normalize_certificate_number(number: str) -> str:
 
 class CertificateOfOrigin(BaseModel):
     number: Number
-    issued_on: date  # valid for six months from this date
+    # Valid for six months from this date. A draft may leave it empty for now.
+    issued_on: Annotated[date | None, Blank] = None
 
     @field_validator("issued_on")
     @classmethod
-    def _not_in_the_future(cls, issued_on: date) -> date:
-        if issued_on > today():
+    def _not_in_the_future(cls, issued_on: date | None) -> date | None:
+        if issued_on is not None and issued_on > today():
             raise ValueError("a certificate can't be issued in the future")
         return issued_on
 
 
 class FacilityLetterForm(BaseModel):
-    importer_name: ShortText
-    importer_address: LongText
-    product: ShortText
-    # Optional: the applicant may not know it. The ETLS desk enters or confirms
-    # it before verifying the file.
-    hs_code: HsCode | None = None
-    quantity: Decimal = Field(gt=0, max_digits=14, decimal_places=3)
-    unit: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=30)]
-    exporter_name: ShortText
-    exporter_country: ShortText
-    exporter_etls_approval_number: Number
-    product_approval_numbers: list[Number] = Field(min_length=1, max_length=50)
-    certificates_of_origin: list[CertificateOfOrigin] = Field(min_length=1, max_length=50)
+    """The application form, as the applicant saves it.
+
+    Any field may be empty while it's a draft, so the applicant can save and
+    come back. What's given must still have the right shape (a positive
+    quantity, a real HS code). Submit is blocked until the form is complete
+    (etls_form_complete), and its blocked_by lists what's still empty.
+    """
+
+    importer_name: Annotated[ShortText | None, Blank] = None
+    importer_address: Annotated[LongText | None, Blank] = None
+    product: Annotated[ShortText | None, Blank] = None
+    # Optional even at Submit: the applicant may not know it. The ETLS desk
+    # enters or confirms it before verifying the file.
+    hs_code: Annotated[HsCode | None, Blank] = None
+    quantity: Annotated[Annotated[Decimal, Field(gt=0, max_digits=14, decimal_places=3)] | None, Blank] = None
+    unit: Annotated[
+        Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=30)] | None, Blank
+    ] = None
+    exporter_name: Annotated[ShortText | None, Blank] = None
+    exporter_country: Annotated[ShortText | None, Blank] = None
+    exporter_etls_approval_number: Annotated[Number | None, Blank] = None
+    product_approval_numbers: list[Number] = Field(default_factory=list, max_length=50)
+    certificates_of_origin: list[CertificateOfOrigin] = Field(default_factory=list, max_length=50)
 
     @field_validator("product_approval_numbers")
     @classmethod
@@ -95,6 +116,8 @@ class WalkInApplication(BaseModel):
 
 
 class FacilityLetterOut(FacilityLetterForm):
+    """The form as stored. On a draft, any field may still be empty."""
+
     case_id: int
     reference: str | None  # the case's tracking number, e.g. MOTIE/ETLS/FL/2026/0001
     status: str | None  # internal status code, for staff only; GET /cases/{id} has the full case
