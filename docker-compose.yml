@@ -40,7 +40,7 @@ services:
       APP_ENV: ${APP_ENV:-production}
       FACILITY_LETTER_REFERENCE_FORMAT: ${FACILITY_LETTER_REFERENCE_FORMAT:-}
       # The start of links in emails ("set your password"); see .env.example.
-      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3000}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3001}
       PASSWORD_LINK_HOURS: ${PASSWORD_LINK_HOURS:-72}
     volumes:
       # Dev only: mount the source so edits reload without rebuilding the image.
@@ -52,6 +52,27 @@ services:
     depends_on:
       db:
         condition: service_healthy
+
+  web:
+    # The Next.js frontend (frontend/). The browser talks only to this; it
+    # calls the API over the Compose network, holding the login in a cookie.
+    build:
+      context: ./frontend
+      target: dev
+    environment:
+      API_URL: http://api:8000
+      WATCHPACK_POLLING: "true"  # file changes from a Windows bind mount
+      NEXT_TELEMETRY_DISABLED: "1"
+    volumes:
+      - ./frontend:/app
+      # The image's own node_modules and build cache, not the host's.
+      - web_node_modules:/app/node_modules
+      - web_next:/app/.next
+    ports:
+      # 3001 on the host: 3000 is often taken by other local Node projects.
+      - "127.0.0.1:3001:3000"
+    depends_on:
+      - api
 
   notifier:
     # Sends the emails waiting in core.notifications, every NOTIFICATION_POLL_SECONDS
@@ -100,3 +121,5 @@ services:
 volumes:
   pgdata:
   documents:
+  web_node_modules:
+  web_next:

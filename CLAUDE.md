@@ -59,6 +59,7 @@ Write for me, not for a reviewer: plain words, short paragraphs, real file paths
 
 - Start services: `docker compose up`
 - Run the API: `uvicorn app.main:app --reload`
+- The web app: `docker compose up -d web`, then http://localhost:3001 (3000 is often taken on the host). Typecheck and unit tests: `docker compose run --rm --no-deps web sh -c "npm run typecheck && npm test"`
 - Run migrations: `docker compose run --rm tools alembic upgrade head` (runs as `motie_owner`)
 - Run tests: `docker compose run --rm tools pytest -v`
 - Send waiting emails once: `docker compose run --rm tools python -m app.core.notifications.worker --once`. The `notifier` service (`docker compose up notifier`) does it continuously. Only the fake sender exists: it logs emails (`docker compose logs notifier`) and sends nothing.

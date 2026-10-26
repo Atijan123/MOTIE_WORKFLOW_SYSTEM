@@ -28,6 +28,7 @@ async def test_login_returns_a_token_that_works_on_me(client, make_user):
         "full_name": user.full_name,
         "roles": ["director", "officer"],
         "positions": ["director_of_trade"],
+        "position_titles": ["Director of Trade"],
     }
 
 

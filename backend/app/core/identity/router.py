@@ -35,7 +35,8 @@ async def me(user: User = Depends(get_current_user)):
         email=user.email,
         full_name=user.full_name,
         roles=sorted(user.role_codes),
-        positions=sorted(user.position_codes),
+        positions=[p.code for p in sorted(user.positions, key=lambda p: p.code)],
+        position_titles=[p.title for p in sorted(user.positions, key=lambda p: p.code)],
     )
 
 

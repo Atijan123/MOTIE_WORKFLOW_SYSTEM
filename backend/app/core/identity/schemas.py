@@ -26,3 +26,4 @@ class UserOut(BaseModel):
     full_name: str
     roles: list[str]
     positions: list[str]  # position codes, e.g. ["director_of_trade"]
+    position_titles: list[str]  # the same posts' titles, in the same order, for the screen's header

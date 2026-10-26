@@ -16,6 +16,27 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 9a — The frontend starts: login, set-password, dates (2026-10-26)
+Chunk 2, step 9 (the frontend), part 1 of 8.
+
+**Built:**
+- **A Next.js app in frontend/**, run by the new Compose service **`web`** at **http://localhost:3001**. That's port 3001 on your machine because 3000 is often taken by other Node projects (it was here). Inside Compose it's still `web:3000`, and it calls the API as `http://api:8000`.
+- **The browser never talks to the API.** Pages and forms run on the Next.js server (server components and server actions), which calls the API with the login token. The token lives in an **httpOnly cookie** (`motie_session`) that page scripts can't read. To the API, Next.js is just another client.
+- **Login** (`/login`): email and password go to `POST /auth/login`; the token goes in the cookie for 60 minutes, as long as the token lasts. When it runs out, the next page sends you back to `/login?expired=1` with "Your session ended".
+- **Set your password** (`/set-password`): the page walk-in applicants reach from their email (step 8j). A script in the browser reads the token after `#`, takes it out of the address bar at once, and the form sends it to `POST /auth/set-password`.
+- **`/`** sends applicants to their applications and staff to their queue (those screens come in 9b and 9d).
+- **Dates the Ministry's way** in frontend/lib/dates.ts: `longDate()` ("16th October, 2026") follows the same rules as `long_date()` in backend/app/core/dates.py, with the same test cases. Also `dayRange()` for absences ("20th–24th October") and `shortDateTime()` for history lines.
+- **`GET /auth/me` now gives `position_titles`** next to the position codes, for the header ("Records Officer").
+- The look follows docs/design (navy bar, cream page, IBM Plex Sans and Source Serif 4, 44px touch targets), in frontend/app/globals.css. The fonts are downloaded at build time and served by this site, so browsers make no request to Google.
+- Security headers on every page: no framing by other sites (`X-Frame-Options`), no MIME sniffing, no full URL in the referrer.
+
+**Files:** frontend/package.json, frontend/Dockerfile, frontend/next.config.mjs, frontend/app/layout.tsx, frontend/app/globals.css, frontend/app/page.tsx, frontend/app/login/ (page.tsx, actions.ts), frontend/app/set-password/ (page.tsx, SetPasswordForm.tsx, actions.ts), frontend/lib/api.ts (`api()`, `apiFetch()`), frontend/lib/session.ts (`startSession()`, `requireUser()`), frontend/lib/forms.ts, frontend/lib/dates.ts, frontend/lib/dates.test.ts, frontend/components/TopBar.tsx, frontend/components/ActionForm.tsx, docker-compose.yml (`web`), .env.example (`PUBLIC_BASE_URL` is now port 3001), backend/app/core/identity/router.py, backend/app/core/identity/schemas.py, backend/tests/core/test_auth.py
+**Try it:**
+- `docker compose up -d web` and open http://localhost:3001. Log in as `records@motie.test` (password in backend/app/dev_seed.py).
+- In the browser's developer tools, Application → Cookies: `motie_session` is marked HttpOnly. Type `document.cookie` in the console: it isn't there.
+- Typecheck and unit tests: `docker compose run --rm --no-deps web sh -c "npm run typecheck && npm test"`
+**New concepts:** Server components and server actions, A login cookie the browser can't read
+
 ### Step 8m — Sent emails lose their password link (2026-10-25)
 A follow-up to 8j.
 
@@ -1308,6 +1329,16 @@ Because the token is 256 random bits, a plain SHA-256 hash is enough. Passwords 
 **Here:** backend/app/core/notifications/worker.py (`send_pending()`, `MAX_ATTEMPTS`, `main()`); the `notifier` service in docker-compose.yml.
 **Learn more:** [PostgreSQL docs: SELECT, the locking clause](https://www.postgresql.org/docs/16/sql-select.html#SQL-FOR-UPDATE-SHARE) (read the part about `SKIP LOCKED`)
 
+### Server components and server actions
+**What:** in Next.js's App Router, a page is a React component that runs **on the server** by default. It can `await` data (here: calls to the API) and sends finished HTML to the browser. Only components marked `"use client"` run in the browser, for things that need it, like reading the `#token` from the address bar. A **server action** is a function marked `"use server"` that a `<form action={...}>` calls: the browser posts the form, the function runs on the server, and the page refreshes with the result. Forms work even before the page's JavaScript has loaded. So most of this frontend is plain server code calling the API, and very little runs in the browser.
+**Here:** every `page.tsx` under frontend/app/ is a server component; `login()` in frontend/app/login/actions.ts is a server action; `ActionForm` in frontend/components/ActionForm.tsx shows the action's error or success message (with `useActionState`); frontend/app/set-password/SetPasswordForm.tsx is a client component.
+**Learn more:** [Next.js docs: Server and Client Components](https://nextjs.org/docs/app/getting-started/server-and-client-components) and [Updating data (server actions)](https://nextjs.org/docs/app/getting-started/updating-data)
+
+### A login cookie the browser can't read
+**What:** the API hands out a token at login (a JWT, step 2). Where it is kept matters. In `localStorage`, any script on the page can read it, so one injected script (XSS) could steal the login. In a cookie marked **httpOnly**, the browser sends it back to the site automatically but scripts can't see it. **SameSite=Lax** stops other sites from sending it with their own form posts (CSRF), and **Secure** keeps it to https on a real server. Here the cookie belongs to the Next.js server, which adds the token to its own API calls. The browser can't reach the API at all (only `web` is meant for people; the API port is published on 127.0.0.1 for your own testing). This set-up is sometimes called a "backend for frontend".
+**Here:** `startSession()` in frontend/lib/session.ts sets the cookie; `apiFetch()` in frontend/lib/api.ts reads it and sends `Authorization: Bearer ...`; `API_URL` in docker-compose.yml's `web` service.
+**Learn more:** [OWASP Session Management Cheat Sheet, "Cookies"](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html#cookies)
+
 ## 3. Decisions
 
 ### Confirmed by the Ministry
@@ -1600,6 +1631,12 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-25 | The send-time scrub is a trigger; the expiry scrub is a SECURITY DEFINER function the worker calls | the worker edits the body itself (needs UPDATE on body); a cron job in Postgres (pg_cron, a new extension) | Both keep the "app can't rewrite an email" rule. Nothing new to install: the worker already runs every 30 seconds. |
 | 2026-10-25 | An unsent email whose link has expired is never sent | send it with "[link removed]" | It would only confuse the applicant; Records can serve them again for a fresh link. |
 | 2026-10-25 | Emails are plain text, English only | HTML; French as well | Plain text reads everywhere and can't hide anything. `[CONFIRM]` wording and languages with the Ministry. |
+| 2026-10-26 | Next.js App Router, pages as server components calling the API from the server | a browser-only React app calling the API with the token in `localStorage` | The token never reaches page scripts, the API needs no CORS set-up, and forms work before JavaScript loads (slow phones). |
+| 2026-10-26 | The session cookie lasts 60 minutes, like the token; then "Your session ended" | refresh tokens | Matches the API (step 2: no refresh tokens yet). Revisit if officers find 60 minutes too short (Open questions: session length). |
+| 2026-10-26 | No CSS framework or component library: one plain stylesheet, frontend/app/globals.css | Tailwind; a component library | CLAUDE.md asks before adding libraries; the mock-ups' styles are simple enough to write directly, and plain CSS is easy for ICT to maintain. |
+| 2026-10-26 | Unit tests with Node's own test runner (`node --test`) | Jest or Vitest | No extra library for a few pure functions (dates, labels). The screens are tested in a real browser with Playwright (step 9h). |
+| 2026-10-26 | The web app on host port 3001 | 3000 | Another local Node project already used 3000 on this machine. `PUBLIC_BASE_URL` (links in emails) moved to 3001 with it. |
+| 2026-10-26 | `GET /auth/me` adds `position_titles` | a separate positions endpoint | One small field for the header, in the same order as `positions`. |
 
 ## 4. Open questions
 
@@ -1657,6 +1694,16 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 9a
+1. A script injected into a page tries to call the API with the user's login. Why can't it?
+2. The login form is submitted on a phone whose JavaScript hasn't loaded yet. What happens?
+3. `longDate("2026-10-22T23:59:00+00:00")` must say 22nd, not 23rd, in every browser. What in frontend/lib/dates.ts makes sure of that?
+
+#### Show answers
+1. It can't get the token. The cookie is httpOnly, so `document.cookie` doesn't show it and the script can't build an `Authorization` header. Only the Next.js server reads the cookie and adds the token (`apiFetch()` in frontend/lib/api.ts).
+2. It still works. The form posts to the server action like a plain HTML form: `login()` runs on the server, sets the cookie and redirects. `ActionForm` only adds the nicer touches ("Working…", no page reload) once JavaScript is there.
+3. Everything is read with the UTC methods (`getUTCDate()` and the like). The Gambia is on GMT all year, so UTC is local time, and the answer doesn't depend on the browser's own time zone.
 
 ### Step 8m
 1. The mail server is down for a day. A walk-in's link email fails every few minutes. What does its stored copy hold during that time, and after the link expires?
