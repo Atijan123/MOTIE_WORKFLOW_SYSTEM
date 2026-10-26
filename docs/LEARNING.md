@@ -16,6 +16,25 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 9d — Staff screens: the queue, the case panel, and S1 (Records, with Outgoing) (2026-10-26)
+Chunk 2, step 9, part 4 of 8.
+
+**Built:**
+- **The staff shell** (frontend/app/staff/layout.tsx): the header with my post ("Records Officer"), the **acting banner** on every staff page ("You are acting for the Permanent Secretary (Dev Permanent Secretary absent 26th–28th October)", from `GET /acting`), and the menu with counts.
+- **My queue** (`/staff`, docs/design/Records.dc.html): every case where I can make a move now (`GET /cases/queue`), oldest first, with service, applicant, goods and days waiting (in orange from 2 days). The selected case opens beside it. The same screen serves Records, the desk and the PS: what the panel offers depends on what the API says this person may do.
+- **The case panel** (frontend/components/staff/CasePanel.tsx): reference, importer, goods, exporter, the form summary, "this applicant has no email: tell them yourself" for walk-ins without one (8j), the documents with View links, the buttons, and the **history** (newest first, with names, posts and "acting for the ... (absent ...)").
+- **The buttons** (frontend/components/staff/Actions.tsx) are the case's `available_actions`, one each. A blocked one is disabled and the reasons are written under it, starting "Accept: originals received isn’t possible yet: ...". One message box (to the applicant, for returns) and one minute box (staff only) serve all of them; the minute says which moves require it.
+- **S1, Records:** "Original seen in person" next to each document whose original must be seen; once ticked, the button gives way to "✓ Original seen 26th October, 2026". Then "Accept: originals received" or "Return to applicant".
+- **S1's Outgoing tab** (`/staff/outgoing`, RecordsOutgoing.dc.html): signed letters waiting to go to GRA (`GET /cases/queue?status=signed`), the signing date, "Download PDF" of the stored letter, and "Mark sent to GRA" with the dispatch date (today by default, never in the future). After marking, the page says "MOTIE/ETLS/FL/2026/0001 marked as sent to GRA on 26th October, 2026" and the row is gone. Signed letters are kept out of "My queue" so they aren't counted twice.
+- **Downloads** go through `/files/...` (frontend/app/files/[...path]/route.ts), which adds the login and passes the file on. It only passes four exact path shapes (a document, the letter, the preview, an issued letter), so it can't be used to reach any other API endpoint.
+
+**Files:** frontend/app/staff/layout.tsx, frontend/app/staff/page.tsx, frontend/app/staff/outgoing/page.tsx, frontend/app/staff/actions.ts (`moveCase()`, `markOriginalSeen()`, `markSentToGra()`), frontend/components/staff/CasePanel.tsx, frontend/components/staff/Actions.tsx, frontend/components/staff/Documents.tsx, frontend/components/staff/History.tsx, frontend/components/ActingBanner.tsx, frontend/components/NavLink.tsx, frontend/app/files/[...path]/route.ts
+**Try it:**
+- Submit an application as the applicant (9c), then log in as `records@motie.test`: it's in My queue. Accept is disabled and says why; tick "Original seen in person" and accept.
+- As `ps@motie.test`, record an absence through the API (`POST /absences`); log in as `dps@motie.test` and the banner is on every page.
+- In the browser, open `http://localhost:3001/files/auth/me`: 404, it's not one of the allowed paths.
+**New concepts:** none; the screens show what [Blocking checks and warnings](#blocking-checks-and-warnings) and [Delegation (acting on behalf of)](#delegation-acting-on-behalf-of) already provide.
+
 ### Step 9c — Applicant screen A2: the facility letter form, uploads and submit (2026-10-26)
 Chunk 2, step 9, part 3 of 8.
 
@@ -1683,6 +1702,10 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-26 | Uploads go through a server action, which passes the raw file to the API | a direct upload from the browser to the API | The browser can't reach the API and has no token (step 9a). The action's body limit is 11 MB (frontend/next.config.mjs), so the API's 10 MB check is the one that answers. |
 | 2026-10-26 | Submit doesn't save the form first ("Save the draft first if you changed anything above") | save and submit in one click | Two separate, simple actions; Submit then checks exactly what's stored. Worth revisiting if applicants trip over it. |
 | 2026-10-26 | Country and unit boxes suggest values but accept any text | fixed select lists | The API takes free text (step 6) and we don't have the agreed lists yet. The country suggestions leave out Burkina Faso, Mali and Niger, which left ECOWAS in 2025. `[CONFIRM]` |
+| 2026-10-26 | One queue screen for every staff post; the panel adapts to `available_actions` | one screen per post (Records, desk, PS) | Whoever acts for an absent post (succession, delegation) gets that post's tools without any extra code. The API decides; the screen shows. |
+| 2026-10-26 | Buttons carry the workflow's move names, with friendlier wording for a few ("Accept: originals received") in `LABELS` in frontend/components/staff/Actions.tsx | only the workflow's names | The mock-ups' wording is clearer for some moves; unknown moves still show their own name, so a new workflow works without frontend changes. |
+| 2026-10-26 | Downloads through a frontend route with an allow-list of path shapes | a general "pass anything to the API" route | A general pass-through would let any page call any API endpoint with the user's login. Four patterns are easy to review. |
+| 2026-10-26 | After "Mark sent to GRA", go back to Outgoing with the confirmation on the page | a message inside the row's form | The row leaves the table once sent, so a message inside it would vanish with it (found by the walk-through in 9h). |
 
 ## 4. Open questions
 
@@ -1741,6 +1764,16 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 9d
+1. The PS is away and the DPS opens a verified case. Why do they get the Sign button, and what will the history say after they sign?
+2. "Accept: originals received" is disabled. Where does the sentence under it come from, and what happens if someone re-enables the button in the browser's developer tools and clicks it?
+3. Why can't `/files/cases/1/status` be used to move a case?
+
+#### Show answers
+1. `GET /cases/{id}` lists Sign in `available_actions` for them, with `on_behalf_of` set, because the succession order lets the DPS act while the PS is away (step 5). The button reads "Sign letter (acting)". The history then says "Dev Deputy PS, ..., acting for the Permanent Secretary (Dev Permanent Secretary away ...)".
+2. From that action's `blocked_by` in `GET /cases/{id}`. A forced click posts the move anyway, and the API refuses it (409) with the same reasons, which the form then shows. The disabled button is a courtesy; the rule is in the engine.
+3. The route only answers GET, and `cases/1/status` matches none of the four patterns in `ALLOWED`, so it returns 404 before anything is sent to the API.
 
 ### Step 9c
 1. Where does the list "3 things still to do before you can submit" come from? What would you change to add a new required field?
