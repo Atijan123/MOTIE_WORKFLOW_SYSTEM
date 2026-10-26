@@ -16,6 +16,21 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 9f — Staff screen S3: the PS signs the letter (2026-10-26)
+Chunk 2, step 9, part 6 of 8.
+
+**Built** (frontend/components/staff/Signing.tsx, docs/design/PS.dc.html), in the case panel for whoever can Sign:
+- **Checks done**, each with ✓ or ✗ (`GET /etls/facility-letters/{id}/checks`): originals seen (by whom, when), the ECOWAS ticks (by whom), duplicate flags and how they were cleared, the HS code and who confirmed it, each certificate's validity, and any missing documents.
+- **The letter preview** in the Ministry's wording, in the page and as a link to open it alone (`/files/etls/facility-letters/{id}/letter-preview.pdf`). It's rendered on request and marked "DRAFT FOR CHECKING - NOT SIGNED"; nothing is stored until Sign.
+- **"Sign letter"** stores the letter (8f). On a production server without the registry reference, Sign is disabled with the reason (8k). **"Return to desk"** needs a minute.
+- After signing, the case leaves the PS's queue and appears on Records' Outgoing tab.
+
+**Files:** frontend/components/staff/Signing.tsx, frontend/components/staff/CasePanel.tsx (`canSign`)
+**Try it:**
+- Take a case through the desk (9e) and log in as `ps@motie.test`: the checks, the preview, then "Sign letter". Log in as `records@motie.test`: Outgoing shows it with "Download PDF".
+- Return one to the desk without a minute: the API's "a reason is required" appears above the buttons.
+**New concepts:** none.
+
 ### Step 9e — Staff screen S2: the ETLS desk's checks (2026-10-26)
 Chunk 2, step 9, part 5 of 8.
 
@@ -1723,6 +1738,7 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-26 | After "Mark sent to GRA", go back to Outgoing with the confirmation on the page | a message inside the row's form | The row leaves the table once sent, so a message inside it would vanish with it (found by the walk-through in 9h). |
 | 2026-10-26 | The desk's checks show to whoever has a "Verify" move, not to the desk post by name | check for `etls_desk_officer` in the frontend | Approvals attach to posts and stand-ins (CLAUDE.md): someone acting for the desk needs the same tools. |
 | 2026-10-26 | Each tick is its own small form ("Mark as checked" / "Undo") | checkboxes saved with one button | Each tick is a recorded statement with its own time and officer (step 8d); one click, one record. |
+| 2026-10-26 | The preview is embedded in the page (an iframe of the PDF) and linked | a "Preview" button only | The PS should read the letter before signing, and the mock-up shows it in place. The iframe loads from this site (`/files/...`), so `X-Frame-Options: SAMEORIGIN` allows it. |
 
 ## 4. Open questions
 
@@ -1781,6 +1797,14 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 9f
+1. The PS opens the preview, then the desk changes the HS code before the PS signs. Does the signed letter match the preview the PS read?
+2. Why can the PS's page show the PDF preview in a frame when every page sends `X-Frame-Options`?
+
+#### Show answers
+1. Not necessarily: the preview is rendered fresh on each request from the current data, and Sign renders and stores the letter at that moment. But the desk can only change the code while the case is at its step (`originals_received`); once verified, the case is at the PS and the desk has no move or HS-code change there. To be sure, reload the page: the checks and the preview are re-read.
+2. `X-Frame-Options: SAMEORIGIN` only forbids framing by *other* sites. The preview comes from the same site (`/files/etls/facility-letters/{id}/letter-preview.pdf`), passed through from the API.
 
 ### Step 9e
 1. The applicant left the HS code blank. What does the desk see about the cement receipt, and why not simply "not needed"?
