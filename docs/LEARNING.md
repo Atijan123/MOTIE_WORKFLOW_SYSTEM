@@ -16,6 +16,21 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 9e — Staff screen S2: the ETLS desk's checks (2026-10-26)
+Chunk 2, step 9, part 5 of 8.
+
+**Built** (frontend/components/staff/DeskChecks.tsx, docs/design/Desk.dc.html), in the case panel for whoever can Verify:
+- **On hold:** an open duplicate-certificate flag shows its message and the earlier cases using the same number, each with its reference (a link to it), importer, status and date (`GET /etls/facility-letters/{id}/duplicates`). "Clear flag and continue" needs a written finding (`POST /cases/{id}/flags/{flag_id}/resolve`). Or the desk rejects or returns the application below, and that reason clears the flag (8d, 8l).
+- **HS code:** the applicant's code (or "Applicant left this blank") in a box to confirm or correct (`POST /etls/facility-letters/{id}/hs-code`), and whether the cement receipt is needed for it: "decided once you confirm the code" until then.
+- **The ECOWAS ETLS list ticks**, each a recorded statement with "Mark as checked" or "Undo" (`PUT /cases/{id}/checklist/{code}`).
+- **"Verify and send to PS"** stays disabled, with the reasons under it, until the flag is cleared, the code confirmed, both ticks done, the documents complete and the certificates within six months (all from `blocked_by`). "Return to applicant" and "Reject application" (red) sit beside it.
+
+**Files:** frontend/components/staff/DeskChecks.tsx, frontend/components/staff/CasePanel.tsx (`canVerify`), frontend/app/staff/actions.ts (`resolveFlag()`, `confirmHsCode()`, `setTick()`)
+**Try it:**
+- Take a case past Records (9d), log in as `desk@motie.test` and open it. Verify lists four reasons; confirm the code and tick both lines, and it's enabled.
+- Submit two applications with the same certificate number and accept both at Records: the second opens at the desk "On hold" with a link to the first.
+**New concepts:** none; see [Recorded ticks (attestations)](#recorded-ticks-attestations) and [Three answers: yes, no, not known yet](#three-answers-yes-no-not-known-yet).
+
 ### Step 9d — Staff screens: the queue, the case panel, and S1 (Records, with Outgoing) (2026-10-26)
 Chunk 2, step 9, part 4 of 8.
 
@@ -1706,6 +1721,8 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-26 | Buttons carry the workflow's move names, with friendlier wording for a few ("Accept: originals received") in `LABELS` in frontend/components/staff/Actions.tsx | only the workflow's names | The mock-ups' wording is clearer for some moves; unknown moves still show their own name, so a new workflow works without frontend changes. |
 | 2026-10-26 | Downloads through a frontend route with an allow-list of path shapes | a general "pass anything to the API" route | A general pass-through would let any page call any API endpoint with the user's login. Four patterns are easy to review. |
 | 2026-10-26 | After "Mark sent to GRA", go back to Outgoing with the confirmation on the page | a message inside the row's form | The row leaves the table once sent, so a message inside it would vanish with it (found by the walk-through in 9h). |
+| 2026-10-26 | The desk's checks show to whoever has a "Verify" move, not to the desk post by name | check for `etls_desk_officer` in the frontend | Approvals attach to posts and stand-ins (CLAUDE.md): someone acting for the desk needs the same tools. |
+| 2026-10-26 | Each tick is its own small form ("Mark as checked" / "Undo") | checkboxes saved with one button | Each tick is a recorded statement with its own time and officer (step 8d); one click, one record. |
 
 ## 4. Open questions
 
@@ -1764,6 +1781,14 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 9e
+1. The applicant left the HS code blank. What does the desk see about the cement receipt, and why not simply "not needed"?
+2. A case is on hold for a duplicate certificate. Name the two ways the desk can deal with it on this screen, and what each leaves in the record.
+
+#### Show answers
+1. "Cement receipt: decided once you confirm the code." The documents checklist answers `applies: null` (not known) until a code is confirmed (8d), because the rule reads only the confirmed code. "Not needed" would be a guess.
+2. "Clear flag and continue" with a written finding: the flag is resolved with that finding, and the desk can go on to Verify. Or Reject / Return to applicant below: the move's reason (the minute, or else the message) resolves the flag, recorded as "Reject: ..." or "Return to applicant: ...", with `by_move` in the audit row.
 
 ### Step 9d
 1. The PS is away and the DPS opens a verified case. Why do they get the Sign button, and what will the history say after they sign?

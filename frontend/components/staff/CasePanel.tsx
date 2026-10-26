@@ -6,6 +6,7 @@ import { goods, hsCode } from "@/lib/labels";
 import type { Case, FacilityLetter, HistoryEvent, Requirement } from "@/lib/types";
 
 import { Actions } from "./Actions";
+import { DeskChecks } from "./DeskChecks";
 import { Documents } from "./Documents";
 import { History } from "./History";
 
@@ -21,6 +22,9 @@ export async function CasePanel({ id }: { id: number }) {
   const step = kase.status.code;
   // Records' tick: whoever may accept the originals (the API checks it again).
   const canSeeOriginals = kase.available_actions.some((a) => a.to_status === "originals_received" && step === "submitted");
+  // The desk's checks (S2) show to whoever can verify: the post holder, or
+  // someone acting for them.
+  const canVerify = kase.available_actions.some((a) => a.to_status === "verified");
 
   return (
     <div className="col-main">
@@ -45,6 +49,7 @@ export async function CasePanel({ id }: { id: number }) {
         ) : null}
         {letter ? <Summary letter={letter} /> : null}
         <Documents caseId={id} requirements={documents} canSeeOriginals={canSeeOriginals} />
+        {letter && canVerify ? <DeskChecks caseId={id} letter={letter} documents={documents} /> : null}
         <Actions caseId={id} actions={kase.available_actions} />
       </section>
       <History events={history} />

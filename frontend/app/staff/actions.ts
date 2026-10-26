@@ -40,6 +40,36 @@ export async function markOriginalSeen(caseId: number, documentId: number, _: Fo
   return { done: "Recorded: original seen in person." };
 }
 
+export async function resolveFlag(caseId: number, flagId: number, _: FormState, data: FormData): Promise<FormState> {
+  try {
+    await api(`/cases/${caseId}/flags/${flagId}/resolve`, { method: "POST", json: { resolution: text(data, "resolution") } });
+  } catch (error) {
+    return failed(error);
+  }
+  revalidatePath("/staff");
+  return { done: "Flag cleared." };
+}
+
+export async function confirmHsCode(caseId: number, _: FormState, data: FormData): Promise<FormState> {
+  try {
+    await api(`/etls/facility-letters/${caseId}/hs-code`, { method: "POST", json: { hs_code: text(data, "hs_code") } });
+  } catch (error) {
+    return failed(error);
+  }
+  revalidatePath("/staff");
+  return { done: "HS code confirmed." };
+}
+
+export async function setTick(caseId: number, code: string, ticked: boolean, _: FormState): Promise<FormState> {
+  try {
+    await api(`/cases/${caseId}/checklist/${code}`, { method: "PUT", json: { ticked } });
+  } catch (error) {
+    return failed(error);
+  }
+  revalidatePath("/staff");
+  return {};
+}
+
 /** Records' "Mark sent to GRA", with the dispatch date (Outgoing tab). */
 export async function markSentToGra(caseId: number, _: FormState, data: FormData): Promise<FormState> {
   const dispatchedOn = text(data, "dispatched_on");
