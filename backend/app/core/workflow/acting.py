@@ -14,7 +14,7 @@ banner says exactly what the buttons will allow.
 from dataclasses import dataclass, field
 from datetime import date
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.identity.models import Position, User, position_holders
@@ -197,6 +197,17 @@ async def cover_for_me(session: AsyncSession, user: User) -> list[CoverForPost]:
 
 
 @dataclass
+class WhoActs:
+    """Who takes an absent person's files, for one or more services."""
+
+    position: str
+    title: str
+    holders: list[str]  # names of the people at work in that post
+    basis: str  # "delegation", "succession", or "same_post" (another holder of their own post is at work)
+    workflows: list[str] | None  # None = every service
+
+
+@dataclass
 class AbsenceView:
     id: int
     person: str
@@ -205,11 +216,75 @@ class AbsenceView:
     ends_on: date
     reason: str | None  # only for the person themselves and for recorders
     may_cancel: bool  # the same rule as cancel_absence(), so the screen offers only what works
+    recorded_by: str  # name of whoever entered it
+    recorded_by_self: bool
+    who_acts: list[WhoActs]  # empty: nobody (no delegation, nobody in the succession order at work)
+
+
+async def _away_on(session: AsyncSession, on: date) -> set[int]:
+    """Users with an absence covering this day."""
+    return set(
+        await session.scalars(
+            select(Absence.user_id).where(
+                Absence.cancelled_at.is_(None), Absence.starts_on <= on, Absence.ends_on >= on
+            )
+        )
+    )
+
+
+async def _who_acts(
+    session: AsyncSession,
+    person: User,
+    on: date,
+    away: set[int],
+    holders: dict[int, list[int]],
+    workflows: list[Workflow],
+) -> list[tuple[int, str, list[str] | None]]:
+    """(position id, basis, workflow codes or None) for each stand-in on day `on`.
+
+    The engine's rules, for a given day instead of today: a delegation from the
+    post comes first (delegation.is_delegated_away()); otherwise the first post
+    in the succession order with a holder at work (succession.acting_successor()).
+    """
+    covered: dict[tuple[int, str], list[str]] = {}
+    for post in sorted(person.positions, key=lambda p: p.id):
+        if any(u != person.id and u not in away for u in holders.get(post.id, [])):
+            covered[(post.id, "same_post")] = [w.code for w in workflows]
+            continue
+        for wf in workflows:
+            delegation = await session.scalar(
+                select(Delegation)
+                .where(
+                    Delegation.from_position_id == post.id,
+                    Delegation.revoked_at.is_(None),
+                    Delegation.starts_on <= on,
+                    Delegation.ends_on >= on,
+                    or_(Delegation.workflow_id.is_(None), Delegation.workflow_id == wf.id),
+                )
+                .order_by(Delegation.id)
+                .limit(1)
+            )
+            if delegation:
+                covered.setdefault((delegation.to_position_id, "delegation"), []).append(wf.code)
+                continue
+            for successor in await succession_order(session, post.id, wf.id):
+                if any(u not in away for u in holders.get(successor, [])):
+                    covered.setdefault((successor, "succession"), []).append(wf.code)
+                    break
+    every = {w.code for w in workflows}
+    return [
+        (position_id, basis, None if set(codes) == every else codes)
+        for (position_id, basis), codes in covered.items()
+    ]
 
 
 async def current_absences(session: AsyncSession, user: User) -> list[AbsenceView]:
     """Everyone away now or later, soonest first. Reasons can be personal (sick
-    leave), so other staff see who and when, not why."""
+    leave), so other staff see who and when, not why.
+
+    "Who acts" is worked out for the absence's first day, or today if it has
+    started: later absences or delegations may change it after that.
+    """
     absences = list(
         await session.scalars(
             select(Absence)
@@ -217,23 +292,54 @@ async def current_absences(session: AsyncSession, user: User) -> list[AbsenceVie
             .order_by(Absence.starts_on, Absence.id)
         )
     )
-    people = {
-        u.id: u
-        for u in await session.scalars(select(User).where(User.id.in_({a.user_id for a in absences})))
-    }
+    if not absences:
+        return []
+    positions = {p.id: p for p in await session.scalars(select(Position))}
+    workflows = list(await session.scalars(select(Workflow).order_by(Workflow.id)))
+    holders: dict[int, list[int]] = {}
+    for row in (await session.execute(select(position_holders.c.position_id, position_holders.c.user_id))).all():
+        holders.setdefault(row.position_id, []).append(row.user_id)
+    user_ids = {a.user_id for a in absences} | {a.recorded_by for a in absences}
+    user_ids |= {u for ids in holders.values() for u in ids}
+    people = {u.id: u for u in await session.scalars(select(User).where(User.id.in_(user_ids)))}
     may_see_reasons = may_record_for_others(user)
-    return [
-        AbsenceView(
-            id=a.id,
-            person=people[a.user_id].full_name,
-            posts=sorted(p.title for p in people[a.user_id].positions),
-            starts_on=a.starts_on,
-            ends_on=a.ends_on,
-            reason=a.reason if may_see_reasons or a.user_id == user.id or a.recorded_by == user.id else None,
-            may_cancel=a.user_id == user.id or may_see_reasons,
+
+    away_cache: dict[date, set[int]] = {}
+    views = []
+    for a in absences:
+        on = max(a.starts_on, today())
+        if on not in away_cache:
+            away_cache[on] = await _away_on(session, on)
+        away = away_cache[on]
+        stand_ins = await _who_acts(session, people[a.user_id], on, away, holders, workflows)
+        views.append(
+            AbsenceView(
+                id=a.id,
+                person=people[a.user_id].full_name,
+                posts=sorted(p.title for p in people[a.user_id].positions),
+                starts_on=a.starts_on,
+                ends_on=a.ends_on,
+                reason=a.reason if may_see_reasons or a.user_id == user.id or a.recorded_by == user.id else None,
+                may_cancel=a.user_id == user.id or may_see_reasons,
+                recorded_by=people[a.recorded_by].full_name,
+                recorded_by_self=a.recorded_by == a.user_id,
+                who_acts=[
+                    WhoActs(
+                        position=positions[position_id].code,
+                        title=positions[position_id].title,
+                        holders=sorted(
+                            people[u].full_name
+                            for u in holders.get(position_id, [])
+                            if u not in away and u != a.user_id
+                        ),
+                        basis=basis,
+                        workflows=codes,
+                    )
+                    for position_id, basis, codes in stand_ins
+                ],
+            )
         )
-        for a in absences
-    ]
+    return views
 
 
 @dataclass

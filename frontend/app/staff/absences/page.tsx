@@ -154,6 +154,9 @@ export default async function Absences() {
         <h2 className="card-head" id="current">
           Current and upcoming absences
         </h2>
+        <p className="small muted" style={{ padding: "12px 16px 0" }}>
+          Who acts is worked out for the first day of each absence, or today if it has started.
+        </p>
         {absences.length ? (
           <div className="table-wrap">
             <table className="table">
@@ -162,6 +165,8 @@ export default async function Absences() {
                   <th>Who</th>
                   <th>Post</th>
                   <th>Dates</th>
+                  <th>Who acts</th>
+                  <th>Recorded by</th>
                   {anyReason ? <th>Reason</th> : null}
                   <th>
                     <span className="visually-hidden">Actions</span>
@@ -174,6 +179,10 @@ export default async function Absences() {
                     <td>{a.person}</td>
                     <td>{a.posts.join(", ")}</td>
                     <td>{dayRange(a.starts_on, a.ends_on)}</td>
+                    <td>
+                      <WhoActs absence={a} workflowName={workflowName} />
+                    </td>
+                    <td>{a.recorded_by_self ? "Themselves" : a.recorded_by}</td>
                     {anyReason ? <td>{a.reason ?? ""}</td> : null}
                     <td>
                       {a.may_cancel ? (
@@ -194,6 +203,31 @@ export default async function Absences() {
         )}
       </section>
     </>
+  );
+}
+
+const BASIS: Record<AbsenceView["who_acts"][number]["basis"], string> = {
+  delegation: "delegation",
+  succession: "succession",
+  same_post: "same post",
+};
+
+/** "Deputy Permanent Secretary, … (Dev Deputy PS), succession", one line per stand-in. */
+function WhoActs({ absence, workflowName }: { absence: AbsenceView; workflowName: (code: string | null) => string }) {
+  if (!absence.who_acts.length) return <span className="warn-text">Nobody at work in the succession order</span>;
+  return (
+    <div className="stack">
+      {absence.who_acts.map((w) => (
+        <span key={`${w.position}-${w.basis}`}>
+          {w.title}
+          {w.holders.length ? ` (${w.holders.join(", ")})` : ""}
+          <span className="muted">
+            , {BASIS[w.basis]}
+            {w.workflows ? `, for ${w.workflows.map(workflowName).join(" and ")}` : ""}
+          </span>
+        </span>
+      ))}
+    </div>
   );
 }
 

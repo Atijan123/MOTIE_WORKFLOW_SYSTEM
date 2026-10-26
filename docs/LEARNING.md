@@ -16,6 +16,27 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 9i — S11: "Who acts" and "Recorded by" in the absences list (2026-10-26)
+A follow-up to 9g, as in docs/design/Absences.dc.html.
+
+**Built:**
+- **Two new columns** in "Current and upcoming absences" (frontend/app/staff/absences/page.tsx):
+  - **Who acts:** for each stand-in, the post, the people at work in it, and why: "Deputy Permanent Secretary, Administration and Finance (Dev Deputy PS), succession", or "Permanent Secretary (Dev Permanent Secretary), delegation, for ETLS application". When the answer differs by service, there's a line per stand-in naming the services. If nobody in the succession order is at work, it says so in orange.
+  - **Recorded by:** "Themselves", or the name of the recorder who entered it.
+- **`GET /absences/current`** gives each row `who_acts` (`position`, `title`, `holders`, `basis`, `workflows`), `recorded_by` and `recorded_by_self`.
+- **Who acts follows the engine's rules,** worked out for the absence's **first day** (or today, if it has already started):
+  1. if another holder of the same post is at work, they carry on ("same post");
+  2. otherwise a delegation from the post in force that day, for that service, comes first;
+  3. otherwise the first post in the succession order with a holder at work that day. A stand-in who is away too is skipped.
+  The page says that it's the first day's answer: an absence or delegation recorded later can change who acts on the following days.
+
+**Files:** backend/app/core/workflow/acting.py (`current_absences()`, `_who_acts()`, `_away_on()`, `WhoActs`), backend/app/core/workflow/schemas.py (`WhoActsOut`), backend/tests/core/test_acting_views.py, frontend/app/staff/absences/page.tsx (`WhoActs`), frontend/lib/types.ts, frontend/e2e/tests/s11-absences.spec.ts
+**Try it:**
+- As `ps@motie.test`, record an absence: the row says the DPS acts, by succession, and "Themselves".
+- As `dps@motie.test`, record an absence for today only; then as the PS, one starting the day after tomorrow. The PS's row still names the DPS, who is back by then. Record the PS's absence for today instead: the DPS is skipped.
+- `docker compose run --rm tools pytest tests/core/test_acting_views.py -v` and `docker compose run --rm e2e npx playwright test tests/s11-absences.spec.ts`
+**New concepts:** none; see [Succession (acting for an absent post)](#succession-acting-for-an-absent-post).
+
 ### Step 9h — Browser walk-throughs with Playwright; chunk 2 is done (2026-10-26)
 Chunk 2, step 9, part 8 of 8.
 
@@ -1794,6 +1815,9 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-26 | Its own folder and image (frontend/e2e/), not in the web app's dependencies | add it to frontend/package.json | The web image stays small and never ships a browser; the tests have their own lockfile. |
 | 2026-10-26 | A slim image (Node + Chromium headless shell) | Microsoft's Playwright image (every browser, ~2 GB) | Disk space is tight on this machine; one browser is enough for these journeys. |
 | 2026-10-26 | Tests run against the dev stack and leave their cases in the dev database | reset the database before each run | Resetting takes minutes and would wipe your own test data. Unique certificate numbers keep runs apart; `scripts/reset-dev.sh` clears the pile when you want. |
+| 2026-10-26 | "Who acts" is the answer for the absence's first day (or today) | an answer per day of the absence; only today's | One line per stand-in is readable. Today's answer would be wrong for future absences, which are most of the list; a day-by-day answer would be long and rarely differs. The page says which day it describes. |
+| 2026-10-26 | Who acts is computed in acting.py with the engine's order (same post, delegation, succession), for a given day | call the engine's `acting_successor()` | The engine's functions only answer for today; the list needs future days. Tests cover the cases where the two could drift apart (stand-in away too, a delegation for one service). |
+| 2026-10-26 | "Recorded by" shows "Themselves" or the recorder's name | the recorder's post title, as in the mock-up | Recorders may hold no post (like `recorder@motie.test`); the name is always there, and the audit log has the rest. |
 
 ## 4. Open questions
 
@@ -1852,6 +1876,16 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 9i
+1. The PS is away from Monday to Friday; the DPS is away on Monday only. Who does the list name for the PS's absence, if you look on Sunday? And on Wednesday?
+2. The Minister delegated to the PS for ETLS applications only, and is away. Why does the row have two lines?
+3. Why couldn't `current_absences()` simply call the engine's `acting_successor()`?
+
+#### Show answers
+1. On Sunday the absence hasn't started, so it's worked out for Monday: the DPS is away then, so the next post in the PS's line with someone at work (or "Nobody" if there's none). On Wednesday the absence has started, so it's worked out for today, Wednesday: the DPS is back, and is named.
+2. The delegation covers one service; for the others the succession order still applies. `_who_acts()` answers per workflow and groups the answers: "Permanent Secretary, delegation, for ETLS application", and the succession stand-in for the remaining services.
+3. `acting_successor()` and `is_delegated_away()` only look at today (`absences_today()`, `today()`). Most rows are future absences, so the list needs the same rules for another day: `_who_acts()` takes the day as a parameter.
 
 ### Step 9h
 1. Why does the walk-through use a new certificate number on every run, and what would happen on the second run if it didn't?

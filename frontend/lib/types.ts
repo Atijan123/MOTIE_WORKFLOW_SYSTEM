@@ -146,6 +146,10 @@ export type AbsenceView = {
   ends_on: string;
   reason: string | null;
   may_cancel: boolean;
+  recorded_by: string;
+  recorded_by_self: boolean;
+  // Worked out for the absence's first day (or today, if it has started).
+  who_acts: { position: string; title: string; holders: string[]; basis: "delegation" | "succession" | "same_post"; workflows: string[] | null }[];
 };
 
 export type Choices = {

@@ -248,6 +248,14 @@ class CoverForPostOut(BaseModel):
     succession: list[SuccessionLineOut]
 
 
+class WhoActsOut(BaseModel):
+    position: str
+    title: str
+    holders: list[str]  # the people at work in that post
+    basis: str  # "delegation", "succession" or "same_post"
+    workflows: list[str] | None  # null = every service
+
+
 class AbsenceViewOut(BaseModel):
     """An absence as all staff see it (S11). `reason` only for the person and for recorders."""
 
@@ -258,6 +266,9 @@ class AbsenceViewOut(BaseModel):
     ends_on: date
     reason: str | None
     may_cancel: bool  # your own absence, or you're a recorder: the cancel button shows
+    recorded_by: str  # name of whoever entered it
+    recorded_by_self: bool
+    who_acts: list[WhoActsOut]  # on the first day (or today, if started); empty = nobody
 
 
 class HolderOut(BaseModel):

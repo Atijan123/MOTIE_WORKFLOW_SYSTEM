@@ -18,6 +18,8 @@ test("the PS records an absence, the DPS acts for them, and the PS ends it early
   const list = ps.getByRole("region", { name: "Current and upcoming absences" });
   const mine = list.getByRole("row", { name: /Dev Permanent Secretary/ });
   await expect(mine).toContainText("Regional trade meeting"); // the person sees their own reason
+  await expect(mine).toContainText("Deputy Permanent Secretary, Administration and Finance (Dev Deputy PS), succession");
+  await expect(mine).toContainText("Themselves");
 
   // Everyone on every screen: the stand-in sees the banner, and not the reason.
   const dps = await loginAs(browser, "dps@motie.test");
@@ -46,11 +48,13 @@ test("the Minister delegates to the PS for one service, then revokes it", async 
 
   const delegation = minister.getByRole("form", { name: "Delegation to the Permanent Secretary" });
   await expect(delegation).toContainText("delegated to the Permanent Secretary");
+  const row = minister.getByRole("row", { name: /Dev Minister/ });
+  await expect(row).toContainText("Permanent Secretary (Dev Permanent Secretary), delegation, for ETLS application");
   await delegation.getByRole("button", { name: "Revoke" }).click();
   await expect(delegation).toHaveCount(0);
 
-  // The absence itself stays until cancelled.
-  const row = minister.getByRole("row", { name: /Dev Minister/ });
+  // The absence itself stays until cancelled, back on the succession order.
+  await expect(row).not.toContainText("delegation");
   await row.getByRole("button", { name: "Cancel" }).click();
   await expect(row).toHaveCount(0);
 });
@@ -70,6 +74,7 @@ test("a recorder records someone else's absence", async ({ browser }) => {
 
   const row = recorder.getByRole("row", { name: /Dev Director of Industry/ });
   await expect(row).toContainText("Annual leave");
+  await expect(row).toContainText("Dev Absence Recorder");
   await row.getByRole("button", { name: "Cancel" }).click();
   await expect(row).toHaveCount(0);
 });

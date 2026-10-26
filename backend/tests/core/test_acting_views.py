@@ -172,3 +172,78 @@ async def test_the_options_list_posts_with_their_holders_and_the_workflows(act, 
 
 async def test_applicants_cannot_list_the_posts(act, people):
     assert (await act(people["applicant"], "get", "/acting/options")).status_code == 403
+
+
+# --- Who acts, and who recorded it (the S11 list's columns) ---------------------
+
+
+async def _row(act, viewer, absence_id) -> dict:
+    rows = (await act(viewer, "get", "/absences/current")).json()
+    [row] = [r for r in rows if r["id"] == absence_id]
+    return row
+
+
+async def test_the_list_says_who_acts_by_succession_and_who_recorded_it(act, people):
+    absence = await _away(act, people["permanent_secretary"])
+    row = await _row(act, people["desk"], absence["id"])
+    assert row["who_acts"] == [
+        {
+            "position": "dps_admin_finance",
+            "title": "Deputy Permanent Secretary, Administration and Finance",
+            "holders": [people["dps"].full_name],
+            "basis": "succession",
+            "workflows": None,  # the PS's line covers every service
+        }
+    ]
+    assert (row["recorded_by"], row["recorded_by_self"]) == (people["permanent_secretary"].full_name, True)
+
+
+async def test_a_delegation_comes_before_the_succession_order(act, people):
+    response = await act(
+        people["minister"], "post", "/delegations",
+        json={
+            "from_position": "minister",
+            "to_position": "permanent_secretary",
+            "starts_on": _days(0),
+            "ends_on": _days(3),
+            "workflow": "etls_application",
+        },
+    )
+    assert response.status_code == 201, response.text
+    absence = await _away(act, people["minister"])
+    row = await _row(act, people["desk"], absence["id"])
+    delegated = [w for w in row["who_acts"] if w["basis"] == "delegation"]
+    assert delegated == [
+        {
+            "position": "permanent_secretary",
+            "title": "Permanent Secretary",
+            "holders": [people["permanent_secretary"].full_name],
+            "basis": "delegation",
+            "workflows": ["etls_application"],  # only that service; the others follow the succession order
+        }
+    ]
+
+
+async def test_a_stand_in_who_is_away_too_is_skipped(act, people):
+    await _away(act, people["dps"])
+    absence = await _away(act, people["permanent_secretary"])
+    row = await _row(act, people["desk"], absence["id"])
+    assert "dps_admin_finance" not in [w["position"] for w in row["who_acts"]]
+
+
+async def test_who_acts_is_worked_out_for_the_first_day_of_a_later_absence(act, people):
+    await _away(act, people["dps"], start=0, end=0)  # back tomorrow
+    absence = await _away(act, people["permanent_secretary"], start=2, end=4)
+    row = await _row(act, people["desk"], absence["id"])
+    assert [w["position"] for w in row["who_acts"]] == ["dps_admin_finance"]
+
+
+async def test_an_absence_entered_by_a_recorder_says_so(act, people, make_user):
+    recorder = await make_user("officer", "absence_recorder")
+    response = await act(
+        recorder, "post", "/absences",
+        json={"user_id": people["director"].id, "starts_on": _days(1), "ends_on": _days(2)},
+    )
+    assert response.status_code == 201, response.text
+    row = await _row(act, people["desk"], response.json()["id"])
+    assert (row["recorded_by"], row["recorded_by_self"]) == (recorder.full_name, False)
