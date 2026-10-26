@@ -1,7 +1,7 @@
 # Gaps: backend vs. the screen spec
 
 An audit of the backend against docs/SCREENS.md. First written at commit `2d0bc42` (step 6l), revised 2026-10-20 for the updated SCREENS.md.
-**Chunk 1 (shared foundations, steps 7a–7f) is done**, and the marks below include it (2026-10-24). Chunk 2's backend (steps 8a–8h, plus the fixes 8i–8l) is done too (2026-10-25); its frontend is next. Each step updated the marks it changed.
+**Chunk 1 (shared foundations, steps 7a–7f) is done**, and the marks below include it (2026-10-24). Chunk 2 is done too: its backend in steps 8a–8m (2026-10-25) and its frontend in steps 9a–9h (2026-10-26). Each step updated the marks it changed.
 
 **How to read it.** Each item is marked:
 - **Built**: the backend supports it as the spec describes, with the file or endpoint.
@@ -144,7 +144,7 @@ Built route (0015–0030): `draft` →(applicant: Submit)→ `submitted` →(Rec
 | Delegate to another post (dates, all workflows or one) | **Built** | `POST /delegations` (core/workflow/delegation.py); revoke with `POST /delegations/{id}/revoke`. |
 | **Shows who will act for me** under the succession order | **Built** | `GET /acting/for-me` (core/workflow/acting.py). |
 | Record for someone else (`absence_recorder` role `[CONFIRM: PS's office, HR]`), audited as "recorded by" | **Built** | `POST /absences` with `user_id`; the audit row records `recorded_by` and `on_behalf` (step 5c). |
-| **List of current and upcoming absences**, with revoke for delegations | **Built** | `GET /absences/current` (everyone away now or later, for all staff); revoke ids in `GET /acting/for-me`. |
+| **List of current and upcoming absences**, with revoke for delegations | **Built** | `GET /absences/current` (everyone away now or later, for all staff, with `may_cancel`, 9g); revoke ids in `GET /acting/for-me`. The form's choices (posts with holders, workflows): `GET /acting/options` (9g). Screen: frontend/app/staff/absences/page.tsx. |
 | (Banner, all screens) "You are acting for …" | **Built** | `GET /acting`. |
 
 ---
@@ -222,7 +222,7 @@ Each chunk is a few small steps, each with tests, a LEARNING.md entry and its ow
 6. **Acting and absences views** (banner, S11): "for which posts am I acting now, and until when", "who acts for my posts", and current and upcoming absences visible to all staff.
 
 ### Chunk 2: facility letter screens end to end
-Backend steps 8a–8h are **done** (2026-10-25), with fixes in 8i–8l (half-filled drafts, set-password links for walk-ins, the registry reference on a real server, returning while held); see the build log in LEARNING.md. The frontend (step 9) comes next.
+**Done.** Backend steps 8a–8h (2026-10-25), with fixes in 8i–8m (half-filled drafts, set-password links for walk-ins, the registry reference on a real server, returning while held, scrubbing sent links); the frontend in steps 9a–9h (2026-10-26), with Playwright walk-throughs in frontend/e2e/. See the build log in LEARNING.md.
 1. **Drafts and submit** (C4): `draft` status, editable form, submit with the missing-documents list; the reference is assigned on submit.
 2. **Returns** (C3): `returned` status, applicant message + internal minute, from Records (S1) and the desk (S2); resubmit. Reason required on Reject.
 3. **Certificate dates and validity** (C10): issue dates on the form; Verify blocked by a certificate over six months old; a warning (not a block) at submission for one expiring within 30 days.

@@ -16,6 +16,25 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 9h — Browser walk-throughs with Playwright; chunk 2 is done (2026-10-26)
+Chunk 2, step 9, part 8 of 8.
+
+**Built:**
+- **frontend/e2e/**, end-to-end tests that drive a real Chromium through the running app, the way people will:
+  - **tests/facility-letter.spec.ts**: the applicant fills in the form, saves, sees Submit disabled with "Invoice is missing", uploads the five documents and submits. Records ticks the original certificate and accepts. The desk confirms the HS code, ticks the ECOWAS list and verifies. The PS reads the checks and the preview and signs. Records downloads the letter (checks it's a PDF) and marks it sent to GRA. The applicant sees **"Letter sent to GRA"** on A1 and on the phone page A3.
+  - **tests/s11-absences.spec.ts**: the PS records an absence, the DPS sees the acting banner (and not the reason), the PS ends it early and the banner goes; the Minister delegates to the PS for one service and revokes it; the recorder records and cancels an absence for the Director. Each test ends what it started.
+- **The Compose service `e2e`** (profile `tools`) runs them against `http://web:3000`. Its image (frontend/e2e/Dockerfile) holds only Chromium's headless shell, about a quarter of the size of Microsoft's image with every browser.
+- **What the walk-through found, fixed in the steps above before committing:** the desk's checks and the PS's signing view were written but never shown in the case panel; two confirmations vanished with the button or row they were in (9d); the HS code showed as bare digits (9b); a select box's name included its chosen option (9g); and port 3000 was taken on this machine (9a).
+- Each run makes new cases with a unique certificate number, so runs don't trip the duplicate flag. They pile up in the dev database; `bash scripts/reset-dev.sh` clears them.
+
+**Files:** frontend/e2e/package.json (`@playwright/test` 1.64.0), frontend/e2e/Dockerfile, frontend/e2e/playwright.config.ts, frontend/e2e/tests/helpers.ts (`loginAs()`, `pdf()`), frontend/e2e/tests/facility-letter.spec.ts, frontend/e2e/tests/s11-absences.spec.ts, docker-compose.yml (`e2e`), docs/GAPS.md (chunk 2 done), CLAUDE.md (commands)
+**Try it:**
+- `docker compose up -d web`, then `docker compose run --rm e2e`. The first run takes a few minutes while `next dev` compiles each page.
+- After a failure: screenshots and a trace are in frontend/e2e/test-results/. Open frontend/e2e/playwright-report/index.html in your browser, or drag a trace.zip onto https://trace.playwright.dev to replay the run step by step.
+- One file only: `docker compose run --rm e2e npx playwright test tests/s11-absences.spec.ts`
+**Chunk 2 is done:** the facility letter screens work end to end. Next is chunk 3 in docs/GAPS.md (ETLS approval: A4, A5, S4–S8).
+**New concepts:** End-to-end tests in a real browser
+
 ### Step 9g — Staff screen S11: absences and delegations (2026-10-26)
 Chunk 2, step 9, part 7 of 8.
 
@@ -1449,6 +1468,11 @@ Because the token is 256 random bits, a plain SHA-256 hash is enough. Passwords 
 **Here:** `startSession()` in frontend/lib/session.ts sets the cookie; `apiFetch()` in frontend/lib/api.ts reads it and sends `Authorization: Bearer ...`; `API_URL` in docker-compose.yml's `web` service.
 **Learn more:** [OWASP Session Management Cheat Sheet, "Cookies"](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html#cookies)
 
+### End-to-end tests in a real browser
+**What:** the backend tests (pytest) check the API one call at a time. They can't see whether the screen calls the right endpoint, shows the button, or keeps the message on the page. An **end-to-end test** drives a real browser through the whole running system (Next.js, API, database) like a person: open a page, type, click, and check what appears. **Playwright** does this. Good habits: find things the way a person or screen reader would (`getByRole("button", { name: "Sign letter" })`, `getByLabel("Quantity")`) rather than by CSS class, so the tests also check that the page is accessible and survive restyling; let `expect(...)` wait for the page instead of sleeping; and give each test its own data (here, a unique certificate number) so runs don't depend on each other. They are slow (minutes, not seconds), so they cover the main journeys, and the details stay in the fast tests.
+**Here:** frontend/e2e/tests/facility-letter.spec.ts and s11-absences.spec.ts; `loginAs()` in frontend/e2e/tests/helpers.ts gives each person their own browser session (cookies); the `e2e` service in docker-compose.yml.
+**Learn more:** [Playwright docs: Writing tests](https://playwright.dev/docs/writing-tests) and [Locators](https://playwright.dev/docs/locators)
+
 ## 3. Decisions
 
 ### Confirmed by the Ministry
@@ -1766,6 +1790,10 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-26 | `GET /acting/options` lists every post with its holders, for staff only | reuse `/acting/for-me`; a general users endpoint | The forms need all posts (to delegate to) and post holders (to record for); nothing else lists them. Staff already see names and posts in case histories. |
 | 2026-10-26 | `may_cancel` comes from the API | the screen works out who may cancel | The rule lives in one place (`cancel_absence()`), and the screen can't offer a button the API will refuse. |
 | 2026-10-26 | The list has no "Who acts" or "Recorded by" column, unlike the mock-up | add both to `GET /absences/current` | SCREENS.md (which wins) asks for the list with revoke; who acts depends on the service and is shown to the person themselves above. Easy to add later if the Ministry wants it. |
+| 2026-10-26 | Playwright for browser tests (asked for by you) | Cypress; Selenium | Real Chromium, waits for the page by itself, finds elements by role and label, and runs headless in a container. |
+| 2026-10-26 | Its own folder and image (frontend/e2e/), not in the web app's dependencies | add it to frontend/package.json | The web image stays small and never ships a browser; the tests have their own lockfile. |
+| 2026-10-26 | A slim image (Node + Chromium headless shell) | Microsoft's Playwright image (every browser, ~2 GB) | Disk space is tight on this machine; one browser is enough for these journeys. |
+| 2026-10-26 | Tests run against the dev stack and leave their cases in the dev database | reset the database before each run | Resetting takes minutes and would wipe your own test data. Unique certificate numbers keep runs apart; `scripts/reset-dev.sh` clears the pile when you want. |
 
 ## 4. Open questions
 
@@ -1824,6 +1852,16 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 9h
+1. Why does the walk-through use a new certificate number on every run, and what would happen on the second run if it didn't?
+2. The tests find buttons with `getByRole("button", { name: "Verify and send to PS" })`, not by CSS class. Name two benefits.
+3. The walk-through found that the PS's signing view never appeared, yet the frontend typechecked and every backend test passed. Why did only the browser test catch it?
+
+#### Show answers
+1. So runs don't affect each other. With a fixed number, the second run's application would use a certificate already on an earlier case, raise the duplicate flag (8d), and the desk's Verify would stay disabled ("On hold"), so the test would fail at the desk.
+2. It checks what a person and a screen reader get (the button's accessible name), so an unlabelled control fails the test; and the test survives restyling, since class names can change freely.
+3. `Signing.tsx` was valid code that nothing rendered: the type checker doesn't complain about an unused component, and the API it calls worked. Only something that looks at the finished page, as a person would, notices the section is missing.
 
 ### Step 9g
 1. The desk officer opens Absences while the PS is away. What do they see of the PS's absence, and why no Cancel button?

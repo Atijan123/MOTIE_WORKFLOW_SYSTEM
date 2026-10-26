@@ -118,8 +118,26 @@ services:
       db:
         condition: service_healthy
 
+  e2e:
+    # Browser walk-throughs with Playwright (frontend/e2e/), against the running
+    # dev stack: `docker compose run --rm e2e`. Dev database only: they log in
+    # as the seeded dev users and create real cases.
+    profiles: ["tools"]
+    build:
+      context: ./frontend/e2e
+    environment:
+      BASE_URL: http://web:3000
+      DEV_SEED_PASSWORD: ${DEV_SEED_PASSWORD:-}
+    volumes:
+      - ./frontend/e2e:/e2e
+      # The image's own node_modules, not the host's.
+      - e2e_node_modules:/e2e/node_modules
+    depends_on:
+      - web
+
 volumes:
   pgdata:
   documents:
   web_node_modules:
   web_next:
+  e2e_node_modules:
