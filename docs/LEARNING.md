@@ -16,6 +16,27 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 9c — Applicant screen A2: the facility letter form, uploads and submit (2026-10-26)
+Chunk 2, step 9, part 3 of 8.
+
+**Built:**
+- **A2, the application** (`/applications/new`, then `/applications/{id}/edit`; docs/design/Apply.dc.html): 1. Importer, 2. Goods, 3. Exporter and approvals (with the certificates of origin and their issue dates), 4. Documents, then Submit.
+- **Nothing is stored until "Save draft"**, so opening the form and leaving makes no empty application. Any box may be empty on a draft (step 8i); what *is* typed must have the right shape, and the API's 422 errors come back as one readable line next to the field's label ("Quantity: ..."), with what was typed put back in the boxes.
+- **One spare row** for another product approval number or certificate. Fill it in and save, and a new spare row appears. No JavaScript is needed to add rows.
+- "1,200" is accepted as a quantity (the commas are taken out before it goes to the API).
+- **Documents:** one row per required document (`GET /cases/{id}/documents`), with Upload or Replace. The file goes through a server action to `POST /cases/{id}/documents/{type}`, which checks the type from the content (PDF, PNG or JPEG) and the size (10 MB). The receipt for cement imports shows as "needed only in some cases" until the Ministry confirms the HS code. The certificate of origin says "Bring the original to Records".
+- **Submit** is disabled until nothing is missing, and lists what's still to do, straight from the Submit action's `blocked_by` ("Invoice is missing", "Quantity is missing"). The 30-day expiry warning (step 8c) shows as "Please note".
+- A **returned** case opens in the same form with the Ministry's message on top, and the button reads "Resubmit application". Once submitted, the edit page sends the applicant to the status page.
+- Country and unit boxes suggest values (Senegal, Ghana…; bags, tonnes…) but take any text, as the API does. `[CONFIRM]` whether these should become fixed lists.
+
+**Files:** frontend/app/applications/ApplicationForm.tsx, frontend/app/applications/actions.ts (`saveDraft()`, `uploadDocument()`, `submitApplication()`), frontend/app/applications/new/page.tsx, frontend/app/applications/[id]/edit/page.tsx, frontend/lib/api.ts (`FIELD_LABELS`, `errorText()`)
+**Try it:**
+- As `applicant@motie.test`: "Apply for a facility letter", type a product only, "Save draft". The Submit box lists everything still missing.
+- Type `abc` as the quantity and save: "Not saved. Quantity: ..." and your other boxes keep what you typed.
+- Fill everything in, upload five small PDFs, and submit: A1 shows the new reference, `MOTIE/ETLS/FL/2026/....`
+- Try uploading a .txt renamed to .pdf: the API refuses it.
+**New concepts:** none; it's [Drafts and submission](#drafts-and-submission) and [Blocking checks and warnings](#blocking-checks-and-warnings) on a screen.
+
 ### Step 9b — Applicant screens A1 and A3: my applications and the status page (2026-10-26)
 Chunk 2, step 9, part 2 of 8.
 
@@ -1657,6 +1678,11 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-26 | `GET /auth/me` adds `position_titles` | a separate positions endpoint | One small field for the header, in the same order as `positions`. |
 | 2026-10-26 | The timeline's "steps ahead" are a fixed list in the frontend | an API endpoint for the usual route | The route rarely changes and is only a hint; what *happened* still comes from the API. If a module's route changes, `FACILITY_LETTER_STEPS` in frontend/lib/labels.ts must follow. |
 | 2026-10-26 | HS codes shown with dots ("2309.90"), stored as digits | show the digits | People and the form's own example write them with dots; the API already accepts either. |
+| 2026-10-26 | "Save draft" sends the whole form; extra approval numbers and certificates by a spare empty row | add/remove buttons in browser script | Works without JavaScript and with one code path. A second "Add" is one save away. |
+| 2026-10-26 | No draft is created by opening "Apply" | create a draft as soon as the page opens | Otherwise every curious click leaves an empty application in the Ministry's lists. |
+| 2026-10-26 | Uploads go through a server action, which passes the raw file to the API | a direct upload from the browser to the API | The browser can't reach the API and has no token (step 9a). The action's body limit is 11 MB (frontend/next.config.mjs), so the API's 10 MB check is the one that answers. |
+| 2026-10-26 | Submit doesn't save the form first ("Save the draft first if you changed anything above") | save and submit in one click | Two separate, simple actions; Submit then checks exactly what's stored. Worth revisiting if applicants trip over it. |
+| 2026-10-26 | Country and unit boxes suggest values but accept any text | fixed select lists | The API takes free text (step 6) and we don't have the agreed lists yet. The country suggestions leave out Burkina Faso, Mali and Niger, which left ECOWAS in 2025. `[CONFIRM]` |
 
 ## 4. Open questions
 
@@ -1710,10 +1736,21 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 - [ ] **Forgotten passwords:** the same links could serve "I forgot my password" for every applicant. Wanted? (Not built; it would need rate limiting so nobody can flood an inbox.)
 - [ ] **Email:** the Ministry's mail server (SMTP host, port, login) and sender address; the wording of the emails, and whether they should also be in French; whether staff should get emails too (e.g. a file waiting more than N days). See backend/app/core/notifications/.
 - [ ] **Email retries (ICT, not the Ministry):** is "8 attempts over about 4 hours, then stop" right, and who is told when an email is given up?
+- [ ] **Countries and units on the form:** should exporter country and unit be fixed lists? Which countries count (the ECOWAS members; Burkina Faso, Mali and Niger left in 2025), and which units does GRA expect? Now they are suggestions only. See `COUNTRIES` and `UNITS` in frontend/app/applications/ApplicationForm.tsx.
 
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 9c
+1. Where does the list "3 things still to do before you can submit" come from? What would you change to add a new required field?
+2. An applicant adds a third certificate. Walk through what happens, with no JavaScript on the page.
+3. Saving fails because the quantity is "abc". Why don't the other boxes go blank?
+
+#### Show answers
+1. From the Submit action's `blocked_by` in `GET /cases/{id}` (the check `etls_form_complete` and the documents check, step 8i). The screen only counts and lists them. A new required field is a backend change in `form_gaps()` (backend/app/modules/etls/service.py); the screen follows by itself.
+2. They fill in the empty spare row and press "Save draft". `formBody()` in frontend/app/applications/actions.ts sends every non-empty row; the page reloads from the API with three certificates and a new empty spare row.
+3. `saveDraft()` returns `values: typed(data)` with the error, and `ApplicationForm` shows those values instead of the stored ones when they are there.
 
 ### Step 9b
 1. A case was returned. Why does its timeline show no greyed-out steps ahead?
