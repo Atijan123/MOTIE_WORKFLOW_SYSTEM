@@ -16,6 +16,24 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 9b — Applicant screens A1 and A3: my applications and the status page (2026-10-26)
+Chunk 2, step 9, part 2 of 8.
+
+**Built:**
+- **A1, "ETLS services"** (`/applications`, docs/design/Main.dc.html): the three services (only the facility letter is live; the other two say "Coming soon"), any case returned to me with the Ministry's message and "Fix and resubmit", the table of my cases (`GET /cases`), and the selected case's timeline beside it.
+- **A3, one case on a phone** (`/applications/{id}`, Track.dc.html): the status in plain words with its explanation and any message, the timeline, and a link to continue a draft or fix a returned case.
+- **The timeline** (frontend/components/Timeline.tsx) shows the steps taken with their dates (`GET /cases/{id}/timeline`), the current one, and the usual steps still ahead, greyed out. The API only knows what has happened; the steps ahead are a fixed list in frontend/lib/labels.ts (`FACILITY_LETTER_STEPS`). A returned or rejected case shows no steps ahead.
+- Only applicant labels are shown: never the internal status names or staff names (the API gives applicants `null` for those anyway, step 7a).
+- Staff who open `/applications` are sent to `/staff`, and applicants who open `/staff` to `/applications` (`requireUser()`); the API still checks every call.
+- `hsCode()` in frontend/lib/labels.ts writes the API's digits the way people do ("230990" → "2309.90"), for the screens that follow.
+
+**Files:** frontend/app/applications/layout.tsx, frontend/app/applications/page.tsx, frontend/app/applications/[id]/page.tsx, frontend/components/Timeline.tsx, frontend/lib/labels.ts (`stepsAhead()`, `pillClass()`, `goods()`, `hsCode()`), frontend/lib/labels.test.ts
+**Try it:**
+- Log in as `applicant@motie.test` at http://localhost:3001. With no cases yet, A1 says so. After step 9c you can make one; meanwhile, any case made through the API shows up.
+- Make the window narrow (or use the browser's phone view) and open a case's "Open on its own page".
+- `docker compose run --rm --no-deps web npm test` (the HS code formatter).
+**New concepts:** none.
+
 ### Step 9a — The frontend starts: login, set-password, dates (2026-10-26)
 Chunk 2, step 9 (the frontend), part 1 of 8.
 
@@ -1637,6 +1655,8 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-26 | Unit tests with Node's own test runner (`node --test`) | Jest or Vitest | No extra library for a few pure functions (dates, labels). The screens are tested in a real browser with Playwright (step 9h). |
 | 2026-10-26 | The web app on host port 3001 | 3000 | Another local Node project already used 3000 on this machine. `PUBLIC_BASE_URL` (links in emails) moved to 3001 with it. |
 | 2026-10-26 | `GET /auth/me` adds `position_titles` | a separate positions endpoint | One small field for the header, in the same order as `positions`. |
+| 2026-10-26 | The timeline's "steps ahead" are a fixed list in the frontend | an API endpoint for the usual route | The route rarely changes and is only a hint; what *happened* still comes from the API. If a module's route changes, `FACILITY_LETTER_STEPS` in frontend/lib/labels.ts must follow. |
+| 2026-10-26 | HS codes shown with dots ("2309.90"), stored as digits | show the digits | People and the form's own example write them with dots; the API already accepts either. |
 
 ## 4. Open questions
 
@@ -1694,6 +1714,16 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 9b
+1. A case was returned. Why does its timeline show no greyed-out steps ahead?
+2. Where does "Letter sent to GRA" on the timeline come from, and where do the greyed-out steps come from?
+3. An applicant types `/staff` in the address bar. What stops them seeing staff screens, and what would stop them if that check were missing?
+
+#### Show answers
+1. `stepsAhead()` only knows the normal route. "Returned: action needed" isn't on it, so it returns nothing: what comes next depends on the applicant.
+2. "Letter sent to GRA" is a line from `GET /cases/{id}/timeline`, built by the API from the audit log (step 7e). The greyed-out steps are `FACILITY_LETTER_STEPS` in frontend/lib/labels.ts, minus the ones already reached.
+3. `requireUser("staff")` in frontend/app/staff/layout.tsx (from step 9d) sends them to `/applications`. Without it, the API would still refuse: `GET /cases/queue` and the other staff endpoints answer 403 to applicants.
 
 ### Step 9a
 1. A script injected into a page tries to call the API with the user's login. Why can't it?
