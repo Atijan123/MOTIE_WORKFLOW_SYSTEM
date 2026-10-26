@@ -39,6 +39,7 @@ _ERROR_STATUS = {
     service.CommentRequired: status.HTTP_422_UNPROCESSABLE_ENTITY,
     service.MessageNotExpected: status.HTTP_422_UNPROCESSABLE_ENTITY,
     service.InvalidDate: status.HTTP_422_UNPROCESSABLE_ENTITY,
+    service.InvalidValue: status.HTTP_422_UNPROCESSABLE_ENTITY,  # not on its list
     service.UploadTooLarge: status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
     service.UnsupportedFileType: status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
 }

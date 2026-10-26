@@ -24,6 +24,7 @@ from app.core.workflow.errors import (  # noqa: F401  (re-exported: callers use 
     InvalidDate,
     InvalidDelegation,
     InvalidDocument,
+    InvalidValue,
     MessageNotExpected,
     NotFound,
     NotPermitted,

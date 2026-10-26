@@ -33,10 +33,10 @@ test("a facility letter goes from draft to Sent to GRA", async ({ browser }) => 
   await applicant.getByLabel("Address").fill("12 Kairaba Avenue, Serrekunda");
   await applicant.getByLabel("Product", { exact: true }).fill("Poultry feed");
   await applicant.getByLabel("Quantity").fill("1,200");
-  await applicant.getByLabel("Unit").fill("bags");
+  await applicant.getByLabel("Unit").selectOption("bags");
   await applicant.getByLabel("HS code (optional)").fill("2309.90");
   await applicant.getByLabel("Exporter", { exact: true }).fill("Dakar Agro SA");
-  await applicant.getByLabel("Country").fill("Senegal");
+  await applicant.getByLabel("Country").selectOption("Senegal");
   await applicant.getByLabel("Exporter’s ETLS approval number").fill("SN-ETLS-0042");
   await applicant.getByLabel("Product approval number 1").fill("SN-PA-0042-01");
   await applicant.getByLabel("Certificate 1 number").fill(certificate);

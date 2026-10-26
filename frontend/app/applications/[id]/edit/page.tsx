@@ -8,7 +8,7 @@ import { longDate } from "@/lib/dates";
 import type { Case, FacilityLetter, Requirement } from "@/lib/types";
 
 import { saveDraft, submitApplication, uploadDocument } from "../../actions";
-import { ApplicationForm } from "../../ApplicationForm";
+import { ApplicationForm, type FormOptions } from "../../ApplicationForm";
 
 export const metadata: Metadata = { title: "Your facility letter application" };
 
@@ -24,7 +24,11 @@ export default async function EditApplication({
   const id = Number((await params).id);
   const letter = await apiOrNull<FacilityLetter>(`/etls/facility-letters/${id}`);
   if (!letter) notFound();
-  const [kase, documents] = await Promise.all([api<Case>(`/cases/${id}`), api<Requirement[]>(`/cases/${id}/documents`)]);
+  const [kase, documents, options] = await Promise.all([
+    api<Case>(`/cases/${id}`),
+    api<Requirement[]>(`/cases/${id}/documents`),
+    api<FormOptions>("/etls/form-options"),
+  ]);
   if (!kase.status.editable) redirect(`/applications/${id}`);
   const { saved } = await searchParams;
 
@@ -54,7 +58,7 @@ export default async function EditApplication({
         </div>
       ) : null}
 
-      <ApplicationForm letter={letter} action={saveDraft.bind(null, id)}>
+      <ApplicationForm letter={letter} options={options} action={saveDraft.bind(null, id)}>
         <p className="small muted">
           A certificate is valid for six months from its issue date.
           {expiries.map((c) => ` ${c.number} is valid until ${longDate(c.expires_on!)}.`).join("")}

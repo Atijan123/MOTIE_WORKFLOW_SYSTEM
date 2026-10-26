@@ -210,3 +210,33 @@ class IssuedLetterOut(BaseModel):
     cancellation_reason: str | None
     sent_to_gra_on: date | None  # the dispatch date, once Records has sent it
     download_url: str
+
+
+class FormOptionsOut(BaseModel):
+    """What the form's Country and Unit boxes offer: the active entries, in order."""
+
+    countries: list[str]
+    units: list[str]
+
+
+class ListItemOut(BaseModel):
+    id: int
+    name: str
+    active: bool  # switched off: no longer offered, and refused on new saves
+    sort_order: int
+
+
+class ListsOut(BaseModel):
+    countries: list[ListItemOut]
+    units: list[ListItemOut]
+
+
+class NewListItem(BaseModel):
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
+
+
+class ListItemChange(BaseModel):
+    """Leave out what doesn't change."""
+
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)] | None = None
+    active: bool | None = None

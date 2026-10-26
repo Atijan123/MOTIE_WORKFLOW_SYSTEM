@@ -71,3 +71,7 @@ class MessageNotExpected(WorkflowError):
 
 class NotReady(WorkflowError):
     """The move is allowed, but one of its checks (e.g. documents complete) fails."""
+
+
+class InvalidValue(WorkflowError):
+    """A value isn't one of the allowed choices (e.g. a country not on the Ministry's list)."""

@@ -1,12 +1,13 @@
 from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.identity.deps import get_current_user
+from app.core.identity.deps import get_current_user, require_role
 from app.core.identity.models import User
 from app.core.workflow import router as workflow_router
 from app.core.workflow import service as workflow
 from app.core.workflow.schemas import CaseOut
 from app.db.session import get_session
+from app.modules.etls import choices
 from app.modules.etls import letter as facility_letter
 from app.modules.etls import service
 from app.modules.etls.models import FacilityLetter
@@ -19,6 +20,11 @@ from app.modules.etls.schemas import (
     OtherCaseOut,
     FacilityLetterForm,
     FacilityLetterOut,
+    FormOptionsOut,
+    ListItemChange,
+    ListItemOut,
+    ListsOut,
+    NewListItem,
     HsCodeConfirmation,
     IssuedLetterOut,
     WalkInApplication,
@@ -271,3 +277,56 @@ def _letter_out(case_id: int, d: IssuedDocument, dispatch=None) -> IssuedLetterO
         sent_to_gra_on=dispatch.dispatched_on if dispatch else None,
         download_url=f"/etls/facility-letters/{case_id}/letters/{d.id}/file",
     )
+
+
+# --- The lists the form picks from (countries, units) ---------------------------
+
+
+@router.get("/form-options", response_model=FormOptionsOut)
+async def form_options(
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """The active countries and units, for the form's select boxes. Anyone logged in."""
+    return FormOptionsOut(
+        countries=[c.name for c in await choices.items(session, "countries", active_only=True)],
+        units=[u.name for u in await choices.items(session, "units", active_only=True)],
+    )
+
+
+@router.get("/lists", response_model=ListsOut)
+async def lists(
+    user: User = Depends(require_role("admin")),
+    session: AsyncSession = Depends(get_session),
+):
+    """Every entry, switched off ones included. Admins only."""
+    return ListsOut(
+        countries=[ListItemOut.model_validate(c, from_attributes=True) for c in await choices.items(session, "countries")],
+        units=[ListItemOut.model_validate(u, from_attributes=True) for u in await choices.items(session, "units")],
+    )
+
+
+@router.post("/lists/{kind}", response_model=ListItemOut, status_code=status.HTTP_201_CREATED)
+async def add_list_item(
+    kind: choices.Kind,
+    body: NewListItem,
+    user: User = Depends(require_role("admin")),
+    session: AsyncSession = Depends(get_session),
+):
+    entry = await choices.add_item(session, actor=user, kind=kind, name=body.name)
+    return ListItemOut.model_validate(entry, from_attributes=True)
+
+
+@router.patch("/lists/{kind}/{item_id}", response_model=ListItemOut)
+async def change_list_item(
+    kind: choices.Kind,
+    item_id: int,
+    body: ListItemChange,
+    user: User = Depends(require_role("admin")),
+    session: AsyncSession = Depends(get_session),
+):
+    """Rename, or switch off / on. There is no delete: applications keep the names they used."""
+    entry = await choices.change_item(
+        session, actor=user, kind=kind, item_id=item_id, name=body.name, active=body.active
+    )
+    return ListItemOut.model_validate(entry, from_attributes=True)

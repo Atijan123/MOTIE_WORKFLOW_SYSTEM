@@ -1,14 +1,17 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
+import { api } from "@/lib/api";
+
 import { saveDraft } from "../actions";
-import { ApplicationForm } from "../ApplicationForm";
+import { ApplicationForm, type FormOptions } from "../ApplicationForm";
 
 export const metadata: Metadata = { title: "Apply for a facility letter" };
 
 // A2 before the first save: nothing is stored until "Save draft", so
 // opening the page and leaving makes no empty application.
-export default function NewApplication() {
+export default async function NewApplication() {
+  const options = await api<FormOptions>("/etls/form-options");
   return (
     <main className="page page-narrow">
       <Link href="/applications" className="small">
@@ -21,7 +24,7 @@ export default function NewApplication() {
           the goods to be cleared without duty.
         </p>
       </div>
-      <ApplicationForm letter={null} action={saveDraft.bind(null, null)} />
+      <ApplicationForm letter={null} options={options} action={saveDraft.bind(null, null)} />
       <section className="card">
         <h2>4. Documents</h2>
         <p className="muted">Save the draft first; then you can upload the documents here.</p>

@@ -16,6 +16,29 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 9j — Exporter countries and units are fixed lists an admin keeps `[CONFIRM]` (2026-10-26)
+A change to A2 (9c).
+
+**Built:**
+- **Two lists as data**, `etls.countries` and `etls.units` (migration 0039): a name, whether it's offered (`active`), and its place in the list. Seeded with:
+  - countries: Benin, Cabo Verde, Côte d’Ivoire, Ghana, Guinea, Guinea-Bissau, Liberia, Nigeria, Senegal, Sierra Leone, Togo. How goods from Burkina Faso, Mali and Niger are treated is `[CONFIRM]`; they're not on the list for now.
+  - units: bags, cartons, tonnes, kg, litres, pieces `[CONFIRM]`.
+- **The form's Country and Unit are select boxes** fed by **`GET /etls/form-options`** (active entries, in order).
+- **The API checks them** (backend/app/modules/etls/choices.py):
+  - on every save (new draft, change, walk-in): a value that isn't an active entry is refused with 422, naming the field ("Exporter's country: 'Mali' isn't on the Ministry's list"). Case doesn't matter: "ghana" is stored as "Ghana". Empty is still fine on a draft.
+  - on Submit: if an entry was switched off after the draft was saved, Submit is blocked: "Unit 'tonnes' is no longer on the Ministry's list: choose another". The form shows the old value as "(no longer on the list)" so it isn't silently lost.
+- **Admins keep the lists** on the new **Lists** screen (`/staff/lists`, in the menu for the `admin` role only): rename, switch off or back on, add (at the end). The endpoints are `GET /etls/lists`, `POST /etls/lists/{countries|units}` and `PATCH /etls/lists/{kind}/{id}` (`name` and/or `active`). Each change writes an audit row (`etls.list_item_added`, `etls.list_item_changed`).
+- **No deleting.** The app's database user has no DELETE on these tables; an entry is switched off instead. Applications keep the name as text, so renaming or switching off an entry never changes what an earlier applicant wrote.
+- Names are unique ignoring case (a unique index on `lower(name)`), with no spaces at either end (a check constraint).
+- New error type `InvalidValue` (422) in backend/app/core/workflow/errors.py.
+
+**Files:** backend/alembic/versions/0039_etls_choice_lists.py, backend/app/modules/etls/choices.py (`clean_form()`, `list_gaps()`, `add_item()`, `change_item()`), backend/app/modules/etls/models.py (`Country`, `Unit`), backend/app/modules/etls/service.py (`create_draft()`, `update_form()`, `open_walk_in()`, `_check_form_complete()`), backend/app/modules/etls/router.py, backend/app/modules/etls/schemas.py, backend/app/core/workflow/errors.py, backend/app/core/workflow/router.py, backend/tests/modules/etls/test_choice_lists.py, frontend/app/applications/ApplicationForm.tsx (`Choice`), frontend/app/applications/new/page.tsx, frontend/app/applications/[id]/edit/page.tsx, frontend/app/staff/lists/ (page.tsx, actions.ts), frontend/app/staff/layout.tsx, frontend/e2e/tests/lists.spec.ts, frontend/e2e/tests/facility-letter.spec.ts
+**Try it:**
+- `docker compose run --rm tools alembic upgrade head`, then log in as `admin@motie.test` and open Lists. Add "drums" to Units.
+- As `applicant@motie.test`, start an application: Unit offers "drums". Save a draft with it. Back as the admin, switch "drums" off: the applicant's Submit now says to choose another unit.
+- `docker compose run --rm tools pytest tests/modules/etls/test_choice_lists.py -v` and `docker compose run --rm e2e npx playwright test tests/lists.spec.ts`
+**New concepts:** Reference lists as data (switch off, never delete)
+
 ### Step 9i — S11: "Who acts" and "Recorded by" in the absences list (2026-10-26)
 A follow-up to 9g, as in docs/design/Absences.dc.html.
 
@@ -1494,6 +1517,11 @@ Because the token is 256 random bits, a plain SHA-256 hash is enough. Passwords 
 **Here:** frontend/e2e/tests/facility-letter.spec.ts and s11-absences.spec.ts; `loginAs()` in frontend/e2e/tests/helpers.ts gives each person their own browser session (cookies); the `e2e` service in docker-compose.yml.
 **Learn more:** [Playwright docs: Writing tests](https://playwright.dev/docs/writing-tests) and [Locators](https://playwright.dev/docs/locators)
 
+### Reference lists as data (switch off, never delete)
+**What:** a "reference list" (countries, units, document types) is a small table that other data picks from. Keeping it in the database, not in code, means an admin can change it without a programmer or a new release. The awkward part is old data. If "kilograms" is deleted, what happens to the hundred applications that said "kilograms"? The usual answers: **never delete, switch off** (an `active` flag: no longer offered, still understood), and decide whether records point at the entry (a foreign key: a rename changes every old record) or copy its text (a rename leaves old records as they were written). Here the application copies the text, because a facility letter is a statement of what the importer wrote at the time.
+**Here:** backend/alembic/versions/0039_etls_choice_lists.py (the tables, the `lower(name)` unique index, grants without DELETE); backend/app/modules/etls/choices.py (`clean_form()` on save, `list_gaps()` on Submit, `change_item()` for rename and switch off); the Lists screen, frontend/app/staff/lists/page.tsx.
+**Learn more:** [Udi Dahan: "Don’t Delete – Just Don’t"](https://udidahan.com/2009/09/01/dont-delete-just-dont/)
+
 ## 3. Decisions
 
 ### Confirmed by the Ministry
@@ -1798,7 +1826,7 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-26 | No draft is created by opening "Apply" | create a draft as soon as the page opens | Otherwise every curious click leaves an empty application in the Ministry's lists. |
 | 2026-10-26 | Uploads go through a server action, which passes the raw file to the API | a direct upload from the browser to the API | The browser can't reach the API and has no token (step 9a). The action's body limit is 11 MB (frontend/next.config.mjs), so the API's 10 MB check is the one that answers. |
 | 2026-10-26 | Submit doesn't save the form first ("Save the draft first if you changed anything above") | save and submit in one click | Two separate, simple actions; Submit then checks exactly what's stored. Worth revisiting if applicants trip over it. |
-| 2026-10-26 | Country and unit boxes suggest values but accept any text | fixed select lists | The API takes free text (step 6) and we don't have the agreed lists yet. The country suggestions leave out Burkina Faso, Mali and Niger, which left ECOWAS in 2025. `[CONFIRM]` |
+| 2026-10-26 | Country and unit boxes suggest values but accept any text | fixed select lists | The API takes free text (step 6) and we don't have the agreed lists yet. The country suggestions leave out Burkina Faso, Mali and Niger, which left ECOWAS in 2025. `[CONFIRM]` **Replaced in step 9j: fixed lists kept by an admin.** |
 | 2026-10-26 | One queue screen for every staff post; the panel adapts to `available_actions` | one screen per post (Records, desk, PS) | Whoever acts for an absent post (succession, delegation) gets that post's tools without any extra code. The API decides; the screen shows. |
 | 2026-10-26 | Buttons carry the workflow's move names, with friendlier wording for a few ("Accept: originals received") in `LABELS` in frontend/components/staff/Actions.tsx | only the workflow's names | The mock-ups' wording is clearer for some moves; unknown moves still show their own name, so a new workflow works without frontend changes. |
 | 2026-10-26 | Downloads through a frontend route with an allow-list of path shapes | a general "pass anything to the API" route | A general pass-through would let any page call any API endpoint with the user's login. Four patterns are easy to review. |
@@ -1818,6 +1846,12 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-26 | "Who acts" is the answer for the absence's first day (or today) | an answer per day of the absence; only today's | One line per stand-in is readable. Today's answer would be wrong for future absences, which are most of the list; a day-by-day answer would be long and rarely differs. The page says which day it describes. |
 | 2026-10-26 | Who acts is computed in acting.py with the engine's order (same post, delegation, succession), for a given day | call the engine's `acting_successor()` | The engine's functions only answer for today; the list needs future days. Tests cover the cases where the two could drift apart (stand-in away too, a delegation for one service). |
 | 2026-10-26 | "Recorded by" shows "Themselves" or the recorder's name | the recorder's post title, as in the mock-up | Recorders may hold no post (like `recorder@motie.test`); the name is always there, and the audit log has the rest. |
+| 2026-10-26 | The lists live in the `etls` schema (`etls.countries`, `etls.units`) | `core` tables shared by all modules | They are the facility letter form's fields; the certificate of origin module (chunk 4) may need a different country list (exporters vs origins). Easy to move to core if two modules want the same list. |
+| 2026-10-26 | Applications store the name as text, checked against the active list on save and on Submit | a foreign key to the list entry | A rename or switch-off never rewrites what an applicant wrote, and no data migration was needed for existing cases. The cost: a rename doesn't follow into old drafts (Submit then asks for a choice from the list). |
+| 2026-10-26 | No delete, only "switch off"; the app has no DELETE grant | allow deleting unused entries | Simple and safe: nobody has to check whether an entry is still used, and the audit log keeps every change. |
+| 2026-10-26 | New entries go at the end; no reordering screen | drag to reorder | Not needed for the demo; `sort_order` is there for when it is. |
+| 2026-10-26 | Case doesn't matter: "ghana" is saved as "Ghana" | refuse anything not spelled exactly | The form sends the exact spelling anyway; this only helps API clients and walk-ins typed by hand. |
+| 2026-10-26 | A saved value that was switched off stays visible in the form, marked "(no longer on the list)" | drop it from the form | Otherwise the select would quietly show "Choose…" and the applicant wouldn't know why Submit complains. |
 
 ## 4. Open questions
 
@@ -1871,11 +1905,21 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 - [ ] **Forgotten passwords:** the same links could serve "I forgot my password" for every applicant. Wanted? (Not built; it would need rate limiting so nobody can flood an inbox.)
 - [ ] **Email:** the Ministry's mail server (SMTP host, port, login) and sender address; the wording of the emails, and whether they should also be in French; whether staff should get emails too (e.g. a file waiting more than N days). See backend/app/core/notifications/.
 - [ ] **Email retries (ICT, not the Ministry):** is "8 attempts over about 4 hours, then stop" right, and who is told when an email is given up?
-- [ ] **Countries and units on the form:** should exporter country and unit be fixed lists? Which countries count (the ECOWAS members; Burkina Faso, Mali and Niger left in 2025), and which units does GRA expect? Now they are suggestions only. See `COUNTRIES` and `UNITS` in frontend/app/applications/ApplicationForm.tsx.
+- [ ] **Countries and units on the form:** they are fixed lists now (step 9j), kept by an admin on the Lists screen. Still to confirm: how goods from **Burkina Faso, Mali and Niger** (which left ECOWAS in 2025) are treated; they're not on the list for now. And are the units right (bags, cartons, tonnes, kg, litres, pieces), and which does GRA expect? See backend/alembic/versions/0039_etls_choice_lists.py.
 
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 9j
+1. The admin renames "kg" to "kilograms". What do earlier applications show, and what happens to a draft that still says "kg" when its applicant presses Submit?
+2. Why is the check made both on save and on Submit?
+3. A developer tries `DELETE FROM etls.units WHERE name = 'pieces'` through the app's connection. What happens, and why is that on purpose?
+
+#### Show answers
+1. Applications keep "kg": they store the text, not a link to the entry. The draft's Submit is blocked with "Unit 'kg' is no longer on the Ministry's list: choose another" (`list_gaps()`), and the form shows "kg (no longer on the list)" until they pick "kilograms".
+2. Save catches a wrong value at once, next to the field. Submit catches an entry that was fine when the draft was saved but has since been switched off or renamed; only then must the application be on the current list.
+3. "permission denied": migration 0039 grants SELECT, INSERT and UPDATE only. Entries are switched off instead, so applications and the audit log always refer to something that still exists.
 
 ### Step 9i
 1. The PS is away from Monday to Friday; the DPS is away on Monday only. Who does the list name for the PS's absence, if you look on Sunday? And on Wednesday?

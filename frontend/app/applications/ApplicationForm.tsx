@@ -11,17 +11,17 @@ import type { FacilityLetter } from "@/lib/types";
 
 import type { DraftState } from "./actions";
 
-// Suggestions only: the API takes any text. [CONFIRM] fixed lists (Open questions).
-const COUNTRIES = ["Benin", "Cabo Verde", "Côte d’Ivoire", "Ghana", "Guinea", "Guinea-Bissau", "Liberia", "Nigeria", "Senegal", "Sierra Leone", "Togo"];
-const UNITS = ["bags", "cartons", "tonnes", "kilograms", "litres", "pieces"];
+
+export type FormOptions = { countries: string[]; units: string[] };
 
 type Props = {
   letter: FacilityLetter | null;
+  options: FormOptions; // the Ministry's lists (GET /etls/form-options), kept by an admin
   action: (state: DraftState, data: FormData) => Promise<DraftState>;
   children?: React.ReactNode; // the expiry note, under the certificates
 };
 
-export function ApplicationForm({ letter, action, children }: Props) {
+export function ApplicationForm({ letter, options, action, children }: Props) {
   const [state, formAction] = useActionState(action, {});
   const v = state.values;
   // After a failed save, show what was typed; otherwise what's stored.
@@ -67,16 +67,12 @@ export function ApplicationForm({ letter, action, children }: Props) {
             Quantity
             <input name="quantity" inputMode="decimal" defaultValue={value("quantity", letter?.quantity ? String(Number(letter.quantity)) : "")} />
           </label>
-          <label className="field">
-            Unit
-            <input name="unit" list="units" defaultValue={value("unit", letter?.unit)} maxLength={30} />
-          </label>
+          <Choice name="unit" label="Unit" choices={options.units} value={value("unit", letter?.unit)} />
           <label className="field">
             HS code (optional)
             <input name="hs_code" placeholder="e.g. 2309.90" defaultValue={value("hs_code", letter?.hs_code ? hsCode(letter.hs_code) : null)} maxLength={20} />
           </label>
         </div>
-        <datalist id="units">{UNITS.map((u) => <option key={u} value={u} />)}</datalist>
         <p className="small muted">Not sure of the HS code? Leave it blank. The Ministry will confirm it.</p>
       </section>
 
@@ -87,10 +83,7 @@ export function ApplicationForm({ letter, action, children }: Props) {
             Exporter
             <input name="exporter_name" defaultValue={value("exporter_name", letter?.exporter_name)} maxLength={200} />
           </label>
-          <label className="field">
-            Country
-            <input name="exporter_country" list="countries" defaultValue={value("exporter_country", letter?.exporter_country)} maxLength={200} />
-          </label>
+          <Choice name="exporter_country" label="Country" choices={options.countries} value={value("exporter_country", letter?.exporter_country)} />
           <label className="field">
             Exporter’s ETLS approval number
             <input
@@ -107,7 +100,6 @@ export function ApplicationForm({ letter, action, children }: Props) {
             <span className="small muted">To add another, fill in the empty box and save.</span>
           </fieldset>
         </div>
-        <datalist id="countries">{COUNTRIES.map((c) => <option key={c} value={c} />)}</datalist>
         <fieldset>
           <legend>Certificates of origin</legend>
           {certRows.map((c, i) => (
@@ -131,5 +123,29 @@ export function ApplicationForm({ letter, action, children }: Props) {
         <SubmitButton className="btn">Save draft</SubmitButton>
       </div>
     </form>
+  );
+}
+
+/**
+ * A select from one of the Ministry's lists. A value saved earlier that has
+ * since been taken off the list stays visible, marked, so it isn't silently
+ * lost; Submit then asks for another (the API's check).
+ */
+function Choice({ name, label, choices, value }: { name: string; label: string; choices: string[]; value: string }) {
+  const gone = value && !choices.includes(value);
+  return (
+    <div className="field">
+      {/* Not wrapped around the select: wrapped, browsers add the chosen option to its name. */}
+      <label htmlFor={name}>{label}</label>
+      <select id={name} name={name} defaultValue={value}>
+        <option value="">Choose…</option>
+        {gone ? <option value={value}>{value} (no longer on the list)</option> : null}
+        {choices.map((c) => (
+          <option key={c} value={c}>
+            {c}
+          </option>
+        ))}
+      </select>
+    </div>
   );
 }

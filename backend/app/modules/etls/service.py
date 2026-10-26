@@ -16,6 +16,7 @@ from app.core.workflow import checklist, checks, effects, flags, summaries
 from app.core.workflow import service as workflow
 from app.core.workflow.delegation import today
 from app.core.workflow.models import Case, WorkflowStatus
+from app.modules.etls import choices
 from app.modules.etls.models import (
     FacilityLetter,
     FacilityLetterCertificate,
@@ -116,6 +117,7 @@ async def create_draft(
     """Open an etls_facility_letter case as a draft, with the importer's form,
     in one transaction. It gets its reference when the applicant submits.
     `applicant` is set when Records opens it for a walk-in."""
+    form = await choices.clean_form(session, form)  # before the case: a refused form opens nothing
     case = await workflow.open_case(
         session, workflow_code=FACILITY_LETTER, actor=actor, module=MODULE, applicant=applicant
     )
@@ -152,6 +154,7 @@ async def open_walk_in(
     if not await workflow.may_open_walk_in(session, FACILITY_LETTER, actor):
         # Checked before an account might be made.
         raise workflow.NotPermitted("Your post can't open applications for walk-in applicants.")
+    form = await choices.clean_form(session, form)  # before an account might be made
     applicant = await identity.get_user_by_email(session, email) if email else None
     if applicant is None:
         applicant = await identity.create_user(
@@ -192,6 +195,7 @@ async def update_form(
         raise workflow.NotPermitted("Only the applicant can change the application form.")
     if not case.current_status.applicant_editable:
         raise workflow.TransitionNotAllowed("The form can't be changed once the application is submitted.")
+    form = await choices.clean_form(session, form)
 
     before = _snapshot(
         {k: getattr(letter, k) for k in _form_rows(form)},
@@ -260,7 +264,9 @@ async def _check_form_complete(session: AsyncSession, case: Case) -> list[str]:
     """Blocks Submit and Resubmit until every required field is filled in, so
     every step after Submit (Records, the desk, the letter) has a whole form."""
     letter = await session.get(FacilityLetter, case.id)
-    return form_gaps(letter) if letter else ["The application form is missing"]
+    if letter is None:
+        return ["The application form is missing"]
+    return form_gaps(letter) + await choices.list_gaps(session, letter)
 
 
 async def check_duplicates(session: AsyncSession, move: effects.Move) -> None:

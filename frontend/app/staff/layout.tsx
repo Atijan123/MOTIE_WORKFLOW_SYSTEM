@@ -31,6 +31,7 @@ export default async function StaffLayout({ children }: { children: React.ReactN
             </NavLink>
           ) : null}
           <NavLink href="/staff/absences">Absences</NavLink>
+          {me.roles.includes("admin") ? <NavLink href="/staff/lists">Lists</NavLink> : null}
         </nav>
         <main className="staff-main">{children}</main>
       </div>

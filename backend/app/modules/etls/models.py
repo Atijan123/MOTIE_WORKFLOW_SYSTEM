@@ -6,7 +6,22 @@ They point at core.cases; core code never reads them.
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, CheckConstraint, Date, DateTime, ForeignKey, Identity, Index, Numeric, Text, func
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Identity,
+    Index,
+    Numeric,
+    SmallInteger,
+    Text,
+    func,
+    text,
+    true,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -101,4 +116,41 @@ class FacilityLetter(Base):
     )
     certificates: Mapped[list[FacilityLetterCertificate]] = relationship(
         lazy="selectin", order_by=FacilityLetterCertificate.number
+    )
+
+
+class _ChoiceList:
+    """An entry in a list the form picks from, kept by an admin (0039).
+
+    Change only through modules/etls/choices.py, which writes the audit rows.
+    Never deleted: switched off (active = false) instead.
+    """
+
+    id: Mapped[int] = mapped_column(SmallInteger, Identity(), primary_key=True)
+    name: Mapped[str] = mapped_column(Text)
+    active: Mapped[bool] = mapped_column(Boolean, server_default=true())
+    sort_order: Mapped[int] = mapped_column(SmallInteger)
+
+
+class Country(_ChoiceList, Base):
+    """An exporter's country the form offers."""
+
+    __tablename__ = "countries"
+    __table_args__ = (
+        # "Ghana" and "ghana" are the same entry (0039).
+        Index("countries_name_key", text("lower(name)"), unique=True),
+        CheckConstraint("btrim(name) <> '' AND name = btrim(name)", name="countries_name_trimmed"),
+        {"schema": "etls"},
+    )
+
+
+class Unit(_ChoiceList, Base):
+    """A unit for the quantity ("bags", "tonnes")."""
+
+    __tablename__ = "units"
+    __table_args__ = (
+        # "Ghana" and "ghana" are the same entry (0039).
+        Index("units_name_key", text("lower(name)"), unique=True),
+        CheckConstraint("btrim(name) <> '' AND name = btrim(name)", name="units_name_trimmed"),
+        {"schema": "etls"},
     )
