@@ -30,6 +30,7 @@ export default async function StaffLayout({ children }: { children: React.ReactN
               Outgoing {toDispatch.length ? <span className="count">{toDispatch.length}</span> : null}
             </NavLink>
           ) : null}
+          <NavLink href="/staff/absences">Absences</NavLink>
         </nav>
         <main className="staff-main">{children}</main>
       </div>

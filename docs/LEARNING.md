@@ -16,6 +16,28 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 9g — Staff screen S11: absences and delegations (2026-10-26)
+Chunk 2, step 9, part 7 of 8.
+
+**Built:**
+- **`/staff/absences`** (docs/design/Absences.dc.html), "Absences" in the staff menu:
+  - **I will be away** (for anyone holding a post): who acts for me under the succession order, per service, with the names of the people holding each post (`GET /acting/for-me`); my current and upcoming delegations, each with **Revoke**; and the form: from, to, reason (optional, seen only by me and the recorders), and **"Or delegate to a different post"** (default "No, use the succession order") for all services or one.
+  - **Record for someone else** (only with the `absence_recorder` role `[CONFIRM]`): pick "post: person", dates and reason. The audit row records who entered it (step 5c).
+  - **Current and upcoming absences** for all staff (`GET /absences/current`): who, post, dates, the reason where I may see it, and **Cancel** (not started yet) or **End early** (already started) where I may.
+- **Two small backend additions:**
+  - **`GET /acting/options`** (staff only): every post with its holders (`user_id`, name), sorted by title, and every workflow with its name. It's what the form's select boxes list. Applicants get 403, since it says who holds which post.
+  - **`may_cancel`** on each row of `GET /absences/current`: true for my own absence and for recorders, the same rule as `cancel_absence()`. So the screen offers Cancel only where it will work.
+- **Recording with a delegation makes two calls**, delegation first, then absence. If the delegation is refused (say, the dates are wrong), nothing is recorded and the form shows why.
+- The select boxes have their own `<label for>`: wrapped in the label, browsers read the chosen option as part of the box's name ("For All services"), which confuses screen readers.
+
+**Files:** frontend/app/staff/absences/page.tsx, frontend/app/staff/absences/actions.ts (`recordMyAbsence()`, `recordAbsenceFor()`, `cancelAbsence()`, `revokeDelegation()`), frontend/app/staff/layout.tsx, frontend/lib/types.ts, frontend/app/globals.css (`.visually-hidden`), backend/app/core/workflow/acting.py (`choices()`, `AbsenceView.may_cancel`), backend/app/core/workflow/acting_router.py, backend/app/core/workflow/schemas.py (`ChoicesOut`), backend/tests/core/test_acting_views.py
+**Try it:**
+- As `ps@motie.test`, Absences: record today to the day after tomorrow. Log in as `dps@motie.test`: the acting banner is on every page, and the PS's row has no Cancel for them. Back as the PS, "End early".
+- As `minister@motie.test`, delegate to the Permanent Secretary for "ETLS application": the delegation shows with Revoke.
+- As `recorder@motie.test` (no post of their own): only "Record for someone else" and the list.
+- `docker compose run --rm tools pytest tests/core/test_acting_views.py -v`
+**New concepts:** none; see [Succession (acting for an absent post)](#succession-acting-for-an-absent-post) and [Delegation (acting on behalf of)](#delegation-acting-on-behalf-of).
+
 ### Step 9f — Staff screen S3: the PS signs the letter (2026-10-26)
 Chunk 2, step 9, part 6 of 8.
 
@@ -1739,6 +1761,11 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-26 | The desk's checks show to whoever has a "Verify" move, not to the desk post by name | check for `etls_desk_officer` in the frontend | Approvals attach to posts and stand-ins (CLAUDE.md): someone acting for the desk needs the same tools. |
 | 2026-10-26 | Each tick is its own small form ("Mark as checked" / "Undo") | checkboxes saved with one button | Each tick is a recorded statement with its own time and officer (step 8d); one click, one record. |
 | 2026-10-26 | The preview is embedded in the page (an iframe of the PDF) and linked | a "Preview" button only | The PS should read the letter before signing, and the mock-up shows it in place. The iframe loads from this site (`/files/...`), so `X-Frame-Options: SAMEORIGIN` allows it. |
+| 2026-10-26 | "I will be away" records the absence and, optionally, a delegation, in one form (as the mock-up) | two separate forms | One task for the person: "I'm away; who takes my files?". |
+| 2026-10-26 | The delegation is created before the absence, in two API calls | absence first; a new combined endpoint | If the delegation fails, nothing is recorded and the person fixes the form. A delegation left without an absence (if the second call fails) is harmless and visible with Revoke; an absence whose delegation silently failed would send files to the wrong post. Both calls check the same dates, so a split is unlikely. |
+| 2026-10-26 | `GET /acting/options` lists every post with its holders, for staff only | reuse `/acting/for-me`; a general users endpoint | The forms need all posts (to delegate to) and post holders (to record for); nothing else lists them. Staff already see names and posts in case histories. |
+| 2026-10-26 | `may_cancel` comes from the API | the screen works out who may cancel | The rule lives in one place (`cancel_absence()`), and the screen can't offer a button the API will refuse. |
+| 2026-10-26 | The list has no "Who acts" or "Recorded by" column, unlike the mock-up | add both to `GET /absences/current` | SCREENS.md (which wins) asks for the list with revoke; who acts depends on the service and is shown to the person themselves above. Easy to add later if the Ministry wants it. |
 
 ## 4. Open questions
 
@@ -1797,6 +1824,16 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 9g
+1. The desk officer opens Absences while the PS is away. What do they see of the PS's absence, and why no Cancel button?
+2. The Minister picks "Delegate to: Permanent Secretary" with an end date before the start date. What is recorded?
+3. Why does `recorder@motie.test` see no "I will be away" form?
+
+#### Show answers
+1. Who, post and dates, but not the reason: reasons can be personal, so `current_absences()` gives it only to the person and to recorders. `may_cancel` is false for them (not their absence, not a recorder), so the page shows no button; the API would answer 404 anyway.
+2. Nothing. `recordMyAbsence()` creates the delegation first; the API refuses it (the dates), and the action returns that error before the absence is sent.
+3. The form is only shown when `GET /acting/for-me` returns a post, and the recorder holds none. An absence only matters for who may act for a post, so `record_absence()` refuses someone without one.
 
 ### Step 9f
 1. The PS opens the preview, then the desk changes the HS code before the PS signs. Does the signed letter match the preview the PS read?

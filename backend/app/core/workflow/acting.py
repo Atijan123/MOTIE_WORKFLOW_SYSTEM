@@ -5,6 +5,7 @@
 - cover_for_me(): for each of my posts, who would act if I'm away: my
   delegations, and the succession line per workflow.
 - current_absences(): who is away now or soon, for all staff.
+- choices(): the posts (with their holders) and workflows the S11 forms pick from.
 
 These use the same rules as the engine (delegation.py, succession.py), so the
 banner says exactly what the buttons will allow.
@@ -203,6 +204,7 @@ class AbsenceView:
     starts_on: date
     ends_on: date
     reason: str | None  # only for the person themselves and for recorders
+    may_cancel: bool  # the same rule as cancel_absence(), so the screen offers only what works
 
 
 async def current_absences(session: AsyncSession, user: User) -> list[AbsenceView]:
@@ -228,7 +230,49 @@ async def current_absences(session: AsyncSession, user: User) -> list[AbsenceVie
             starts_on=a.starts_on,
             ends_on=a.ends_on,
             reason=a.reason if may_see_reasons or a.user_id == user.id or a.recorded_by == user.id else None,
+            may_cancel=a.user_id == user.id or may_see_reasons,
         )
         for a in absences
     ]
+
+
+@dataclass
+class Holder:
+    user_id: int
+    name: str
+
+
+@dataclass
+class PostChoice:
+    code: str
+    title: str
+    holders: list[Holder]  # an empty post can still be delegated to; nobody can act until it's filled
+
+
+@dataclass
+class WorkflowChoice:
+    code: str
+    name: str
+
+
+@dataclass
+class Choices:
+    posts: list[PostChoice]
+    workflows: list[WorkflowChoice]
+
+
+async def choices(session: AsyncSession) -> Choices:
+    """Every post with its holders, and every workflow: what S11's forms pick from
+    ("delegate to which post", "for which service", "who is away")."""
+    holder_rows = (await session.execute(select(position_holders.c.position_id, position_holders.c.user_id))).all()
+    names = await _names(session, {r.user_id for r in holder_rows})
+    holders: dict[int, list[Holder]] = {}
+    for row in holder_rows:
+        holders.setdefault(row.position_id, []).append(Holder(row.user_id, names[row.user_id]))
+    posts = [
+        PostChoice(p.code, p.title, sorted(holders.get(p.id, []), key=lambda h: h.name))
+        for p in await session.scalars(select(Position).order_by(Position.title))
+    ]
+    workflows = [WorkflowChoice(w.code, w.name) for w in await session.scalars(select(Workflow).order_by(Workflow.name))]
+    return Choices(posts, workflows)
 

@@ -257,3 +257,27 @@ class AbsenceViewOut(BaseModel):
     starts_on: date
     ends_on: date
     reason: str | None
+    may_cancel: bool  # your own absence, or you're a recorder: the cancel button shows
+
+
+class HolderOut(BaseModel):
+    user_id: int
+    name: str
+
+
+class PostChoiceOut(BaseModel):
+    code: str
+    title: str
+    holders: list[HolderOut]
+
+
+class WorkflowChoiceOut(BaseModel):
+    code: str
+    name: str
+
+
+class ChoicesOut(BaseModel):
+    """What S11's forms pick from: posts (with holders) and workflows."""
+
+    posts: list[PostChoiceOut]
+    workflows: list[WorkflowChoiceOut]

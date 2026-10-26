@@ -1,5 +1,5 @@
 """The acting banner (GET /acting) and the absences screen S11 (GET /acting/for-me,
-GET /absences/current)."""
+GET /absences/current, GET /acting/options)."""
 
 from datetime import timedelta
 
@@ -137,3 +137,38 @@ async def test_cancelled_absences_drop_off_and_applicants_cannot_look(act, peopl
     seen = (await act(people["desk"], "get", "/absences/current")).json()
     assert absence["id"] not in [r["id"] for r in seen]
     assert (await act(people["applicant"], "get", "/absences/current")).status_code == 403
+
+
+async def test_only_the_person_and_recorders_may_cancel_an_absence(act, people, make_user):
+    absence = await _away(act, people["permanent_secretary"])
+
+    def may_cancel(rows):
+        return [r["may_cancel"] for r in rows if r["id"] == absence["id"]]
+
+    assert may_cancel((await act(people["permanent_secretary"], "get", "/absences/current")).json()) == [True]
+    assert may_cancel((await act(people["desk"], "get", "/absences/current")).json()) == [False]
+    recorder = await make_user("officer", "absence_recorder")
+    assert may_cancel((await act(recorder, "get", "/absences/current")).json()) == [True]
+    # And the flag says what the API does: the desk officer's cancel is refused.
+    assert (await act(people["desk"], "post", f"/absences/{absence['id']}/cancel")).status_code == 404
+
+
+# --- What the S11 forms pick from ----------------------------------------------
+
+
+async def test_the_options_list_posts_with_their_holders_and_the_workflows(act, people):
+    response = await act(people["desk"], "get", "/acting/options")
+    assert response.status_code == 200, response.text
+    options = response.json()
+    posts = {p["code"]: p for p in options["posts"]}
+    assert posts["permanent_secretary"]["title"] == "Permanent Secretary"
+    assert posts["permanent_secretary"]["holders"] == [
+        {"user_id": people["permanent_secretary"].id, "name": people["permanent_secretary"].full_name}
+    ]
+    titles = [p["title"] for p in options["posts"]]
+    assert titles == sorted(titles)  # for a select box
+    assert {"etls_facility_letter", "etls_application"} <= {w["code"] for w in options["workflows"]}
+
+
+async def test_applicants_cannot_list_the_posts(act, people):
+    assert (await act(people["applicant"], "get", "/acting/options")).status_code == 403

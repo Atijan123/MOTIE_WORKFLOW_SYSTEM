@@ -129,3 +129,26 @@ export type ActingNow = {
   delegation_starts_on: string | null;
   delegation_ends_on: string | null;
 };
+
+// S11: absences and delegations (backend/app/core/workflow/schemas.py).
+export type CoverForPost = {
+  position: string;
+  title: string;
+  delegations: { id: number; to_position: string; to_title: string; workflow: string | null; starts_on: string; ends_on: string }[];
+  succession: { workflow: string; line: { position: string; title: string; holders: string[] }[] }[];
+};
+
+export type AbsenceView = {
+  id: number;
+  person: string;
+  posts: string[];
+  starts_on: string;
+  ends_on: string;
+  reason: string | null;
+  may_cancel: boolean;
+};
+
+export type Choices = {
+  posts: { code: string; title: string; holders: { user_id: number; name: string }[] }[];
+  workflows: { code: string; name: string }[];
+};
