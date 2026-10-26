@@ -136,6 +136,8 @@ legend { font-weight: 600; padding: 0 0 6px; }
 
 /* Messages */
 .notice { border-radius: 10px; padding: 16px 20px; display: flex; flex-direction: column; gap: 4px; }
+/* A notice with its action on the right ("Action needed … Fix and resubmit"). */
+.notice.spread { flex-direction: row; align-items: center; }
 .notice-warn { background: var(--warn-bg); border: 1px solid var(--warn-border); color: var(--warn-text); }
 .notice-warn strong, .notice-warn a { color: var(--warn); }
 .notice-info { background: var(--info-bg); border: 1px solid #b8d0e4; color: var(--info-text); }

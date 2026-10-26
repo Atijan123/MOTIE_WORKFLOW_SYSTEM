@@ -16,6 +16,34 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 9k — Demo data: `scripts/seed-demo.sh` (2026-10-26)
+For the Ministry demo. Development only.
+
+**Built:**
+- **`bash scripts/seed-demo.sh`** (add `--yes` to skip the prompt): refuses unless `.env` says `APP_ENV=development`; runs `scripts/reset-dev.sh` (a fresh database, documents volume and dev users); then runs `python -m app.demo_seed` in the `tools` container, which refuses too if `APP_ENV` isn't development.
+- **Three fictional importers** (`fatou.jallow@`, `lamin.ceesay@`, `awa.touray@demo.test`, the dev password) and **eight fictional facility letter cases**, one per stage:
+
+  | Reference | Stage |
+  | --- | --- |
+  | FL/2026/0001 | Sent to GRA (the whole route) |
+  | FL/2026/0002 | Signed by the **DPS acting for the PS**, who is recorded as away for three days; waiting for Records to dispatch |
+  | FL/2026/0003 | Verified, waiting for signature (the PS or, while the PS is away, the DPS) |
+  | FL/2026/0004 | At the desk: cement, so the receipt question is open until the code is confirmed |
+  | FL/2026/0005 | Returned by Records: "The invoice scan is unreadable…" |
+  | FL/2026/0006 | At the desk, **on hold**: the same certificate number as 0001 |
+  | FL/2026/0007 | Submitted, waiting for Records |
+  | (no reference) | A half-filled draft |
+- **Made through the API, as the real people.** The seed logs in as the applicant, Records, the desk, the PS and the DPS and makes each move, so references, histories ("acting for the Permanent Secretary"), audit rows and outbox emails are exactly what real use gives. Uploaded documents are one-page PDFs that say "DEMO DOCUMENT. Fictional".
+- It prints the cases with their references and every demo login with the password.
+- The PS's absence is left in place, so the demo can show the acting banner (log in as the DPS) and S11's "Who acts". End it from S11 as the PS ("End early") if you'd rather not.
+- **Fixed while looking at the demo:** the applicant's "Action needed … Fix and resubmit" notice was squashed into the centre (frontend/app/globals.css, `.notice.spread`).
+
+**Files:** scripts/seed-demo.sh, backend/app/demo_seed.py (`seed_users()`, `seed_cases()`, `Demo`), backend/tests/test_demo_seed.py, frontend/app/globals.css, CLAUDE.md (commands)
+**Try it:**
+- `bash scripts/seed-demo.sh --yes`, then http://localhost:3001: as `records@motie.test` (My queue and Outgoing), `desk@motie.test` (0004 and 0006), `dps@motie.test` (the banner; 0003 to sign), `awa.touray@demo.test` (the returned case).
+- `docker compose run --rm tools pytest tests/test_demo_seed.py -v` runs the whole seed against the test database (rolled back afterwards) and checks each case's stage.
+**New concepts:** none; see [Disposable dev environments (reset and seed)](#disposable-dev-environments-reset-and-seed).
+
 ### Step 9j — Exporter countries and units are fixed lists an admin keeps `[CONFIRM]` (2026-10-26)
 A change to A2 (9c).
 
@@ -1852,6 +1880,11 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-26 | New entries go at the end; no reordering screen | drag to reorder | Not needed for the demo; `sort_order` is there for when it is. |
 | 2026-10-26 | Case doesn't matter: "ghana" is saved as "Ghana" | refuse anything not spelled exactly | The form sends the exact spelling anyway; this only helps API clients and walk-ins typed by hand. |
 | 2026-10-26 | A saved value that was switched off stays visible in the form, marked "(no longer on the list)" | drop it from the form | Otherwise the select would quietly show "Choose…" and the applicant wouldn't know why Submit complains. |
+| 2026-10-26 | The demo seed always starts with a reset | add to whatever is there | References come out as FL/2026/0001–0007 in a known order, and the duplicate (0006) always points at 0001. A demo should look the same every time it's set up. |
+| 2026-10-26 | Cases are made through the HTTP API as the real users | insert rows straight into the tables | Rows written by hand could skip audit rows, references or emails, and show a demo the real system can't produce. Through the API, every rule is checked. |
+| 2026-10-26 | `seed_cases()` takes an HTTP client | always call the running API | The test passes its in-process client, so the whole seed is tested against the test database and rolled back. |
+| 2026-10-26 | The PS stays recorded as away after the DPS signs | end the absence at once | The demo can show the acting banner and "Who acts" in S11; the presenter can end it from S11. |
+| 2026-10-26 | All cases are dated today ("waiting: today") | back-date them | Back-dating would mean writing rows by hand (see above). A demo can explain "days waiting" on the queue without it. |
 
 ## 4. Open questions
 
@@ -1910,6 +1943,16 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 9k
+1. Someone runs `scripts/seed-demo.sh` on a server whose `.env` says `APP_ENV=production`. How many things stop it, and where?
+2. Why is FL/2026/0006 on hold at the desk but not at Records?
+3. After the seed, can the PS still sign FL/2026/0003 while recorded as away? And the DPS?
+
+#### Show answers
+1. Three: the script's own check of `.env`; `scripts/reset-dev.sh`'s check (it runs first); and `main()` in backend/app/demo_seed.py, which reads `settings.app_env`. The first one stops it before anything is deleted.
+2. Its certificate number is already on 0001, so Submit raised the duplicate flag (8d). That flag holds only the desk's moves, so Records could accept the originals as usual; the desk must clear it, reject or return.
+3. Yes to both. The PS holds the post, and an absence doesn't take it away: it only lets the next post in the succession order act. The DPS's Sign shows "(acting)", and the history records "acting for the Permanent Secretary" with the absence's dates.
 
 ### Step 9j
 1. The admin renames "kg" to "kilograms". What do earlier applications show, and what happens to a draft that still says "kg" when its applicant presses Submit?

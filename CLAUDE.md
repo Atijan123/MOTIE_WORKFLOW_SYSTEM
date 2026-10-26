@@ -65,5 +65,6 @@ Write for me, not for a reviewer: plain words, short paragraphs, real file paths
 - Run tests: `docker compose run --rm tools pytest -v`
 - Send waiting emails once: `docker compose run --rm tools python -m app.core.notifications.worker --once`. The `notifier` service (`docker compose up notifier`) does it continuously. Only the fake sender exists: it logs emails (`docker compose logs notifier`) and sends nothing.
 - Reset the dev database and documents volume, migrate and seed dev users: `bash scripts/reset-dev.sh` (only runs with `APP_ENV=development` in `.env`; `--yes` skips the prompt). Seeded users are `<post>@motie.test` with the password in `backend/app/dev_seed.py`.
+- Demo data (development only): `bash scripts/seed-demo.sh` resets the dev database, then creates fictional facility letter cases at every stage and prints the logins (`--yes` skips the prompt).
 - Database users: `motie_app` (the API), `motie_owner` (migrations), `motie` superuser (setup only). Created by `db/init/10-db-users.sh`; rerun it with `docker compose exec db bash /docker-entrypoint-initdb.d/10-db-users.sh` after changing a password in `.env`.
 - Postgres from the host: `localhost:5433` (5432 is taken by a local Windows Postgres)
