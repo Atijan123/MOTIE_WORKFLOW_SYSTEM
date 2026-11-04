@@ -16,6 +16,40 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 10a — Authorised signatories sign in the Director's absence (S12); cement letters need the Minister or the PS (2026-11-04)
+The rule for signing in the Director's absence changed (SCREENS.md S3, S5, S12 and both routes).
+
+**Built:**
+- **The facility letter is now signed by the Director of Industry and Investment**, "For: Permanent Secretary" (it used to be the PS). The Director also returns it to the desk and cancels a signed letter.
+- **Cement letters are the exception** (HS heading 2523, as the *desk* confirms it; the applicant's own code never decides). Only the Minister or the PS may sign, return or cancel them, each in their own right: no delegation, no succession, no signatory list. A cement letter isn't in the Director's queue at all.
+- **The succession step "DPS Admin & Finance acts for the Director" is gone.** In its place is a list of **named people** (not posts): `core.authorised_signatories`, with date added, added by, date removed and removed by. While every Director is recorded absent, the Director's steps appear in the queue of **every officer on the list**, for facility letters (signing) and ETLS approvals (sign and assign).
+- **First to act claims it.** Two signatories pressing Sign at the same moment: the engine already locks the case row (`SELECT ... FOR UPDATE` in `change_status()`), so the second waits, then finds the case signed and gets 409 "someone may have just acted on it: reload". One signing, one letter. Proven by backend/tests/core/test_signatory_race.py.
+- **One list for both services, kept as a per-workflow setting** so it can be split later: `core.signatory_rules` says "in workflow W, while every holder of post P is away, the people on list L act for P". Two rows today, both pointing at the list `director_absence`. Splitting is a new list and an UPDATE of one row.
+- **Who keeps the list:** the new role `signatory_admin` (the Director's office), on the new screen **S12, Signatories** (`/staff/signatories`, in the menu for that role only). Add an officer, remove one, see earlier signatories. Every change writes an audit row (`signatory.added`, `signatory.removed`). You can't add yourself, an applicant, or someone already on the list.
+- **Nothing is forgotten.** The app's database user can't delete entries, can't change who was added or when, and a trigger refuses to undo a removal. Someone put back on the list gets a new row.
+- **The record says who and why.** The audit row of a signatory's move has `basis: "signatory"`, `on_behalf_of: "director_of_industry"`, the signatory's name, their list entry, `in_absence: "in the Director's absence"`, and the Director's absences it relied on. The case history shows "Awa Bah, authorised signatory for the Director of Industry and Investment, in the Director's absence (… away …)".
+- **The signature block** (template version 3) is now, as in SCREENS.md S3:
+
+  ```
+  [signer's name]
+  In the Director's absence        (only for an authorised signatory)
+  For: Permanent Secretary         (the PS or the Minister signing cement: their own title)
+  ```
+  A template line made only of fields that are all empty is left out, so the middle line disappears when nobody was absent. The preview shows the block as the person looking at it would sign.
+- **Two small engine features** made this data, not code:
+  - `workflow_transitions.applies_when`: a condition in the documents' condition language (`{"field": "hs_heading", "op": "equals", "value": "2523"}`, plus a new `not_equals`). A move whose condition doesn't hold isn't that case's move at all. Anything uncertain (no confirmed HS code) means "doesn't apply". See `applicable()` in backend/app/core/workflow/service.py.
+  - `workflow_transitions.own_post_only`: only holders of the post itself, for the cement rule.
+- **Everywhere else follows:** the acting banner ("You may sign for the Director …, as an authorised signatory"), S11 ("any officer on the authorised signatories list can sign (…)" for the Director; the list in "Who acts"), the queue, and the desk's button now reads "Verify and send for signature".
+- **Seeds (fake names only):** `signatories@motie.test` (Dev Signatory Admin) keeps the list; `signer1@` and `signer2@motie.test` (Dev Signatory One, Two) are on it. The demo now has the Director sign case 1; case 2 is signed by Dev Signatory One while the Director is away; and case 9 is a verified cement letter waiting for the Minister or the PS.
+
+**Files:** backend/alembic/versions/0040_authorised_signatories.py; backend/app/core/workflow/signatories.py (`acting_signatory()`, `add_signatory()`, `remove_signatory()`, `overview()`), signatory_router.py, service.py (`applicable()`, `_permitted()`, `change_status()`), queues.py, acting.py, history.py, models.py, schemas.py, succession.py (`presence()`); backend/app/core/documents/conditions.py (`not_equals`); backend/app/modules/etls/letter.py (`_signature()`, `build_fields()`, `preview_fields()`, `render_pdf()`), templates/facility_letter.txt; backend/app/dev_seed.py, demo_seed.py; backend/app/main.py; tests: backend/tests/core/test_signatories.py, test_signatory_race.py, backend/tests/modules/etls/test_signing_rules.py, plus the existing tests where the PS used to sign; frontend/app/staff/signatories/ (page.tsx, actions.ts), frontend/app/staff/layout.tsx, frontend/app/staff/absences/page.tsx, frontend/components/ActingBanner.tsx, frontend/components/staff/History.tsx, Actions.tsx, Signing.tsx, frontend/lib/types.ts, frontend/e2e/tests/s12-signatories.spec.ts, facility-letter.spec.ts.
+**Try it:**
+- `bash scripts/reset-dev.sh --yes` (migrates and seeds the new users), then http://localhost:3001 as `signatories@motie.test`: Signatories. Remove Dev Signatory Two and add them back; "Earlier signatories" keeps the removal.
+- `bash scripts/seed-demo.sh --yes`, then log in as `signer1@motie.test`: the banner, and case 0003 in My queue. Sign it, then log in as `signer2@motie.test`: it's gone from their queue. As `ps@motie.test`: case 0008 (cement) is there; as `director@motie.test` it isn't.
+- `docker compose run --rm tools pytest tests/core/test_signatories.py tests/core/test_signatory_race.py tests/modules/etls/test_signing_rules.py -v`
+- `docker compose run --rm e2e npx playwright test tests/s12-signatories.spec.ts`
+**New concepts:** [Named signatories instead of a successor post](#named-signatories-instead-of-a-successor-post), [Moves that apply only to some cases](#moves-that-apply-only-to-some-cases), [Separation of duties](#separation-of-duties). Also see [Row locking](#row-locking-select--for-update) for "first to act claims it".
+
 ### Step 9k — Demo data: `scripts/seed-demo.sh` (2026-10-26)
 For the Ministry demo. Development only.
 
@@ -1550,6 +1584,21 @@ Because the token is 256 random bits, a plain SHA-256 hash is enough. Passwords 
 **Here:** backend/alembic/versions/0039_etls_choice_lists.py (the tables, the `lower(name)` unique index, grants without DELETE); backend/app/modules/etls/choices.py (`clean_form()` on save, `list_gaps()` on Submit, `change_item()` for rename and switch off); the Lists screen, frontend/app/staff/lists/page.tsx.
 **Learn more:** [Udi Dahan: "Don’t Delete – Just Don’t"](https://udidahan.com/2009/09/01/dont-delete-just-dont/)
 
+### Named signatories instead of a successor post
+**What:** succession says "when the Director is away, *the next post* acts". A signatories list says "when the Director is away, *these named people* may act". The list is kept by a person with the right to change it (the Director's office), and every change is dated and audited, so you can always answer "who could sign on 3rd March?". Everyone on the list sees the work; whoever acts first takes it, and the row lock makes sure only one can.
+**Here:** `core.authorised_signatories` and `core.signatory_rules` (0040); `acting_signatory()` in backend/app/core/workflow/signatories.py; `_permitted()` in backend/app/core/workflow/service.py uses the list *instead of* the succession order wherever a rule names one.
+**Learn more:** [Wikipedia: Signing authority](https://en.wikipedia.org/wiki/Signing_authority)
+
+### Moves that apply only to some cases
+**What:** usually a workflow says "from Verified, the Director may Sign". Sometimes who signs depends on the case itself: cement letters go to the Minister or the PS. Rather than an `if cement:` in the code, each move row can carry a condition (`applies_when`), tested against facts the module supplies. A move whose condition fails doesn't exist for that case: it's not in anyone's queue and not offered as a disabled button. "Not known yet" counts as "no", so nobody signs under a rule that might not be theirs.
+**Here:** `applicable()` and `_holds()` in backend/app/core/workflow/service.py; the condition language in backend/app/core/documents/conditions.py (shared with document requirements, see [Rules as data](#rules-as-data-a-small-condition-language)); the facts in `facility_letter_facts()` in backend/app/modules/etls/service.py.
+**Learn more:** [Martin Fowler: Rules Engine](https://martinfowler.com/bliki/RulesEngine.html) (and why to keep one small).
+
+### Separation of duties
+**What:** the person who grants a power shouldn't be able to grant it to themselves. The signatory admin can add anyone on the staff to the list, except themselves: someone else in the office must do that. It's a cheap control that makes a single bad actor's job harder, and the audit log shows who added whom.
+**Here:** `add_signatory()` in backend/app/core/workflow/signatories.py refuses `user_id == actor.id`; the S12 page leaves you out of the "Add an officer" list.
+**Learn more:** [Wikipedia: Separation of duties](https://en.wikipedia.org/wiki/Separation_of_duties)
+
 ## 3. Decisions
 
 ### Confirmed by the Ministry
@@ -1562,7 +1611,10 @@ These were open questions; the Ministry has answered them. The code follows them
 - **"Assign" means minuting the file to an officer (2026-10-19).** It doesn't pass on the Director's signing power, so delegations still can't be passed on (step 4d).
 - **Delegations aren't passed on (2026-10-19).** The step 4d rule stays.
 - **When the Minister is away, the PS acts; when the PS is away too, a DPS acts (2026-10-19).** This follows the general chain of command, through the succession order (steps 5b and 5d), not a standing transition. (Which DPS is still open.)
-- **When the Director of Industry and Investment is away, the DPS Administration and Finance may sign and assign ETLS files (2026-10-19).**
+- ~~**When the Director of Industry and Investment is away, the DPS Administration and Finance may sign and assign ETLS files (2026-10-19).**~~ Replaced on 2026-11-04 (see below).
+- **Signing in the Director's absence (2026-11-04, SCREENS.md S12):** there is no fixed rule that a DPS acts. The Director's office keeps a list of named officers; while the Director is recorded absent, any of them may sign, for facility letters and ETLS approvals (sign and assign). The signature records their name and "in the Director's absence".
+- **Facility letters are signed by the Director "For: Permanent Secretary" (2026-11-04, SCREENS.md S3).** The PS doesn't sign them, except cement.
+- **Cement facility letters are signed by the Minister or the PS only (2026-11-04),** following the Ministry's notices to GRA of 17th and 26th November 2025.
 - **A position holder, or an authorised officer on their behalf, records absences (2026-10-19).** The audit log shows who recorded it. (Who counts as "authorised" is still open.)
 - **Certificate of origin validity (2026-10-24):** the desk can't verify while any certificate is more than six months past its issue date; at submission the applicant is warned, not stopped, if one expires within 30 days. (Whether GRA also needs it valid at clearance is *not* confirmed; see Open questions.)
 - **The applicant's timeline after a cancelled letter (2026-10-24):** only the cancel move is hidden. A corrected letter replacing one already sent to GRA reads "Corrected letter issued" when it is sent.
@@ -1885,6 +1937,18 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-10-26 | `seed_cases()` takes an HTTP client | always call the running API | The test passes its in-process client, so the whole seed is tested against the test database and rolled back. |
 | 2026-10-26 | The PS stays recorded as away after the DPS signs | end the absence at once | The demo can show the acting banner and "Who acts" in S11; the presenter can end it from S11. |
 | 2026-10-26 | All cases are dated today ("waiting: today") | back-date them | Back-dating would mean writing rows by hand (see above). A demo can explain "days waiting" on the queue without it. |
+| 2026-11-04 | One list, linked per workflow through `core.signatory_rules` (workflow, post, list) | a column on the workflow; a list per workflow now | You asked for one list now and a way to split later. Splitting is a new list and one UPDATE; no code changes. |
+| 2026-11-04 | The list replaces only the succession order; a Director's own delegation still comes first | the list replaces delegation too | Literal reading of the request ("replace the succession step"), and it keeps the existing rule "a personal delegation beats the standing order". `[CONFIRM]` |
+| 2026-11-04 | Whoever may sign a letter may also return it to the desk and cancel it | keep those moves with the PS | Same person, same file; otherwise the PS would be cancelling letters signed by the Director. `[CONFIRM]` |
+| 2026-11-04 | "First to act claims it" by the existing row lock in `change_status()`, no "claim" record | a separate claim step or table | The lock already guarantees only one move succeeds. A claim record would add a state (claimed but not signed) that someone must clear when a signatory walks away. |
+| 2026-11-04 | Cement is decided by `applies_when` on each move row (`hs_heading` equals / not_equals 2523) | a check that blocks the Director's Sign on cement | A blocking check would put cement letters in the Director's queue with a button they can never press. |
+| 2026-11-04 | Cement moves are `own_post_only` | let succession and delegation apply | "Only the Minister or the PS": with succession, a DPS would sign when both are away. |
+| 2026-11-04 | No HS code confirmed means neither the Director's nor the Minister's/PS's moves apply | guess "not cement" | Fail closed. It can't happen today, because the desk can't verify without confirming the code. |
+| 2026-11-04 | Signatories must be active staff; an absent signatory (one with a post and a recorded absence) is skipped | allow anyone | Same idea as succession skipping a post whose holders are away. `[CONFIRM]` |
+| 2026-11-04 | A signatory acts as a named person, so the audit row's `as_position` is empty and their name is stored in the row | record their own post | They sign because they're on the list, not because of their post (DPSs and others alike). Storing the name keeps the record right after a change of name. |
+| 2026-11-04 | The signer's name is always printed, with "For: Permanent Secretary" unless the PS or Minister signs in their own right | name only for signatories | SCREENS.md S3: the block is "[Name] / For: Permanent Secretary". This settles the earlier `[CONFIRM]` on naming whoever acted. |
+| 2026-11-04 | The race test numbers its committed case in the year 2095 | use this year | Its rows are committed; this year's numbers belong to tests that expect FL/0001 (the demo seed test). |
+| 2026-11-04 | etls_application (the approval placeholder) gets the signatory rule now | wait for etls_approval | Its sign-and-assign step is the one in use today. The etls_approval migration must add its own `signatory_rules` row. |
 
 ## 4. Open questions
 
@@ -1913,7 +1977,7 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 - [ ] **Facility letter form lists:** are there fixed lists for exporter country (ECOWAS members), unit and product? They would make checks such as the cement rule exact.
 - [ ] **Duplicate certificates:** does a number from a *rejected* case count as used? (Right now every earlier use counts.) May anyone besides the ETLS desk clear the flag?
 - [ ] **Originals:** besides the certificate of origin, must any other paper original be seen in person (e.g. the invoice)? It's one column per document (`original_required`).
-- [ ] **Facility letter layout:** the wording is in (step 6i). Still to check: the letterhead (printed paper, or a logo and address we should add?); whether the subject line is bold; and what the signature line says when someone acts for the PS (now "For: Permanent Secretary", no name). See backend/app/modules/etls/templates/facility_letter.txt.
+- [ ] **Facility letter layout:** the wording is in (step 6i) and the signature block follows SCREENS.md S3 (step 10a). Still to check: the letterhead (printed paper, or a logo and address we should add?); whether the subject line is bold; and what the Minister's line says on a cement letter (now "Minister"; or "For: Permanent Secretary"?). See backend/app/modules/etls/templates/facility_letter.txt and `OWN_TITLE` in backend/app/modules/etls/letter.py.
 - [ ] **Issued letters:** storing (step 6f) and cancel-and-correct (step 6l) are built. Still open: may the importer download it? Does a corrected letter get a new file reference? Should the case go back to the desk (now) or straight to the PS? Is cancelling allowed after "Sent to GRA" (now yes), and must GRA be told in writing when a letter they hold is cancelled?
 - [ ] **The cement receipt:** which receipt is it (e.g. a payment receipt for a cement levy)? Is "HS heading 2523" the right trigger, or only some subheadings (e.g. 2523.29 Portland cement, not 2523.10 clinker)? Are other headings subject to receipts too? See backend/alembic/versions/0020_facility_letter_hs_code.py.
 - [ ] **HS code:** it's optional for applicants now (step 6k). Which officer enters or confirms it: the ETLS desk (placeholder) or someone else? How many digits does GRA use (we accept 6, 8 or 10)?
@@ -1940,9 +2004,24 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 - [ ] **Email retries (ICT, not the Ministry):** is "8 attempts over about 4 hours, then stop" right, and who is told when an email is given up?
 - [ ] **Countries and units on the form:** they are fixed lists now (step 9j), kept by an admin on the Lists screen. Still to confirm: how goods from **Burkina Faso, Mali and Niger** (which left ECOWAS in 2025) are treated; they're not on the list for now. And are the units right (bags, cartons, tonnes, kg, litres, pieces), and which does GRA expect? See backend/alembic/versions/0039_etls_choice_lists.py.
 
+- [ ] **Authorised signatories (step 10a):** may a Director's own delegation still hand signing to a post (now yes; the list replaces only the succession order)? Should a signatory who is recorded absent be skipped (now yes)? Is "you can't add yourself" right? Who in the Director's office gets the `signatory_admin` role? When the Director's post is vacant (no holder at all), should the list apply (now no, as for succession)?
+- [ ] **One list or two:** facility letters and ETLS approvals share the list `director_absence`. Does the Director's office want separate lists? (A new list and one UPDATE of `core.signatory_rules`.)
+- [ ] **Returning and cancelling:** whoever may sign may also return a letter to the desk and cancel a signed one (the Director or a signatory; the Minister or the PS for cement). Right?
+- [ ] **Cement when the Minister and the PS are both away:** nobody else may sign (own post only), so cement letters wait. Right? Is "HS heading 2523" still the exact trigger (see the cement receipt question)?
+
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 10a
+1. The Director is recorded absent and Awa and Lamin are both on the list. Both press Sign on the same letter in the same second. What does each see, and why can't two letters be issued?
+2. A cement letter is verified. Why isn't it in the Director's queue at all, rather than shown with a disabled Sign button? And why can't the DPS sign it when the Minister and the PS are both away?
+3. The Director's office wants a separate list for ETLS approvals. What has to change: code, data, or both?
+
+#### Show answers
+1. One gets 200 and the letter; the other gets 409 ("someone may have just acted on it: reload"). `change_status()` reads the case with `SELECT ... FOR UPDATE`, so the second request waits for the first to commit, then reads status "signed". There's no move from "signed" to "signed", so it's refused before any effect (issuing the letter) runs. The unique index on current issued letters is a second guard.
+2. The Director's Sign row has `applies_when` "hs_heading not_equals 2523". `applicable()` drops it for a cement case before anything else, so the queue (which uses the engine's own `available_transitions()`) never offers it. The Minister's and the PS's rows are `own_post_only`, so `_permitted()` never considers delegation, succession or a list for them.
+3. Only data: a migration that inserts a new row in `core.signatory_lists` and points the `etls_application` (later `etls_approval`) row of `core.signatory_rules` at it. The S12 screen shows every list by itself.
 
 ### Step 9k
 1. Someone runs `scripts/seed-demo.sh` on a server whose `.env` says `APP_ENV=production`. How many things stop it, and where?

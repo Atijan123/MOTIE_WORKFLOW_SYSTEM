@@ -30,12 +30,11 @@ async def test_general_chain_is_minister_then_ps_then_dps(db_session, ids):
     ]
 
 
-async def test_etls_director_is_covered_by_dps_admin_and_finance(db_session, ids):
+async def test_the_director_has_no_successor_post(db_session, ids):
+    """The authorised signatories list replaced "DPS Admin & Finance acts for
+    the Director" (0040; see test_signing_rules.py)."""
     positions, etls = ids
-    order = await succession_order(db_session, positions["director_of_industry"], etls)
-    assert order == [positions["dps_admin_finance"]]
-    # That rule is for ETLS only: for another workflow the Director has no successor.
-    assert await succession_order(db_session, positions["director_of_industry"], etls + 1000) == []
+    assert await succession_order(db_session, positions["director_of_industry"], etls) == []
 
 
 async def test_posts_without_a_rule_have_nobody_next_in_line(db_session, ids):

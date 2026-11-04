@@ -31,7 +31,7 @@ async def _verified_case(act, people, **form) -> int:
     return case_id
 
 
-async def _signed_case(act, people, signer="permanent_secretary", **form) -> int:
+async def _signed_case(act, people, signer="director", **form) -> int:
     case_id = await _verified_case(act, people, **form)
     response = await move(act, people[signer], case_id, "signed")
     assert response.status_code == 200, f"{signer}: {response.text}"
@@ -90,11 +90,15 @@ async def test_the_letter_has_every_field(act, people, db_session):
     assert fields.exporter_approval_number == "SN-ETLS-0091"
     assert fields.product_approval_numbers == "PA-1, PA-2"
     assert fields.certificate_numbers == "CO-10, CO-9"
-    # The PS signed in their own right.
-    assert fields.signer_name == people["permanent_secretary"].full_name
-    assert fields.signer_title == "Permanent Secretary"
+    # The Director signed in their own right, for the PS (SCREENS.md S3).
+    assert fields.signer_name == people["director"].full_name
+    assert fields.signer_title == "Director of Industry and Investment"
     assert fields.acting_for == ""
-    assert fields.signature_title == "Permanent Secretary"
+    assert (fields.signature_name, fields.signature_note, fields.signature_title) == (
+        people["director"].full_name,
+        "",
+        "For: Permanent Secretary",
+    )
 
 
 async def test_the_pdf_shows_the_fields_on_the_page(act, people, db_session):
@@ -117,13 +121,14 @@ async def test_the_pdf_shows_the_fields_on_the_page(act, people, db_session):
         "SN-PA-2025-011",
         "SN-CO-2026-0042\\)",  # "Certificate of Origin (No. ...)": wraps before the number
         "Sincerely,",
-        "Permanent Secretary",
+        fields.signer_name,  # the Director, by name (SCREENS.md S3)
+        "For: Permanent Secretary",
         "Cc: Kombo Building Supplies Ltd",
         "12 Kairaba Avenue, Serrekunda",
     ]:
         assert expected in pdf, expected
     assert "version:" not in pdf  # the ## notes are never printed
-    assert "For: " not in pdf  # the PS signed in their own right
+    assert "absence" not in pdf  # only an authorised signatory's letter says so
     assert "$" not in pdf  # every placeholder was filled
 
 
@@ -150,19 +155,29 @@ def test_layout_marks_come_from_the_template_not_the_data(tmp_path):
     assert "(**Bold >> Right**) Tj" in pdf  # printed as typed: not bold, not split
 
 
-async def test_when_the_ps_is_away_the_signature_block_says_who_acted(act, people, db_session):
+async def test_someone_the_director_delegated_to_signs_in_their_own_name(act, people, db_session):
     start, end = today().isoformat(), (today() + timedelta(days=3)).isoformat()
-    away = await act(people["permanent_secretary"], "post", "/absences", json={"starts_on": start, "ends_on": end})
-    assert away.status_code == 201
+    delegated = await act(
+        people["director"],
+        "post",
+        "/delegations",
+        json={"from_position": "director_of_industry", "to_position": "dps_admin_finance", "starts_on": start, "ends_on": end},
+    )
+    assert delegated.status_code == 201, delegated.text
 
     case_id = await _signed_case(act, people, signer="dps")
     fields = await _fields(db_session, case_id)
 
     assert fields.signer_name == people["dps"].full_name
     assert fields.signer_title == "Deputy Permanent Secretary, Administration and Finance"
-    assert fields.acting_for == "for the Permanent Secretary"
-    assert fields.signature_title == "For: Permanent Secretary"
-    assert "For: Permanent Secretary" in letter.render_pdf(fields, compress=False).decode("latin-1")
+    assert fields.acting_for == "for the Director of Industry and Investment"
+    assert (fields.signature_name, fields.signature_note, fields.signature_title) == (
+        people["dps"].full_name,
+        "",
+        "For: Permanent Secretary",
+    )
+    pdf = letter.render_pdf(fields, compress=False).decode("latin-1")
+    assert people["dps"].full_name in pdf and "For: Permanent Secretary" in pdf
     # ...and the stored letter records who issued it.
     assert (await issued.get_current(db_session, case_id, letter.KIND)).issued_by == people["dps"].id
 
@@ -222,13 +237,13 @@ async def test_signing_stores_the_letter_with_its_checksum_and_template_version(
     assert content.startswith(b"%PDF-")
     assert document.sha256 == hashlib.sha256(content).hexdigest()
     assert document.size_bytes == len(content)
-    assert document.issued_by == people["permanent_secretary"].id
+    assert document.issued_by == people["director"].id
     template = letter.load_template()
     assert (document.template_version, document.template_sha256) == (template.version, template.sha256)
 
     # The checksum and template version are in the audit log too, by the signer.
     [event] = await _events(db_session, case_id, "case.document_issued")
-    assert event.actor_user_id == people["permanent_secretary"].id
+    assert event.actor_user_id == people["director"].id
     assert event.details["sha256"] == document.sha256
     assert event.details["template_version"] == template.version
     assert event.details["issued_document_id"] == document.id
@@ -274,7 +289,7 @@ async def test_if_issuing_fails_the_signing_fails_and_leaves_no_file(
 
     monkeypatch.setattr(issued, "record_event", broken_audit)
     with pytest.raises(RuntimeError):
-        await move(act, people["permanent_secretary"], case_id, "signed")
+        await move(act, people["director"], case_id, "signed")
     await db_session.rollback()  # what the real request's session does when it ends
 
     assert _stored_files(document_storage) == files_before
@@ -307,7 +322,7 @@ async def test_an_effect_with_no_code_behind_it_blocks_the_move(act, people, db_
     case_id = await _verified_case(act, people)
     monkeypatch.delitem(effects._effects, letter.ISSUE_EFFECT)
 
-    response = await move(act, people["permanent_secretary"], case_id, "signed")
+    response = await move(act, people["director"], case_id, "signed")
     assert response.status_code == 409
     assert letter.ISSUE_EFFECT in response.json()["detail"]
     await db_session.rollback()  # as the real request's session would
@@ -349,6 +364,6 @@ def test_the_date_is_written_the_ministrys_way(day, expected):
     assert letter.long_date(day) == expected
 
 
-def test_the_date_format_did_not_change_the_template_version():
-    # Only the code that writes the date changed, not the template file.
-    assert letter.load_template().version.startswith("2 ")
+def test_the_template_version_is_the_signature_block_one():
+    # Version 3 (0040) added the signer's name and "in the Director's absence".
+    assert letter.load_template().version.startswith("3 ")

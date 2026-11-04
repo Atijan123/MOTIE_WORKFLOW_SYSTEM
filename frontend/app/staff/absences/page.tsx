@@ -209,12 +209,13 @@ export default async function Absences() {
 const BASIS: Record<AbsenceView["who_acts"][number]["basis"], string> = {
   delegation: "delegation",
   succession: "succession",
+  signatory: "authorised signatories",
   same_post: "same post",
 };
 
 /** "Deputy Permanent Secretary, … (Dev Deputy PS), succession", one line per stand-in. */
 function WhoActs({ absence, workflowName }: { absence: AbsenceView; workflowName: (code: string | null) => string }) {
-  if (!absence.who_acts.length) return <span className="warn-text">Nobody at work in the succession order</span>;
+  if (!absence.who_acts.length) return <span className="warn-text">Nobody at work to act (succession order or signatories list)</span>;
   return (
     <div className="stack">
       {absence.who_acts.map((w) => (
@@ -249,15 +250,19 @@ function CoverText({ post, workflowName }: { post: CoverForPost; workflowName: (
       {post.succession.length ? (
         <div className="stack">
           <span>
-            While you are away{post.delegations.length ? " and nothing is delegated" : ""}, under the agreed succession order:
+            While you are away{post.delegations.length ? " and nothing is delegated" : ""}:
           </span>
           <ul className="small" style={{ margin: 0, paddingLeft: 20 }}>
             {post.succession.map((s) => (
               <li key={s.workflow}>
                 {workflowName(s.workflow)}:{" "}
-                {s.line
-                  .map((stand) => `the ${stand.title}${stand.holders.length ? ` (${stand.holders.join(", ")})` : " (vacant)"}`)
-                  .join(", then ")}
+                {s.signatories
+                  ? s.signatories.length
+                    ? `any officer on the authorised signatories list can sign (${s.signatories.join(", ")})`
+                    : "the authorised signatories list is empty, so nobody can sign: ask the Director's office"
+                  : `under the agreed succession order, ${s.line
+                      .map((stand) => `the ${stand.title}${stand.holders.length ? ` (${stand.holders.join(", ")})` : " (vacant)"}`)
+                      .join(", then ")}`}
               </li>
             ))}
           </ul>

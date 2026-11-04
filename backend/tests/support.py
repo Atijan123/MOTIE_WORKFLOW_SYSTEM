@@ -148,6 +148,41 @@ async def ready_to_verify(act, people, case_id, hs_code="7210.49"):
     return response
 
 
+CEMENT = "2523.29"  # Portland cement: only the Minister or the PS signs (0040)
+
+
+async def verified_case(act, people, hs_code="7210.49", **form) -> int:
+    """A facility letter the desk has verified, waiting for signature. With a
+    cement `hs_code`, the cement receipt is uploaded once the code is confirmed."""
+    case_id = await create_draft(act, people["applicant"], hs_code=hs_code, **form)
+    await ready_for_records(act, people, case_id)
+    response = await move(act, people["records_officer"], case_id, "originals_received")
+    assert response.status_code == 200, response.text
+    assert (await ready_to_verify(act, people, case_id, hs_code)).status_code == 200
+    await upload_required(act, people["applicant"], case_id)  # the receipt, for cement
+    response = await move(act, people["desk"], case_id, "verified")
+    assert response.status_code == 200, response.text
+    return case_id
+
+
+async def record_absence(act, user, days=3):
+    """`user` records their own absence from today. Returns the response."""
+    return await act(
+        user,
+        "post",
+        "/absences",
+        json={"starts_on": today().isoformat(), "ends_on": (today() + timedelta(days=days - 1)).isoformat()},
+    )
+
+
+SIGNATORY_LIST = "director_absence"
+
+
+async def add_signatory(act, admin, user):
+    """`admin` (signatory_admin) puts `user` on the Director's-absence list. Returns the response."""
+    return await act(admin, "post", f"/signatories/{SIGNATORY_LIST}/members", json={"user_id": user.id})
+
+
 async def ready_for_records(act, people, case_id) -> None:
     """Upload every document the case needs and submit it (as the applicant),
     then have Records mark the original certificate of origin as seen, so

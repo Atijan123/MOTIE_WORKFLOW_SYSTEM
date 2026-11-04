@@ -29,19 +29,22 @@ async def test_one_case_per_stage_made_through_the_api(db_session, client):
         "originals_received",
         "submitted",
         "draft",
+        "verified",  # cement, for the Minister or the PS
     ]
     # Every case but the draft has its reference, in the order made.
     year = date.today().year
-    assert [c["reference"] for c in cases] == [f"MOTIE/ETLS/FL/{year}/{n:04d}" for n in range(1, 8)] + [None]
+    refs = [f"MOTIE/ETLS/FL/{year}/{n:04d}" for n in range(1, 9)]
+    assert [c["reference"] for c in cases] == refs[:7] + [None, refs[7]]
 
     # The duplicate is on hold at the desk; the earlier case isn't.
     assert (cases[5]["on_hold"], cases[3]["on_hold"]) == (True, False)
 
-    # The DPS signed the second one, acting for the absent PS.
+    # An authorised signatory signed the second one, in the Director's absence.
     history = (await client.get(f"/cases/{made[1][1]}/history", headers=headers)).json()
     [signed] = [e for e in history if e["details"].get("to") == "signed"]
-    assert signed["acting_for"]["position"] == "permanent_secretary"
-    assert signed["acting_for"]["basis"] == "succession"
+    assert signed["acting_for"]["position"] == "director_of_industry"
+    assert signed["acting_for"]["basis"] == "signatory"
+    assert signed["actor_name"] == "Dev Signatory One"
 
 
 def test_the_demo_seed_refuses_to_run_outside_development(monkeypatch):

@@ -125,15 +125,19 @@ Built route (0015–0030): `draft` →(applicant: Submit)→ `submitted` →(Rec
 | Return to applicant | **Built** | 8b: "Return to applicant" (`originals_received → returned`). The resubmitted case goes to Records first. |
 | History panel | **Built** | As in global rules. |
 
-### S3. PS signs the letter
+### S3. Director signs the letter for the PS
 
 | Item | Status | Backed by / what's missing |
 | --- | --- | --- |
-| Letters awaiting signature | **Built** | `GET /cases/queue` for the PS (`?status=verified` narrows it). |
+| Who signs: the Director ("For: Permanent Secretary"); while the Director is recorded absent, any officer on the authorised signatories list; cement only the Minister or the PS | **Built** | 10a: migration 0040 (`applies_when`, `own_post_only`, `core.signatory_rules`); core/workflow/signatories.py. |
+| Signature block "[Name] / For: Permanent Secretary", plus "In the Director's absence" for a signatory | **Built** | 10a: template version 3; `_signature()` in modules/etls/letter.py. |
+| First to sign takes it; the others' queues clear | **Built** | 10a: the row lock in `change_status()`; tests/core/test_signatory_race.py. |
+| Signing produces three copies (Records' file copy, GRA's copy in Outgoing, the applicant's copy released to them) | **Missing** | Only one stored letter today, which Records downloads to dispatch. How the applicant gets theirs is `[CONFIRM]` in SCREENS.md. |
+| Letters awaiting signature | **Built** | `GET /cases/queue` for the Director (or a signatory, or the Minister/PS for cement); `?status=verified` narrows it. |
 | Summary of checks done | **Built** | 8f: `GET /etls/facility-letters/{id}/checks` (originals seen, ECOWAS ticks, duplicate flags, HS code, certificate validity, missing documents). |
 | Letter preview in the Ministry's wording | **Built** | 8f: `GET /etls/facility-letters/{id}/letter-preview.pdf`: rendered on request, never stored, marked "DRAFT FOR CHECKING - NOT SIGNED". |
 | Sign (stores the letter) | **Built** | `verified → signed`, effect `issue_facility_letter` (core/documents/issued.py). |
-| Return to desk | **Built** | 8f: "Return to the desk" (`verified → originals_received`, PS, minute required; 0031). |
+| Return to desk | **Built** | 8f: "Return to the desk" (`verified → originals_received`, minute required; 0031). Since 10a, by whoever may sign. |
 | Cancel and reissue | **Built** | "Cancel the signed letter" (0022); `.../letters`, `.../letters/{letter_id}/file`. The timeline hides the cancel move (7e). Since 8e it's a correction move (`is_correction`), so it puts no letter in the PS's queue. |
 
 ### S11. Absences and delegations (all staff)
@@ -157,7 +161,7 @@ Built today (`etls_application`, 0005 + 0012): Records → Minister → PS → D
 | Screen | Status | Notes |
 | --- | --- | --- |
 | S4. Minute a file | **Partial** | Built: minute text (the move's comment), Minister → PS → Director moves, acting via succession. Missing: the form summary, "samples received", return to Records. |
-| S5. Sign and assign | **Partial** | Built: the sign-and-assign move; DPS Admin & Finance stands in (succession, `etls_application` only). Missing: choosing a named officer (case assignment), return to PS; the stand-in row must move to `etls_approval`. |
+| S5. Sign and assign | **Partial** | Built: the sign-and-assign move; in the Director's absence, the authorised signatories list (10a, `etls_application` only). Missing: choosing a named officer (case assignment), return to PS; `etls_approval` needs its own `signatory_rules` row. |
 | S6. Technical review | **Missing** | Per-product findings, cost-price limits as data, inspection and report, send to NAC, ask the applicant. |
 | S7. NAC decisions | **Missing** | Meetings, per-product decisions, meeting pack, signed minutes. |
 | S8. ECOWAS submission and outcome | **Missing** | Submission pack, per-product outcomes, the approved products register. |
@@ -166,7 +170,7 @@ Built today (`etls_application`, 0005 + 0012): Records → Minister → PS → D
 
 ## 5. Staff screens: certificates of origin
 
-Everything is **Missing** (S9 comparison table and flags; S10 box 10 certification and numbering, duplicate reprints, box 11 Customs, collection, six-month validity, one product per certificate). The issue-once pattern (core/documents/issued.py) and flags (core/workflow/flags.py) can be reused. The certifying officer is the Director `[CONFIRM]`, so the DPS stand-in needs a succession row for the CO workflow too.
+Everything is **Missing** (S9 comparison table and flags; S10 box 10 certification and numbering, duplicate reprints, box 11 Customs, collection, six-month validity, one product per certificate). The issue-once pattern (core/documents/issued.py) and flags (core/workflow/flags.py) can be reused. The certifying officer is the Director `[CONFIRM]`, so the CO workflow would need a `signatory_rules` row too (10a).
 
 ---
 
@@ -175,8 +179,9 @@ Everything is **Missing** (S9 comparison table and flags; S10 box 10 certificati
 | Check | Status | Where |
 | --- | --- | --- |
 | Minister → PS → DPS Admin & Finance | **Built** | alembic/versions/0013_succession_orders.py; `acting_successor()`; tests/core/test_acting_for.py. |
-| PS → DPS Admin & Finance | **Built** | Same migration. Covers the facility letter: the DPS signs "For: Permanent Secretary" and can cancel. |
-| ETLS: Director → DPS Admin & Finance | **Built**, with a caveat | Seeded only for `etls_application`. `etls_approval` (chunk 3) and the CO workflow (chunk 4) each need their own row. |
+| PS → DPS Admin & Finance | **Built** | Same migration. No longer covers the facility letter (10a): the PS signs only cement letters, and nobody stands in for those. |
+| Director's absence: the authorised signatories list (S12), not a successor post | **Built**, with a caveat | 10a: `core.signatory_rules` rows for `etls_facility_letter` and `etls_application`. `etls_approval` (chunk 3) needs its own row; so does the CO workflow (chunk 4) if the Director certifies there. The old Director → DPS succession row is removed. |
+| S12 screen (keep the list) | **Built** | 10a: `/staff/signatories`, role `signatory_admin`; `GET /signatories`, `POST /signatories/{list}/members`, `POST /signatories/members/{id}/remove`. |
 | A delegation overrides succession | **Built** | `_permitted()` in core/workflow/service.py. |
 | History fetched with "acting for" | **Built** | `GET /cases/{id}/history`: names, post titles, and `acting_for` with the absence or delegation dates (step 7e). |
 

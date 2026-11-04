@@ -34,6 +34,16 @@ function who(e: HistoryEvent): React.ReactNode {
   if (!e.actor_name) return "System";
   const as = e.actor_title ? `${e.actor_name}, ${e.actor_title}` : e.actor_name;
   if (!e.acting_for) return as;
+  if (e.acting_for.basis === "signatory") {
+    // "Awa Bah, authorised signatory for the Director …, in the Director's absence (… away …)"
+    const away = e.acting_for.absences.map((a) => `${a.person} away ${dayRange(a.starts_on, a.ends_on)}`).join("; ");
+    return (
+      <>
+        {as}, <b>authorised signatory for the {e.acting_for.title}, {e.acting_for.in_absence}</b>
+        {away ? ` (${away})` : ""}
+      </>
+    );
+  }
   const why =
     e.acting_for.delegation
       ? `delegated ${dayRange(e.acting_for.delegation.starts_on, e.acting_for.delegation.ends_on)}`

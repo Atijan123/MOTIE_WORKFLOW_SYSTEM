@@ -108,6 +108,7 @@ export type ActingFor = {
   basis: string;
   absences: { person: string; starts_on: string; ends_on: string }[];
   delegation: { from_position: string; to_position: string; starts_on: string; ends_on: string } | null;
+  in_absence: string | null; // an authorised signatory: "in the Director's absence"
 };
 
 export type HistoryEvent = {
@@ -128,6 +129,7 @@ export type ActingNow = {
   absences: { person: string; starts_on: string; ends_on: string }[];
   delegation_starts_on: string | null;
   delegation_ends_on: string | null;
+  in_absence: string | null; // basis "signatory"
 };
 
 // S11: absences and delegations (backend/app/core/workflow/schemas.py).
@@ -135,7 +137,8 @@ export type CoverForPost = {
   position: string;
   title: string;
   delegations: { id: number; to_position: string; to_title: string; workflow: string | null; starts_on: string; ends_on: string }[];
-  succession: { workflow: string; line: { position: string; title: string; holders: string[] }[] }[];
+  // `signatories` instead of `line` where the service uses the authorised signatories list for this post.
+  succession: { workflow: string; line: { position: string; title: string; holders: string[] }[]; signatories: string[] | null }[];
 };
 
 export type AbsenceView = {
@@ -149,10 +152,40 @@ export type AbsenceView = {
   recorded_by: string;
   recorded_by_self: boolean;
   // Worked out for the absence's first day (or today, if it has started).
-  who_acts: { position: string; title: string; holders: string[]; basis: "delegation" | "succession" | "same_post"; workflows: string[] | null }[];
+  // For "signatory", position and title are the list's, and holders the people on it at work.
+  who_acts: {
+    position: string;
+    title: string;
+    holders: string[];
+    basis: "delegation" | "succession" | "signatory" | "same_post";
+    workflows: string[] | null;
+  }[];
 };
 
 export type Choices = {
   posts: { code: string; title: string; holders: { user_id: number; name: string }[] }[];
   workflows: { code: string; name: string }[];
 };
+
+// S12: authorised signatories (backend/app/core/workflow/signatories.py).
+export type Signatory = {
+  id: number;
+  user_id: number;
+  name: string;
+  posts: string[];
+  added_at: string;
+  added_by: string;
+  removed_at: string | null;
+  removed_by: string | null;
+};
+
+export type SignatoryList = {
+  code: string;
+  name: string;
+  absence_wording: string;
+  used_for: { workflow: string; workflow_name: string; position: string; position_title: string }[];
+  current: Signatory[];
+  past: Signatory[];
+};
+
+export type SignatoryCandidate = { user_id: number; name: string; posts: string[] };

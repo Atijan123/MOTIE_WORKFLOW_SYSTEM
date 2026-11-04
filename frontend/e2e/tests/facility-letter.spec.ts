@@ -1,6 +1,6 @@
 // The whole facility letter route in the browser (SCREENS.md A1, A2, S1, S2,
 // S3): an importer applies, Records sees the originals, the desk verifies, the
-// PS signs, Records sends the letter to GRA, and the importer sees it.
+// Director signs for the PS, Records sends the letter to GRA, and the importer sees it.
 import { expect, test, type Page } from "@playwright/test";
 
 import { isoDay, loginAs, pdf } from "./helpers";
@@ -77,7 +77,7 @@ test("a facility letter goes from draft to Sent to GRA", async ({ browser }) => 
   // --- S2: the desk confirms the HS code, ticks the ECOWAS list, verifies -----
   const desk = await loginAs(browser, "desk@motie.test");
   await openFromQueue(desk, shortRef);
-  const verify = desk.getByRole("button", { name: "Verify and send to PS" });
+  const verify = desk.getByRole("button", { name: "Verify and send for signature" });
   await expect(verify).toBeDisabled();
   await desk.getByLabel("HS code").fill("2309.90");
   await desk.getByRole("button", { name: "Confirm code" }).click();
@@ -92,8 +92,8 @@ test("a facility letter goes from draft to Sent to GRA", async ({ browser }) => 
   await verify.click();
   await expect(desk.getByText(`${reference} is now:`)).toBeVisible();
 
-  // --- S3: the PS reads the checks and the preview, and signs ------------------
-  const ps = await loginAs(browser, "ps@motie.test");
+  // --- S3: the Director reads the checks and the preview, and signs for the PS --
+  const ps = await loginAs(browser, "director@motie.test");
   await openFromQueue(ps, shortRef);
   await expect(ps.getByRole("region", { name: "Checks done" })).toContainText("HS code 2309.90 confirmed");
   await expect(ps.getByTitle("Letter preview")).toBeVisible();

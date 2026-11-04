@@ -16,12 +16,12 @@ from tests.support import (
 
 pytestmark = pytest.mark.anyio
 
-# The route in SCREENS.md (Records sends to GRA, and that's final). [CONFIRM]
-# who reviews between desk and PS, and who rejects.
+# The route in SCREENS.md (the Director signs for the PS; Records sends to
+# GRA, and that's final). [CONFIRM] who rejects.
 ROUTE = [
     ("records_officer", "originals_received"),
     ("desk", "verified"),
-    ("permanent_secretary", "signed"),
+    ("director", "signed"),
 ]
 
 
@@ -33,7 +33,8 @@ async def test_facility_letter_workflow_is_seeded(db_session):
     rows = (
         await db_session.execute(
             text(
-                "SELECT f.code, t.code, p.code FROM core.workflow_transitions x "
+                "SELECT f.code, t.code, p.code, x.applies_when->>'op', x.own_post_only "
+                "FROM core.workflow_transitions x "
                 "JOIN core.workflows w ON w.id = x.workflow_id "
                 "JOIN core.workflow_statuses f ON f.id = x.from_status_id "
                 "JOIN core.workflow_statuses t ON t.id = x.to_status_id "
@@ -42,21 +43,33 @@ async def test_facility_letter_workflow_is_seeded(db_session):
             )
         )
     ).all()
+    always = (None, False)
     assert {tuple(r) for r in rows} == {
-        ("draft", "submitted", None),  # the applicant's own move (0026)
+        ("draft", "submitted", None, *always),  # the applicant's own move (0026)
         # Returns and the applicant's resubmission (0027).
-        ("submitted", "returned", "records_officer"),
-        ("originals_received", "returned", "etls_desk_officer"),
-        ("returned", "submitted", None),
-        ("submitted", "originals_received", "records_officer"),
-        ("originals_received", "verified", "etls_desk_officer"),
-        ("originals_received", "rejected", "etls_desk_officer"),
-        ("verified", "signed", "permanent_secretary"),
-        ("signed", "sent_to_gra", "records_officer"),  # Records dispatches (0030)
-        # Cancelling a signed letter so a corrected one can be issued (0022).
-        ("signed", "originals_received", "permanent_secretary"),
-        ("sent_to_gra", "originals_received", "permanent_secretary"),
-        ("verified", "originals_received", "permanent_secretary"),  # return to the desk (0031)
+        ("submitted", "returned", "records_officer", *always),
+        ("originals_received", "returned", "etls_desk_officer", *always),
+        ("returned", "submitted", None, *always),
+        ("submitted", "originals_received", "records_officer", *always),
+        ("originals_received", "verified", "etls_desk_officer", *always),
+        ("originals_received", "rejected", "etls_desk_officer", *always),
+        ("signed", "sent_to_gra", "records_officer", *always),  # Records dispatches (0030)
+    } | {
+        # The signer's moves: sign; cancel a signed letter so a corrected one can
+        # be issued (0022); return to the desk (0031). The Director's unless the
+        # letter is for cement, then only the Minister's or the PS's (0040).
+        (from_code, to_code, post, op, own_only)
+        for from_code, to_code in [
+            ("verified", "signed"),
+            ("signed", "originals_received"),
+            ("sent_to_gra", "originals_received"),
+            ("verified", "originals_received"),
+        ]
+        for post, op, own_only in [
+            ("director_of_industry", "not_equals", False),
+            ("minister", "equals", True),
+            ("permanent_secretary", "equals", True),
+        ]
     }
 
 

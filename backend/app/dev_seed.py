@@ -17,8 +17,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.identity.service import assign_position, create_user, get_user_by_email
+from app.core.workflow import signatories
 
 DEFAULT_PASSWORD = "dev password 123"
+SIGNERS = ["signer1@motie.test", "signer2@motie.test"]  # put on the list by signatories@motie.test
 
 # (email, name, roles, posts). ".test" is a domain reserved for testing, so
 # these addresses can never belong to a real person.
@@ -32,6 +34,11 @@ USERS = [
     ("officer@motie.test", "Dev Industry Officer", ["officer"], ["industry_officer"]),
     ("desk@motie.test", "Dev ETLS Desk Officer", ["officer"], ["etls_desk_officer"]),
     ("recorder@motie.test", "Dev Absence Recorder", ["officer", "absence_recorder"], []),
+    # The Director's office keeps the authorised signatories list (S12)...
+    ("signatories@motie.test", "Dev Signatory Admin", ["officer", "signatory_admin"], []),
+    # ...and these two are on it: they sign while the Director is recorded absent.
+    ("signer1@motie.test", "Dev Signatory One", ["officer"], []),
+    ("signer2@motie.test", "Dev Signatory Two", ["officer"], []),
     ("admin@motie.test", "Dev Admin", ["admin"], []),
 ]
 
@@ -46,6 +53,13 @@ async def seed(session: AsyncSession, password: str) -> list[str]:
             created.append(email)
         for post in posts:
             await assign_position(session, user=user, position_code=post, actor=None)
+    # Through the same code as S12, so the audit log shows who added them.
+    # Only when the person is new, so running the seed twice changes nothing.
+    admin = await get_user_by_email(session, "signatories@motie.test")
+    for email in SIGNERS:
+        if email in created:
+            signer = await get_user_by_email(session, email)
+            await signatories.add_signatory(session, actor=admin, list_code="director_absence", user_id=signer.id)
     return created
 
 

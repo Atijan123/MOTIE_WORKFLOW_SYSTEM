@@ -8,7 +8,7 @@ const ELSEWHERE = new Set(["sent_to_gra"]);
 // The mock-ups' button wording for some moves; others use the workflow's own name.
 const LABELS: Record<string, string> = {
   "Confirm originals received": "Accept: originals received",
-  Verify: "Verify and send to PS",
+  Verify: "Verify and send for signature",
   "Sign the facility letter": "Sign letter",
   "Return to the desk": "Return to desk",
   Reject: "Reject application",

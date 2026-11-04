@@ -10,7 +10,7 @@ import pytest
 
 from app.core.identity.service import remove_position
 from app.core.workflow import delegation
-from tests.support import STAFF, move, open_case
+from tests.support import STAFF, add_signatory, move, open_case
 
 pytestmark = pytest.mark.anyio
 
@@ -93,19 +93,24 @@ async def test_minister_and_ps_both_absent_dps_does_the_ministers_step(act, peop
     assert event["details"]["absence_ids"] == [minister_away, ps_away]
 
 
-async def test_director_absent_dps_admin_and_finance_signs_and_assigns(act, people):
+async def test_director_absent_an_authorised_signatory_signs_and_assigns(act, people, make_user):
+    """No longer the DPS by succession (0040): a named person on the list."""
+    admin, signer = await make_user("officer", "signatory_admin"), await make_user("officer")
+    assert (await add_signatory(act, admin, signer)).status_code == 201
     case_id = await _case_ready_for(act, people, "with_officer")  # with the Director
     absence_id = await _away(act, people["director"])
 
-    response = await move(act, people["dps"], case_id, "with_officer", comment="Signed for the Director")
+    assert (await move(act, people["dps"], case_id, "with_officer")).status_code == 403
+    response = await move(act, signer, case_id, "with_officer", comment="Signed for the Director")
     assert response.status_code == 200, response.text
     assert response.json()["status"]["code"] == "with_officer"
 
     details = (await _last_event(act, people, case_id))["details"]
     assert details["transition"] == "Sign and assign to an officer"
-    assert details["as_position"] == "dps_admin_finance"
+    assert (details["as_position"], details["basis"]) == (None, "signatory")
     assert details["on_behalf_of"] == "director_of_industry"
     assert details["absence_ids"] == [absence_id]
+    assert details["in_absence"] == "in the Director's absence"
 
 
 async def test_director_present_dps_admin_and_finance_cannot_sign(act, people):
@@ -127,7 +132,10 @@ async def test_nobody_absent_each_step_only_by_its_own_post(act, people):
         assert (await _last_event(act, people, case_id))["details"]["basis"] == "own"
 
 
-async def test_case_history_shows_who_acted_for_whom(act, people):
+async def test_case_history_shows_who_acted_for_whom(act, people, make_user):
+    admin, signer = await make_user("officer", "signatory_admin"), await make_user("officer")
+    assert (await add_signatory(act, admin, signer)).status_code == 201
+    people = {**people, "signer": signer}
     case_id = (await open_case(act, people["applicant"]))["id"]
     await _away(act, people["minister"])
     await _away(act, people["director"])
@@ -136,7 +144,7 @@ async def test_case_history_shows_who_acted_for_whom(act, people):
         ("records_officer", "with_minister"),
         ("permanent_secretary", "with_ps"),  # for the Minister
         ("permanent_secretary", "with_director"),  # the PS's own step
-        ("dps", "with_officer"),  # for the Director
+        ("signer", "with_officer"),  # for the Director, from the list
         ("officer", "approved"),
     ]:
         assert (await move(act, people[actor], case_id, to_status)).status_code == 200, actor
@@ -151,7 +159,7 @@ async def test_case_history_shows_who_acted_for_whom(act, people):
         (people["records_officer"].id, "records_officer", None),
         (people["permanent_secretary"].id, "permanent_secretary", "minister"),
         (people["permanent_secretary"].id, "permanent_secretary", None),
-        (people["dps"].id, "dps_admin_finance", "director_of_industry"),
+        (signer.id, None, "director_of_industry"),
         (people["officer"].id, "industry_officer", None),
     ]
 

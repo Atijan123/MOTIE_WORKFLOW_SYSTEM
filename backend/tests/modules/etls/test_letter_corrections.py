@@ -31,14 +31,14 @@ async def _signed_case(act, people, **form) -> int:
     return case_id
 
 
-async def _verify_and_sign(act, people, case_id, hs_code="7210.49", signer="permanent_secretary"):
+async def _verify_and_sign(act, people, case_id, hs_code="7210.49", signer="director"):
     assert (await ready_to_verify(act, people, case_id, hs_code)).status_code == 200
     assert (await move(act, people["desk"], case_id, "verified")).status_code == 200
     response = await move(act, people[signer], case_id, "signed")
     assert response.status_code == 200, response.text
 
 
-async def _cancel(act, people, case_id, reason=REASON, who="permanent_secretary"):
+async def _cancel(act, people, case_id, reason=REASON, who="director"):
     return await move(act, people[who], case_id, "originals_received", comment=reason)
 
 
@@ -73,7 +73,7 @@ async def test_the_ps_cancels_a_signed_letter_with_a_reason(act, people, db_sess
     assert cancelled["id"] == original["id"]
     assert cancelled["status"] == "cancelled"
     assert cancelled["cancellation_reason"] == REASON
-    assert cancelled["cancelled_by"] == people["permanent_secretary"].id
+    assert cancelled["cancelled_by"] == people["director"].id
     assert cancelled["cancelled_at"] is not None
 
     # The file is kept, unchanged, and still downloadable, marked as cancelled.
@@ -90,7 +90,7 @@ async def test_the_ps_cancels_a_signed_letter_with_a_reason(act, people, db_sess
     assert "cancelled" in default.json()["detail"]
 
     [event] = await _events(db_session, case_id, "case.document_cancelled")
-    assert event.actor_user_id == people["permanent_secretary"].id
+    assert event.actor_user_id == people["director"].id
     assert event.details == {
         "issued_document_id": original["id"],
         "kind": letter.KIND,
@@ -110,27 +110,34 @@ async def test_cancelling_needs_a_written_reason(act, people, reason):
 
 async def test_the_cancel_button_says_it_needs_a_reason(act, people):
     case_id = await _signed_case(act, people)
-    actions = (await act(people["permanent_secretary"], "get", f"/cases/{case_id}")).json()["available_actions"]
+    actions = (await act(people["director"], "get", f"/cases/{case_id}")).json()["available_actions"]
     [cancel] = [a for a in actions if a["to_status"] == "originals_received"]
     assert cancel["name"] == "Cancel the signed letter"
     assert cancel["requires_comment"] is True
 
 
-@pytest.mark.parametrize("who", ["desk", "records_officer", "minister"])
-async def test_only_the_ps_may_cancel(act, people, who):
+@pytest.mark.parametrize("who", ["desk", "records_officer", "minister", "permanent_secretary"])
+async def test_only_the_signer_may_cancel(act, people, who):
+    """The Director, for anything but cement (the Minister and the PS cancel
+    cement letters: test_signing_rules.py)."""
     case_id = await _signed_case(act, people)
     assert (await _cancel(act, people, case_id, who=who)).status_code == 403
 
 
-async def test_someone_acting_for_the_ps_may_cancel(act, people, db_session):
+async def test_someone_acting_for_the_director_may_cancel(act, people, db_session):
     case_id = await _signed_case(act, people)
     start, end = today().isoformat(), (today() + timedelta(days=3)).isoformat()
-    away = await act(people["permanent_secretary"], "post", "/absences", json={"starts_on": start, "ends_on": end})
-    assert away.status_code == 201
+    delegated = await act(
+        people["director"],
+        "post",
+        "/delegations",
+        json={"from_position": "director_of_industry", "to_position": "dps_admin_finance", "starts_on": start, "ends_on": end},
+    )
+    assert delegated.status_code == 201, delegated.text
 
     assert (await _cancel(act, people, case_id, who="dps")).status_code == 200
     moves = await _events(db_session, case_id, "case.status_changed")
-    assert moves[-1].details["on_behalf_of"] == "permanent_secretary"
+    assert moves[-1].details["on_behalf_of"] == "director_of_industry"
     assert moves[-1].details["comment"] == REASON
     assert (await _listing(act, people, case_id))[0]["cancelled_by"] == people["dps"].id
 

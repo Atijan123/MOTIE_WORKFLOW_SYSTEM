@@ -65,16 +65,16 @@ async def test_hidden_moves_and_repeated_labels_send_nothing(act, people, db_ses
     assert (await move(act, people["records_officer"], case_id, "originals_received")).status_code == 200
     await ready_to_verify(act, people, case_id)
     assert (await move(act, people["desk"], case_id, "verified")).status_code == 200
-    assert (await move(act, people["permanent_secretary"], case_id, "signed")).status_code == 200
+    assert (await move(act, people["director"], case_id, "signed")).status_code == 200
     before = len(await _outbox(db_session, case_id))
 
     # The PS cancels the letter: invisible to the applicant, so no email.
-    cancel = await move(act, people["permanent_secretary"], case_id, "originals_received", comment="Typo")
+    cancel = await move(act, people["director"], case_id, "originals_received", comment="Typo")
     assert cancel.status_code == 200, cancel.text
     assert len(await _outbox(db_session, case_id)) == before
 
     assert (await move(act, people["desk"], case_id, "verified")).status_code == 200
-    assert (await move(act, people["permanent_secretary"], case_id, "signed")).status_code == 200
+    assert (await move(act, people["director"], case_id, "signed")).status_code == 200
     assert (await send_to_gra(act, people, case_id)).status_code == 200
     subjects = [e.subject.split(": ", 1)[1] for e in await _outbox(db_session, case_id)]
     assert subjects == [

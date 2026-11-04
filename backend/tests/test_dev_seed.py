@@ -5,6 +5,7 @@ import pytest
 from app import dev_seed
 from app.core.config import Settings, settings
 from app.core.identity.service import get_user_by_email
+from app.core.workflow import signatories
 
 pytestmark = pytest.mark.anyio
 
@@ -17,6 +18,10 @@ async def test_seed_creates_one_user_per_post_and_twice_changes_nothing(db_sessi
     assert desk.position_codes == {"etls_desk_officer"}
     ps = await get_user_by_email(db_session, "ps@motie.test")
     assert ps.position_codes == {"permanent_secretary"}
+    # Two named signatories, added by the Director's office (S12).
+    [lst] = [l for l in await signatories.overview(db_session, await get_user_by_email(db_session, "signatories@motie.test"))]
+    assert sorted(m.name for m in lst.current) == ["Dev Signatory One", "Dev Signatory Two"]
+    assert {m.added_by for m in lst.current} == {"Dev Signatory Admin"}
 
     assert await dev_seed.seed(db_session, "a dev password 1") == []
 

@@ -6,6 +6,7 @@ from datetime import timedelta
 import pytest
 
 from app.core.workflow.delegation import today
+from tests.support import add_signatory
 
 pytestmark = pytest.mark.anyio
 
@@ -50,15 +51,25 @@ async def test_the_dps_acting_for_an_absent_ps_in_every_workflow(act, people):
             ],
             "delegation_starts_on": None,
             "delegation_ends_on": None,
+            "in_absence": None,
         }
     ]
 
 
-async def test_the_directors_stand_in_is_for_etls_approvals_only(act, people):
+async def test_the_director_has_signatories_not_a_stand_in_post(act, people, make_user):
+    admin, signer = await make_user("officer", "signatory_admin"), await make_user("officer")
+    assert (await add_signatory(act, admin, signer)).status_code == 201
     await _away(act, people["director"])
-    [banner] = await _acting(act, people["dps"])
-    assert banner["position"] == "director_of_industry"
-    assert banner["workflows"] == ["etls_application"]
+    assert await _acting(act, people["dps"]) == []  # the DPS no longer acts for the Director
+    [banner] = await _acting(act, signer)
+    assert (banner["position"], banner["basis"], banner["in_absence"]) == (
+        "director_of_industry",
+        "signatory",
+        "in the Director's absence",
+    )
+    # Both services with a list (null when that is every service there is).
+    assert banner["workflows"] is None or set(banner["workflows"]) == {"etls_application", "etls_facility_letter"}
+    assert banner["absences"][0]["person"] == people["director"].full_name
 
 
 async def test_acting_by_delegation(act, people):
@@ -86,17 +97,31 @@ async def test_a_future_absence_shows_no_banner_yet(act, people):
 # --- S11: who acts for me, and who is away -------------------------------------
 
 
-async def test_who_acts_for_my_posts(act, people):
+async def test_who_acts_for_my_posts(act, people, make_user):
+    admin, signer = await make_user("officer", "signatory_admin"), await make_user("officer")
+    assert (await add_signatory(act, admin, signer)).status_code == 201
     response = await act(people["director"], "get", "/acting/for-me")
     assert response.status_code == 200
     [mine] = response.json()
     assert mine["position"] == "director_of_industry"
     assert mine["delegations"] == []
-    # The Director's stand-in is for ETLS approvals only; no line for facility letters.
-    assert [line["workflow"] for line in mine["succession"]] == ["etls_application"]
-    [stand_in] = mine["succession"][0]["line"]
-    assert stand_in["position"] == "dps_admin_finance"
-    assert people["dps"].full_name in stand_in["holders"]
+    # The Director's step goes to the authorised signatories list in both services.
+    lines = {line["workflow"]: line for line in mine["succession"]}
+    assert set(lines) == {"etls_application", "etls_facility_letter"}
+    for line in lines.values():
+        assert line["line"] == [] and signer.full_name in line["signatories"]
+
+
+async def test_who_acts_while_the_director_is_away_is_the_list(act, people, make_user):
+    admin, signer = await make_user("officer", "signatory_admin"), await make_user("officer")
+    assert (await add_signatory(act, admin, signer)).status_code == 201
+    absence = await _away(act, people["director"])
+    row = await _row(act, people["desk"], absence["id"])
+    [listed] = [w for w in row["who_acts"] if w["basis"] == "signatory"]
+    assert listed["position"] == "director_absence"
+    assert listed["title"] == "Authorised signatories in the Director's absence"
+    assert signer.full_name in listed["holders"]
+    assert listed["workflows"] is None or set(listed["workflows"]) == {"etls_application", "etls_facility_letter"}
 
 
 async def test_my_delegations_are_listed_with_their_id(act, people):

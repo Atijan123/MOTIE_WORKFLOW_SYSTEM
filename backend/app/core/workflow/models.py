@@ -105,6 +105,13 @@ class WorkflowTransition(Base):
         CheckConstraint(
             "by_applicant = (required_position_id IS NULL)", name="workflow_transitions_post_or_applicant"
         ),
+        CheckConstraint(
+            "applies_when IS NULL OR ("
+            "jsonb_typeof(applies_when) = 'object' "
+            "AND applies_when ?& array['field', 'op', 'value'] "
+            "AND applies_when->>'op' IN ('equals', 'not_equals', 'contains'))",
+            name="workflow_transitions_applies_when_shape",
+        ),
         {"schema": "core"},
     )
 
@@ -130,6 +137,13 @@ class WorkflowTransition(Base):
     # Puts a mistake right (cancelling a letter): may leave a final status, and
     # puts the case in nobody's queue (0030).
     is_correction: Mapped[bool] = mapped_column(Boolean, server_default=false())
+    # The move is only this case's move when the condition holds against the
+    # module's facts, e.g. "HS heading is 2523" (0040). Empty = always. Tested
+    # by service.applicable().
+    applies_when: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    # Only holders of the post itself: no delegation, succession or signatory
+    # list (0040), e.g. "only the Minister or the PS signs a cement letter".
+    own_post_only: Mapped[bool] = mapped_column(Boolean, server_default=false())
 
     # Two links to the same table (from and to), so each says which column it uses.
     from_status: Mapped[WorkflowStatus] = relationship(
@@ -269,6 +283,59 @@ class SuccessionStep(Base):
     workflow_id: Mapped[int | None] = mapped_column(SmallInteger, ForeignKey("core.workflows.id"))
     rank: Mapped[int] = mapped_column(SmallInteger)
     successor_position_id: Mapped[int] = mapped_column(SmallInteger, ForeignKey("core.positions.id"))
+
+
+class SignatoryList(Base):
+    """A named list of people who may sign for an absent post (0040). Written by migrations."""
+
+    __tablename__ = "signatory_lists"
+    __table_args__ = {"schema": "core"}
+
+    id: Mapped[int] = mapped_column(SmallInteger, Identity(), primary_key=True)
+    code: Mapped[str] = mapped_column(Text, unique=True)
+    name: Mapped[str] = mapped_column(Text)
+    absence_wording: Mapped[str] = mapped_column(Text)  # e.g. "in the Director's absence"
+
+
+class AuthorisedSignatory(Base):
+    """One person's time on a signatory list (0040). Add and remove only through
+    workflow/signatories.py, which checks who may and writes the audit rows."""
+
+    __tablename__ = "authorised_signatories"
+    __table_args__ = (
+        CheckConstraint(
+            "(removed_at IS NULL) = (removed_by IS NULL)", name="authorised_signatories_removed_complete"
+        ),
+        Index(
+            "authorised_signatories_current_key",
+            "list_id",
+            "user_id",
+            unique=True,
+            postgresql_where=text("removed_at IS NULL"),
+        ),
+        {"schema": "core"},
+    )
+    __mapper_args__ = {"eager_defaults": True}
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    list_id: Mapped[int] = mapped_column(SmallInteger, ForeignKey("core.signatory_lists.id"))
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("core.users.id"))
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    added_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("core.users.id"))
+    removed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    removed_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("core.users.id"))
+
+
+class SignatoryRule(Base):
+    """In this workflow, while every holder of this post is away, the people on
+    this list act for it instead of the succession order (0040). Written by migrations."""
+
+    __tablename__ = "signatory_rules"
+    __table_args__ = {"schema": "core"}
+
+    workflow_id: Mapped[int] = mapped_column(SmallInteger, ForeignKey("core.workflows.id"), primary_key=True)
+    position_id: Mapped[int] = mapped_column(SmallInteger, ForeignKey("core.positions.id"), primary_key=True)
+    list_id: Mapped[int] = mapped_column(SmallInteger, ForeignKey("core.signatory_lists.id"))
 
 
 class Absence(Base):

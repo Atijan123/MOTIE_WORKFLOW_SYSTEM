@@ -84,10 +84,12 @@ async def test_the_moves_say_how_the_timeline_describes_them(db_session):
             )
         )
     ).all()
-    assert [tuple(r) for r in rows] == [
-        ("Confirm originals received", "Originals checked", True),
-        # Cancelling a signed letter is invisible to the applicant (SCREENS.md A2).
-        ("Cancel the signed letter", None, False),
-        ("Cancel the signed letter", None, False),
-        ("Resubmit", "Resubmitted", True),  # 0027
-    ]
+    assert sorted(tuple(r) for r in rows) == sorted(
+        [
+            ("Confirm originals received", "Originals checked", True),
+            ("Resubmit", "Resubmitted", True),  # 0027
+        ]
+        # Cancelling a signed letter is invisible to the applicant (SCREENS.md A2):
+        # from "signed" and from "sent to GRA", for each of the three signers (0040).
+        + [("Cancel the signed letter", None, False)] * 6
+    )

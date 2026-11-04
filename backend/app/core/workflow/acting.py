@@ -3,7 +3,7 @@
 - acting_now(): the posts I'm acting for today, and on what basis. The banner
   on every screen: "You are acting for the Permanent Secretary (absent ...)".
 - cover_for_me(): for each of my posts, who would act if I'm away: my
-  delegations, and the succession line per workflow.
+  delegations, and the succession line (or signatories list) per workflow.
 - current_absences(): who is away now or soon, for all staff.
 - choices(): the posts (with their holders) and workflows the S11 forms pick from.
 
@@ -18,9 +18,17 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.identity.models import Position, User, position_holders
+from app.core.workflow import signatories
 from app.core.workflow.absence import may_record_for_others
 from app.core.workflow.delegation import is_delegated_away, today
-from app.core.workflow.models import Absence, Delegation, SuccessionStep, Workflow
+from app.core.workflow.models import (
+    Absence,
+    AuthorisedSignatory,
+    Delegation,
+    SignatoryList,
+    SuccessionStep,
+    Workflow,
+)
 from app.core.workflow.succession import acting_successor, succession_order
 
 
@@ -35,11 +43,12 @@ class AwayPeriod:
 class ActingNow:
     position: str  # code of the post I'm acting for
     title: str
-    basis: str  # "delegation" or "succession"
+    basis: str  # "delegation", "succession" or "signatory"
     workflows: list[str] | None  # None = every workflow
-    absences: list[AwayPeriod] = field(default_factory=list)  # succession: who is away, until when
+    absences: list[AwayPeriod] = field(default_factory=list)  # succession, signatory: who is away, until when
     delegation_starts_on: date | None = None  # delegation: its dates
     delegation_ends_on: date | None = None
+    in_absence: str | None = None  # signatory: e.g. "in the Director's absence"
 
 
 async def _names(session: AsyncSession, user_ids: set[int]) -> dict[int, str]:
@@ -50,11 +59,14 @@ async def _names(session: AsyncSession, user_ids: set[int]) -> dict[int, str]:
 
 async def acting_now(session: AsyncSession, user: User) -> list[ActingNow]:
     held = {p.id for p in user.positions}
-    if not held:
+    signing = await signatories.posts_i_may_sign_for(session, user)
+    if not held and not signing:
         return []
     positions = {p.id: p for p in await session.scalars(select(Position))}
     workflows = list(await session.scalars(select(Workflow).order_by(Workflow.id)))
-    found: list[ActingNow] = []
+    found = await _signing_now(session, user, signing - held, positions, workflows)
+    if not held:
+        return found
 
     # Delegations to one of my posts, in force today.
     on = today()
@@ -114,6 +126,43 @@ async def acting_now(session: AsyncSession, user: User) -> list[ActingNow]:
     return found
 
 
+async def _signing_now(
+    session: AsyncSession, user: User, posts: set[int], positions: dict[int, Position], workflows: list[Workflow]
+) -> list[ActingNow]:
+    """Posts I may sign for today as an authorised signatory, by the engine's
+    own rule (signatories.acting_signatory()), per workflow with a list."""
+    found = []
+    for position_id in sorted(posts):
+        covered: list[str] = []
+        away: dict[int, Absence] = {}
+        wording = None
+        for wf, _ in await signatories.lists_for_post(session, position_id):
+            if await is_delegated_away(session, position_id, wf.id):
+                continue
+            rule = await signatories.rule_for(session, wf.id, position_id)
+            signatory = await signatories.acting_signatory(session, rule, user)
+            if signatory:
+                covered.append(wf.code)
+                away.update({a.id: a for a in signatory.absences})
+                wording = signatory.list.absence_wording
+        if covered:
+            names = await _names(session, {a.user_id for a in away.values()})
+            found.append(
+                ActingNow(
+                    position=positions[position_id].code,
+                    title=positions[position_id].title,
+                    basis="signatory",
+                    workflows=None if len(covered) == len(workflows) else covered,
+                    absences=[
+                        AwayPeriod(names.get(a.user_id, "?"), a.starts_on, a.ends_on)
+                        for a in sorted(away.values(), key=lambda a: (a.starts_on, a.id))
+                    ],
+                    in_absence=wording,
+                )
+            )
+    return found
+
+
 @dataclass
 class StandIn:
     position: str
@@ -125,6 +174,9 @@ class StandIn:
 class SuccessionLine:
     workflow: str
     line: list[StandIn]  # first in line first
+    # Set instead of `line` where the workflow keeps a signatories list for
+    # this post: the names of the people on it now.
+    signatories: list[str] | None = None
 
 
 @dataclass
@@ -166,7 +218,12 @@ async def cover_for_me(session: AsyncSession, user: User) -> list[CoverForPost]:
             .order_by(Delegation.starts_on, Delegation.id)
         )
         lines = []
+        lists = {wf.id: lst for wf, lst in await signatories.lists_for_post(session, mine.id)}
         for wf in workflows:
+            if wf.id in lists:
+                names = [u.full_name for u in await signatories.current_members(session, lists[wf.id].id)]
+                lines.append(SuccessionLine(wf.code, [], signatories=names))
+                continue
             order = await succession_order(session, mine.id, wf.id)
             if order:
                 lines.append(
@@ -202,8 +259,10 @@ class WhoActs:
 
     position: str
     title: str
-    holders: list[str]  # names of the people at work in that post
-    basis: str  # "delegation", "succession", or "same_post" (another holder of their own post is at work)
+    holders: list[str]  # names of the people at work in that post (or on that list)
+    # "delegation", "succession", "signatory" (position and title are then the
+    # list's code and name), or "same_post" (another holder of their own post is at work)
+    basis: str
     workflows: list[str] | None  # None = every service
 
 
@@ -239,12 +298,17 @@ async def _who_acts(
     away: set[int],
     holders: dict[int, list[int]],
     workflows: list[Workflow],
+    signers: dict[int, list[int]],
 ) -> list[tuple[int, str, list[str] | None]]:
-    """(position id, basis, workflow codes or None) for each stand-in on day `on`.
+    """(position id, or list id for "signatory"; basis; workflow codes or None)
+    for each stand-in on day `on`.
 
     The engine's rules, for a given day instead of today: a delegation from the
-    post comes first (delegation.is_delegated_away()); otherwise the first post
-    in the succession order with a holder at work (succession.acting_successor()).
+    post comes first (delegation.is_delegated_away()); otherwise, where the
+    workflow keeps a signatories list for the post, the list if someone on it
+    is at work (signatories.acting_signatory()); otherwise the first post in the
+    succession order with a holder at work (succession.acting_successor()).
+    `signers` is {list id: user ids on it now}.
     """
     covered: dict[tuple[int, str], list[str]] = {}
     for post in sorted(person.positions, key=lambda p: p.id):
@@ -266,6 +330,11 @@ async def _who_acts(
             )
             if delegation:
                 covered.setdefault((delegation.to_position_id, "delegation"), []).append(wf.code)
+                continue
+            rule = await signatories.rule_for(session, wf.id, post.id)
+            if rule is not None:
+                if any(u not in away and u != person.id for u in signers.get(rule.list_id, [])):
+                    covered.setdefault((rule.list_id, "signatory"), []).append(wf.code)
                 continue
             for successor in await succession_order(session, post.id, wf.id):
                 if any(u not in away for u in holders.get(successor, [])):
@@ -299,10 +368,27 @@ async def current_absences(session: AsyncSession, user: User) -> list[AbsenceVie
     holders: dict[int, list[int]] = {}
     for row in (await session.execute(select(position_holders.c.position_id, position_holders.c.user_id))).all():
         holders.setdefault(row.position_id, []).append(row.user_id)
+    lists = {l.id: l for l in await session.scalars(select(SignatoryList))}
+    signers: dict[int, list[int]] = {}
+    for m in await session.scalars(select(AuthorisedSignatory).where(AuthorisedSignatory.removed_at.is_(None))):
+        signers.setdefault(m.list_id, []).append(m.user_id)
     user_ids = {a.user_id for a in absences} | {a.recorded_by for a in absences}
-    user_ids |= {u for ids in holders.values() for u in ids}
+    user_ids |= {u for ids in holders.values() for u in ids} | {u for ids in signers.values() for u in ids}
     people = {u.id: u for u in await session.scalars(select(User).where(User.id.in_(user_ids)))}
     may_see_reasons = may_record_for_others(user)
+
+    def stand_in(key: int, basis: str, codes: list[str] | None, absent_id: int, away: set[int]) -> WhoActs:
+        if basis == "signatory":
+            code, title, ids = lists[key].code, lists[key].name, signers.get(key, [])
+        else:
+            code, title, ids = positions[key].code, positions[key].title, holders.get(key, [])
+        return WhoActs(
+            position=code,
+            title=title,
+            holders=sorted(people[u].full_name for u in ids if u not in away and u != absent_id),
+            basis=basis,
+            workflows=codes,
+        )
 
     away_cache: dict[date, set[int]] = {}
     views = []
@@ -311,7 +397,7 @@ async def current_absences(session: AsyncSession, user: User) -> list[AbsenceVie
         if on not in away_cache:
             away_cache[on] = await _away_on(session, on)
         away = away_cache[on]
-        stand_ins = await _who_acts(session, people[a.user_id], on, away, holders, workflows)
+        stand_ins = await _who_acts(session, people[a.user_id], on, away, holders, workflows, signers)
         views.append(
             AbsenceView(
                 id=a.id,
@@ -323,20 +409,7 @@ async def current_absences(session: AsyncSession, user: User) -> list[AbsenceVie
                 may_cancel=a.user_id == user.id or may_see_reasons,
                 recorded_by=people[a.recorded_by].full_name,
                 recorded_by_self=a.recorded_by == a.user_id,
-                who_acts=[
-                    WhoActs(
-                        position=positions[position_id].code,
-                        title=positions[position_id].title,
-                        holders=sorted(
-                            people[u].full_name
-                            for u in holders.get(position_id, [])
-                            if u not in away and u != a.user_id
-                        ),
-                        basis=basis,
-                        workflows=codes,
-                    )
-                    for position_id, basis, codes in stand_ins
-                ],
+                who_acts=[stand_in(key, basis, codes, a.user_id, away) for key, basis, codes in stand_ins],
             )
         )
     return views

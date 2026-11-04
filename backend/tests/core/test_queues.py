@@ -10,7 +10,7 @@ import pytest
 from sqlalchemy import text
 
 from app.core.workflow.delegation import today
-from tests.support import ready_to_verify, create_draft, move, ready_for_records, submitted_case
+from tests.support import ready_to_verify, create_draft, move, open_case, ready_for_records, submitted_case
 
 pytestmark = pytest.mark.anyio
 
@@ -93,28 +93,28 @@ async def test_longest_waiting_first_with_days_waiting(act, people, db_session):
 
 
 async def test_someone_acting_by_succession_sees_the_absent_posts_cases(act, people):
-    case_id = await _submit(act, people)
-    await _to_ps(act, people, case_id)
-    assert case_id in await _queue(act, people["permanent_secretary"])
-    assert case_id not in await _queue(act, people["dps"])
+    case_id = (await open_case(act, people["applicant"]))["id"]
+    assert (await move(act, people["records_officer"], case_id, "with_minister")).status_code == 200
+    assert case_id in await _queue(act, people["minister"])
+    assert case_id not in await _queue(act, people["permanent_secretary"])
 
     start, end = today().isoformat(), (today() + timedelta(days=2)).isoformat()
-    away = await act(people["permanent_secretary"], "post", "/absences", json={"starts_on": start, "ends_on": end})
+    away = await act(people["minister"], "post", "/absences", json={"starts_on": start, "ends_on": end})
     assert away.status_code == 201
 
-    dps = await _queue(act, people["dps"])
-    assert case_id in dps
-    [action] = [a for a in dps[case_id]["available_actions"] if a["to_status"] == "signed"]
-    assert action["on_behalf_of"] == "permanent_secretary"
+    ps = await _queue(act, people["permanent_secretary"])
+    assert case_id in ps
+    [action] = [a for a in ps[case_id]["available_actions"] if a["to_status"] == "with_ps"]
+    assert action["on_behalf_of"] == "minister"
 
 
 async def test_a_delegate_sees_the_delegating_posts_cases(act, people):
     case_id = await _submit(act, people)
     await _to_ps(act, people, case_id)
     delegation = await act(
-        people["permanent_secretary"], "post", "/delegations",
+        people["director"], "post", "/delegations",
         json={
-            "from_position": "permanent_secretary",
+            "from_position": "director_of_industry",
             "to_position": "dps_admin_finance",
             "starts_on": today().isoformat(),
             "ends_on": (today() + timedelta(days=2)).isoformat(),
@@ -129,7 +129,7 @@ async def test_the_queue_can_be_narrowed_to_one_status(act, people):
     await _to_desk(act, people, waiting)
     signed = await _submit(act, people, "CO-Q-S")
     await _to_ps(act, people, signed)
-    assert (await move(act, people["permanent_secretary"], signed, "signed")).status_code == 200
+    assert (await move(act, people["director"], signed, "signed")).status_code == 200
 
     # Records' "Outgoing" tab: signed letters to send to GRA.
     only_signed = await _queue(act, people["records_officer"], status="signed")

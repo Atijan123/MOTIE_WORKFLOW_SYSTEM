@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy import text
 
 from app.core.workflow.delegation import today
-from tests.support import ready_to_verify, facility_letter_form, move, open_case, ready_for_records
+from tests.support import add_signatory, ready_to_verify, facility_letter_form, move, open_case, ready_for_records
 
 pytestmark = pytest.mark.anyio
 
@@ -65,27 +65,30 @@ async def test_newest_first_with_names_and_post_titles(act, people, db_session):
     assert times == sorted(times, reverse=True)
 
 
-async def test_acting_by_succession_shows_whose_absence_and_the_dates(act, people, db_session):
+async def test_an_authorised_signatory_shows_whose_absence_and_the_dates(act, people, make_user):
     case_id = await _letter_at_ps(act, people)
+    admin, signer = await make_user("officer", "signatory_admin"), await make_user("officer")
+    assert (await add_signatory(act, admin, signer)).status_code == 201
     start, end = today(), today() + timedelta(days=4)
     away = await act(
-        people["permanent_secretary"], "post", "/absences",
+        people["director"], "post", "/absences",
         json={"starts_on": start.isoformat(), "ends_on": end.isoformat()},
     )
     assert away.status_code == 201
-    assert (await move(act, people["dps"], case_id, "signed")).status_code == 200
+    assert (await move(act, signer, case_id, "signed")).status_code == 200
 
     signing = await _signing(act, people, case_id)
-    assert signing["actor_name"] == people["dps"].full_name
-    assert signing["actor_title"] == await _title(db_session, "dps_admin_finance")
+    assert signing["actor_name"] == signer.full_name
+    assert signing["actor_title"] is None  # a named person, from no post
     assert signing["acting_for"] == {
-        "position": "permanent_secretary",
-        "title": "Permanent Secretary",
-        "basis": "succession",
+        "position": "director_of_industry",
+        "title": "Director of Industry and Investment",
+        "basis": "signatory",
         "absences": [
-            {"person": people["permanent_secretary"].full_name, "starts_on": start.isoformat(), "ends_on": end.isoformat()}
+            {"person": people["director"].full_name, "starts_on": start.isoformat(), "ends_on": end.isoformat()}
         ],
         "delegation": None,
+        "in_absence": "in the Director's absence",
     }
 
 
@@ -93,9 +96,9 @@ async def test_acting_by_delegation_shows_the_delegation_and_its_dates(act, peop
     case_id = await _letter_at_ps(act, people, "CO-H-DEL")
     start, end = today(), today() + timedelta(days=2)
     delegation = await act(
-        people["permanent_secretary"], "post", "/delegations",
+        people["director"], "post", "/delegations",
         json={
-            "from_position": "permanent_secretary",
+            "from_position": "director_of_industry",
             "to_position": "dps_admin_finance",
             "starts_on": start.isoformat(),
             "ends_on": end.isoformat(),
@@ -108,7 +111,7 @@ async def test_acting_by_delegation_shows_the_delegation_and_its_dates(act, peop
     assert acting_for["basis"] == "delegation"
     assert acting_for["absences"] == []
     assert acting_for["delegation"] == {
-        "from_position": "Permanent Secretary",
+        "from_position": "Director of Industry and Investment",
         "to_position": await _title(db_session, "dps_admin_finance"),
         "starts_on": start.isoformat(),
         "ends_on": end.isoformat(),
@@ -120,7 +123,7 @@ async def test_acting_by_delegation_shows_the_delegation_and_its_dates(act, peop
 
 async def test_the_applicant_timeline_uses_plain_labels(act, people):
     case_id = await _letter_at_ps(act, people)
-    assert (await move(act, people["permanent_secretary"], case_id, "signed")).status_code == 200
+    assert (await move(act, people["director"], case_id, "signed")).status_code == 200
 
     response = await act(people["applicant"], "get", f"/cases/{case_id}/timeline")
     entries = response.json()
@@ -139,8 +142,8 @@ async def test_the_applicant_timeline_uses_plain_labels(act, people):
 
 async def test_cancelling_a_letter_is_invisible_to_the_applicant(act, people):
     case_id = await _letter_at_ps(act, people, "CO-H-CAN")
-    assert (await move(act, people["permanent_secretary"], case_id, "signed")).status_code == 200
-    cancel = await move(act, people["permanent_secretary"], case_id, "originals_received", comment="Wrong date")
+    assert (await move(act, people["director"], case_id, "signed")).status_code == 200
+    cancel = await move(act, people["director"], case_id, "originals_received", comment="Wrong date")
     assert cancel.status_code == 200
 
     assert (await _timeline(act, people["applicant"], case_id))[-1] == "Letter signed"  # no "cancelled" entry

@@ -2,7 +2,8 @@
 
 - staff_history(): every audit row, newest first, with the actor's name and
   post title, and, when someone acted for another post, that post and the
-  absences or delegation it relied on (with their dates).
+  absences or delegation it relied on (with their dates), or that they signed
+  as an authorised signatory "in the Director's absence".
 - applicant_timeline(): only the status changes an applicant may see, as plain
   labels with dates. No names, no comments, no internal step names.
 
@@ -42,9 +43,11 @@ class DelegationSeen:
 class ActingFor:
     position: str  # code, e.g. "permanent_secretary"
     title: str  # e.g. "Permanent Secretary"
-    basis: str  # "delegation" or "succession"
+    basis: str  # "delegation", "succession" or "signatory"
     absences: list[AbsenceSeen] = field(default_factory=list)
     delegation: DelegationSeen | None = None
+    # A named authorised signatory: why they could, e.g. "in the Director's absence".
+    in_absence: str | None = None
 
 
 @dataclass
@@ -96,6 +99,7 @@ async def staff_history(session: AsyncSession, case: Case) -> list[HistoryEntry]
                 )
                 if delegation
                 else None,
+                in_absence=e.details.get("in_absence"),
             )
         as_position = e.details.get("as_position")
         entries.append(

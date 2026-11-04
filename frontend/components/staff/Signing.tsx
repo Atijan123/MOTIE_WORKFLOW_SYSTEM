@@ -18,7 +18,8 @@ const Ok = ({ ok, children }: { ok: boolean; children: React.ReactNode }) => (
   </li>
 );
 
-/** S3 (docs/design/PS.dc.html): what was checked, and the letter as it will be signed. */
+/** S3 (docs/design/PS.dc.html): what was checked, and the letter as it will be signed. Shown to whoever may sign:
+ * the Director, an authorised signatory in the Director's absence, or (cement) the Minister or the PS. */
 export async function Signing({ caseId }: { caseId: number }) {
   const c = await api<Checks>(`/etls/facility-letters/${caseId}/checks`);
   const preview = `/files/etls/facility-letters/${caseId}/letter-preview.pdf`;

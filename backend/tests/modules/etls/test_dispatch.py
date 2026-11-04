@@ -30,7 +30,7 @@ async def _signed(act, people, number="CO-GRA-1") -> int:
 async def _verify_and_sign(act, people, case_id):
     assert (await ready_to_verify(act, people, case_id)).status_code == 200
     assert (await move(act, people["desk"], case_id, "verified")).status_code == 200
-    assert (await move(act, people["permanent_secretary"], case_id, "signed")).status_code == 200
+    assert (await move(act, people["director"], case_id, "signed")).status_code == 200
 
 
 async def _queue(act, user, **params) -> list[int]:
@@ -102,7 +102,7 @@ async def test_only_records_sends_and_a_refusal_leaves_nothing_behind(act, peopl
 async def test_a_corrected_letter_after_gra_had_one_reads_corrected_letter_issued(act, people):
     case_id = await _signed(act, people, "CO-GRA-CORR")
     assert (await send_to_gra(act, people, case_id)).status_code == 200
-    cancel = await move(act, people["permanent_secretary"], case_id, "originals_received", comment="Wrong quantity")
+    cancel = await move(act, people["director"], case_id, "originals_received", comment="Wrong quantity")
     assert cancel.status_code == 200, cancel.text
     await _verify_and_sign(act, people, case_id)
     # The corrected letter is a new issued letter, so it needs its own dispatch.
@@ -126,7 +126,7 @@ async def test_a_corrected_letter_after_gra_had_one_reads_corrected_letter_issue
 
 async def test_a_letter_cancelled_before_it_was_sent_reads_normally(act, people):
     case_id = await _signed(act, people, "CO-GRA-EARLY")
-    cancel = await move(act, people["permanent_secretary"], case_id, "originals_received", comment="Typo")
+    cancel = await move(act, people["director"], case_id, "originals_received", comment="Typo")
     assert cancel.status_code == 200, cancel.text
     await _verify_and_sign(act, people, case_id)
     assert (await send_to_gra(act, people, case_id)).status_code == 200

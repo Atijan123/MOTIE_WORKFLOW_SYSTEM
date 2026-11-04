@@ -43,7 +43,7 @@ class Succession(NamedTuple):
     absences: list[Absence]
 
 
-async def _presence(session: AsyncSession, position_id: int) -> tuple[bool, list[Absence]]:
+async def presence(session: AsyncSession, position_id: int) -> tuple[bool, list[Absence]]:
     """(is any holder of this post at work today?, absences of the holders who aren't)."""
     holder_ids = list(
         await session.scalars(
@@ -65,12 +65,12 @@ async def acting_successor(
     appointed. Then the first post in the succession order with a holder at work
     acts; posts whose holders are all away (or that are vacant) are skipped.
     """
-    present, away = await _presence(session, position_id)
+    present, away = await presence(session, position_id)
     if present or not away:
         return None
     reasons = list(away)
     for successor_id in await succession_order(session, position_id, workflow_id):
-        present, away = await _presence(session, successor_id)
+        present, away = await presence(session, successor_id)
         if present:
             return Succession(successor_id, reasons)
         reasons += away

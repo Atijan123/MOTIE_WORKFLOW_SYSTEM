@@ -22,7 +22,7 @@ async def _verified(act, people) -> int:
 
 
 async def _sign_action(act, people, case_id) -> dict:
-    case = (await act(people["permanent_secretary"], "get", f"/cases/{case_id}")).json()
+    case = (await act(people["director"], "get", f"/cases/{case_id}")).json()
     [action] = [a for a in case["available_actions"] if a["to_status"] == "signed"]
     return action
 
@@ -37,7 +37,7 @@ async def test_in_production_signing_waits_for_the_setting(act, people, producti
     case_id = await _verified(act, people)
     [reason] = (await _sign_action(act, people, case_id))["blocked_by"]
     assert NOT_SET in reason and "FACILITY_LETTER_REFERENCE_FORMAT" in reason
-    response = await move(act, people["permanent_secretary"], case_id, "signed")
+    response = await move(act, people["director"], case_id, "signed")
     assert response.status_code == 409
     assert NOT_SET in response.json()["detail"]
 
@@ -46,12 +46,12 @@ async def test_in_production_signing_works_once_it_is_set(act, people, productio
     monkeypatch.setattr(settings, "facility_letter_reference_format", "ADM 151/420/02")
     case_id = await _verified(act, people)
     assert (await _sign_action(act, people, case_id))["blocked_by"] == []
-    assert (await move(act, people["permanent_secretary"], case_id, "signed")).status_code == 200
+    assert (await move(act, people["director"], case_id, "signed")).status_code == 200
 
 
 async def test_the_preview_says_it_is_not_set(act, people, production):
     case_id = await _verified(act, people)
-    response = await act(people["permanent_secretary"], "get", f"/etls/facility-letters/{case_id}/letter-preview.pdf")
+    response = await act(people["director"], "get", f"/etls/facility-letters/{case_id}/letter-preview.pdf")
     assert response.status_code == 200  # the PS can still read the letter
 
 

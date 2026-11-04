@@ -23,7 +23,7 @@ async def _verified(act, people, number="CO-PS-1") -> int:
 
 async def test_the_ps_sees_every_check_made(act, people):
     case_id = await _verified(act, people)
-    response = await act(people["permanent_secretary"], "get", f"/etls/facility-letters/{case_id}/checks")
+    response = await act(people["director"], "get", f"/etls/facility-letters/{case_id}/checks")
     assert response.status_code == 200, response.text
     checks = response.json()
 
@@ -47,7 +47,7 @@ async def test_applicants_cannot_see_the_checks(act, people):
 
 async def test_the_preview_is_marked_and_never_stored(act, people, db_session):
     case_id = await _verified(act, people)
-    response = await act(people["permanent_secretary"], "get", f"/etls/facility-letters/{case_id}/letter-preview.pdf")
+    response = await act(people["director"], "get", f"/etls/facility-letters/{case_id}/letter-preview.pdf")
     assert response.status_code == 200, response.text
     assert response.headers["content-type"] == "application/pdf"
     assert response.headers["x-letter-status"] == "preview"
@@ -64,9 +64,13 @@ async def test_the_preview_is_marked_and_never_stored(act, people, db_session):
 
 async def test_the_preview_says_it_is_a_draft_with_the_ministrys_wording(act, people, db_session):
     case_id = await _verified(act, people)
-    fields = await letter.preview_fields(db_session, await db_session.get(Case, case_id))
-    assert fields.signature_title == "Permanent Secretary"
-    assert fields.signer_name == ""  # nobody has signed
+    # As the desk sees it: the desk can't sign, so no name; the Director's letter is "For: Permanent Secretary".
+    fields = await letter.preview_fields(db_session, await db_session.get(Case, case_id), people["desk"])
+    assert fields.signature_title == "For: Permanent Secretary"
+    assert (fields.signer_name, fields.signature_name) == ("", "")
+    # The Director sees their own name in it, as it will be signed.
+    mine = await letter.preview_fields(db_session, await db_session.get(Case, case_id), people["director"])
+    assert mine.signature_name == people["director"].full_name
     raw = letter.render_pdf(fields, preview=True, compress=False)
     assert letter.PREVIEW_MARK.encode() in raw
     assert b"REQUEST FOR ETLS FACILITY" in raw
@@ -75,22 +79,22 @@ async def test_the_preview_says_it_is_a_draft_with_the_ministrys_wording(act, pe
 
 async def test_no_preview_once_the_letter_is_signed(act, people):
     case_id = await _verified(act, people)
-    assert (await move(act, people["permanent_secretary"], case_id, "signed")).status_code == 200
-    response = await act(people["permanent_secretary"], "get", f"/etls/facility-letters/{case_id}/letter-preview.pdf")
+    assert (await move(act, people["director"], case_id, "signed")).status_code == 200
+    response = await act(people["director"], "get", f"/etls/facility-letters/{case_id}/letter-preview.pdf")
     assert response.status_code == 409
     assert "letter.pdf" in response.json()["detail"]
 
 
 async def test_the_ps_returns_the_file_to_the_desk_with_a_reason(act, people):
     case_id = await _verified(act, people)
-    actions = (await act(people["permanent_secretary"], "get", f"/cases/{case_id}")).json()["available_actions"]
+    actions = (await act(people["director"], "get", f"/cases/{case_id}")).json()["available_actions"]
     [back] = [a for a in actions if a["to_status"] == "originals_received"]
     assert back["name"] == "Return to the desk"
     assert back["requires_comment"] is True
 
-    assert (await move(act, people["permanent_secretary"], case_id, "originals_received")).status_code == 422
+    assert (await move(act, people["director"], case_id, "originals_received")).status_code == 422
     response = await move(
-        act, people["permanent_secretary"], case_id, "originals_received", comment="Check the quantity with Records"
+        act, people["director"], case_id, "originals_received", comment="Check the quantity with Records"
     )
     assert response.status_code == 200, response.text
     queue = (await act(people["desk"], "get", "/cases/queue")).json()

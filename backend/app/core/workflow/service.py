@@ -4,15 +4,17 @@ Every status change is checked against core.workflow_transitions and recorded
 in core.audit_log in the same transaction.
 """
 
-from typing import NamedTuple
+import logging
+from typing import Any, NamedTuple
 
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit.service import record_event
+from app.core.documents import conditions, facts
 from app.core.identity.models import User
 from app.core.workflow.delegation import active_delegations_to, is_delegated_away, today
-from app.core.workflow import checks, effects
+from app.core.workflow import checks, effects, signatories
 from app.core.workflow.flags import holding, resolve_by_move
 from app.core.workflow.errors import (  # noqa: F401  (re-exported: callers use service.NotFound etc.)
     AlreadyCancelled,
@@ -46,23 +48,30 @@ from app.core.workflow.succession import Succession, acting_successor
 
 AUDIT_ENTITY = "case"
 
+logger = logging.getLogger(__name__)
+
 
 class PermittedMove(NamedTuple):
     """A move this user may make, and on what basis:
     - the applicant's own move, e.g. "Submit" (transition.by_applicant);
-    - their own post (delegation and succession both None);
+    - their own post (delegation, succession and signatory all None);
     - a delegation from the required post to one of theirs (`delegation`);
-    - the succession order, because the required post's holders are away (`succession`).
+    - the succession order, because the required post's holders are away (`succession`);
+    - a signatories list the user is on, because the required post's holders
+      are away and the workflow uses a list for that post (`signatory`).
     """
 
     transition: WorkflowTransition
     delegation: Delegation | None = None
     succession: Succession | None = None
+    signatory: signatories.Signatory | None = None
 
     @property
     def basis(self) -> str:
         if self.transition.by_applicant:
             return "applicant"
+        if self.signatory:
+            return "signatory"
         return "delegation" if self.delegation else "succession" if self.succession else "own"
 
     @property
@@ -234,23 +243,50 @@ async def next_reference(session: AsyncSession, workflow: Workflow) -> str:
     return f"{workflow.reference_prefix}/{year}/{number:04d}"
 
 
+def _holds(condition: dict[str, Any], known: dict[str, Any]) -> bool:
+    """Does a move's applies_when hold? Unlike a document rule, anything
+    uncertain means no: a fact the module doesn't supply (a set-up mistake) or
+    one not known yet (no confirmed HS code) leaves the move out, so nobody
+    signs a letter under a rule that may not be theirs."""
+    if condition["field"] not in known:
+        logger.error("A move's condition uses unknown fact %r; leaving the move out", condition["field"])
+        return False
+    return conditions.holds(condition, known) is True
+
+
+async def applicable(
+    session: AsyncSession, case: Case, transitions: list[WorkflowTransition]
+) -> list[WorkflowTransition]:
+    """The transitions that are this case's moves at all: those whose
+    applies_when holds (e.g. a cement letter's signing is the Minister's or the
+    PS's, any other letter's the Director's). The others aren't blocked, they
+    simply don't exist for this case."""
+    if not any(t.applies_when for t in transitions):
+        return transitions  # the usual case: no facts needed
+    known = await facts.facts_for(session, case.workflow.code, case.id)
+    return [t for t in transitions if not t.applies_when or _holds(t.applies_when, known)]
+
+
 async def _permitted(
     session: AsyncSession, case: Case, user: User, transitions: list[WorkflowTransition]
 ) -> list[PermittedMove]:
     """Which of these transitions the user may make, best basis first: their own
-    posts, then a personal delegation, then the succession order.
+    posts, then a personal delegation, then the succession order or, where the
+    workflow names one for the post, its signatories list.
 
     The applicant's moves (Submit) belong to the case's applicant only: no post
-    holds them, so delegation and succession never apply."""
+    holds them, so delegation and succession never apply. Neither do they to a
+    move marked own_post_only."""
+    transitions = await applicable(session, case, transitions)
     applicant_moves = [t for t in transitions if t.by_applicant]
     own = [PermittedMove(t) for t in applicant_moves] if acts_as_applicant(case, user) else []
     transitions = [t for t in transitions if not t.by_applicant]
 
     held = {p.id for p in user.positions}
     own += [PermittedMove(t) for t in transitions if t.required_position_id in held]
-    rest = [t for t in transitions if t.required_position_id not in held]
+    rest = [t for t in transitions if t.required_position_id not in held and not t.own_post_only]
     if not rest:
-        return own  # nothing left that a delegation or succession could add
+        return own  # nothing left that someone acting for a post could add
 
     acting_for = await active_delegations_to(session, user, case.workflow_id)
     delegated = [
@@ -259,7 +295,7 @@ async def _permitted(
         if t.required_position_id in acting_for
     ]
 
-    succeeded = []
+    stood_in = []
     for t in rest:
         if t.required_position_id in acting_for:
             continue
@@ -267,10 +303,18 @@ async def _permitted(
         # the standing succession order doesn't apply, even to its first in line.
         if await is_delegated_away(session, t.required_position_id, case.workflow_id):
             continue
+        # Where the workflow keeps a signatories list for this post, the list
+        # replaces the succession order (0040): named people, not the next post.
+        rule = await signatories.rule_for(session, case.workflow_id, t.required_position_id)
+        if rule is not None:
+            signatory = await signatories.acting_signatory(session, rule, user)
+            if signatory:
+                stood_in.append(PermittedMove(t, signatory=signatory))
+            continue
         succession = await acting_successor(session, t.required_position_id, case.workflow_id)
         if succession and succession.acting_position_id in held:
-            succeeded.append(PermittedMove(t, succession=succession))
-    return own + delegated + succeeded
+            stood_in.append(PermittedMove(t, succession=succession))
+    return own + delegated + stood_in
 
 
 async def available_transitions(session: AsyncSession, case: Case, user: User) -> list[PermittedMove]:
@@ -355,8 +399,11 @@ async def change_status(
         )
     ).all()
     if not moves:
+        # Also what the slower of two people pressing at once gets: the lock
+        # above made them wait, and the case has moved on since their page loaded.
         raise TransitionNotAllowed(
-            f"A case can't move from '{from_status.code}' to '{to_status_code}'."
+            f"A case can't move from '{from_status.code}' to '{to_status_code}'. "
+            "If your page was open for a while, someone may have just acted on it: reload."
         )
     # Own posts come first in the list, so acting for someone else is only used
     # when the actor can't make the move in their own right.
@@ -364,7 +411,7 @@ async def change_status(
     if not permitted:
         raise NotPermitted("None of your positions can make this move.")
     chosen = permitted[0]
-    move, delegation, succession = chosen
+    move, delegation, succession, signatory = chosen
     # Checked after permission, so someone who may not act at all gets 403, not
     # a peek at why the case is held. A few moves (rejecting) may be made
     # while on hold; they resolve the flags below.
@@ -389,8 +436,9 @@ async def change_status(
         raise NotReady("Not ready: " + "; ".join(issues))
     # Recorded with the move, so the history shows what the actor was told.
     warned = await checks.warnings(session, case, move.id)
-    if move.by_applicant:
-        acting_from = None  # the applicant acts for themselves, from no post
+    if move.by_applicant or signatory:
+        # The applicant acts for themselves; a signatory as a named person, not from a post.
+        acting_from = None
     elif delegation:
         acting_from = delegation.to_position.code
     elif succession:
@@ -412,13 +460,27 @@ async def change_status(
             "to": to_status_code,
             "transition": move.name,
             # The post the actor acted from, whose step it was if not their own
-            # ("acting for"), and why they could: "own", "delegation" or
-            # "succession". Together: "PS, acting for the Minister, who is absent".
+            # ("acting for"), and why they could: "own", "delegation",
+            # "succession" or "signatory". Together: "PS, acting for the
+            # Minister, who is absent".
             "as_position": acting_from,
             "on_behalf_of": chosen.on_behalf_of,
             "basis": chosen.basis,
             "delegation_id": delegation.id if delegation else None,
-            "absence_ids": [a.id for a in succession.absences] if succession else [],
+            "absence_ids": [a.id for a in (succession or signatory).absences] if succession or signatory else [],
+            # Signed by a named person on a signatories list: who, which place
+            # on the list, and why ("in the Director's absence"). The name is
+            # kept as it was, so the record reads right after a change of name.
+            **(
+                {
+                    "signatory_id": signatory.membership.id,
+                    "signatory_list": signatory.list.code,
+                    "signatory_name": actor.full_name,
+                    "in_absence": signatory.list.absence_wording,
+                }
+                if signatory
+                else {}
+            ),
             "comment": comment,  # internal: staff only
             "applicant_message": applicant_message,  # shown to the applicant
             **({"warnings": warned} if warned else {}),

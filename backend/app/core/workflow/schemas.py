@@ -106,9 +106,10 @@ class ActingForOut(BaseModel):
 
     position: str  # e.g. "permanent_secretary"
     title: str  # e.g. "Permanent Secretary": the screen says "acting for the Permanent Secretary"
-    basis: str  # "delegation" or "succession"
-    absences: list[AbsenceSeenOut]  # who was away, from when to when (succession)
+    basis: str  # "delegation", "succession" or "signatory" (a named person on a signatories list)
+    absences: list[AbsenceSeenOut]  # who was away, from when to when (succession, signatory)
     delegation: DelegationSeenOut | None
+    in_absence: str | None = None  # signatory: e.g. "in the Director's absence"
 
 
 class AuditEventOut(BaseModel):
@@ -212,11 +213,12 @@ class ActingNowOut(BaseModel):
 
     position: str
     title: str
-    basis: str  # "delegation" or "succession"
+    basis: str  # "delegation", "succession" or "signatory"
     workflows: list[str] | None  # null = every workflow
-    absences: list[AwayPeriodOut]  # succession: whose absence, from when to when
+    absences: list[AwayPeriodOut]  # succession, signatory: whose absence, from when to when
     delegation_starts_on: date | None  # delegation: its dates
     delegation_ends_on: date | None
+    in_absence: str | None = None  # signatory: e.g. "in the Director's absence"
 
 
 class StandInOut(BaseModel):
@@ -228,6 +230,8 @@ class StandInOut(BaseModel):
 class SuccessionLineOut(BaseModel):
     workflow: str
     line: list[StandInOut]  # first in line first
+    # Instead of a line: this workflow uses a signatories list for the post; who is on it.
+    signatories: list[str] | None = None
 
 
 class MyDelegationOut(BaseModel):
@@ -251,8 +255,8 @@ class CoverForPostOut(BaseModel):
 class WhoActsOut(BaseModel):
     position: str
     title: str
-    holders: list[str]  # the people at work in that post
-    basis: str  # "delegation", "succession" or "same_post"
+    holders: list[str]  # the people at work in that post, or on that list
+    basis: str  # "delegation", "succession", "signatory" (position, title: the list's) or "same_post"
     workflows: list[str] | None  # null = every service
 
 
@@ -292,3 +296,43 @@ class ChoicesOut(BaseModel):
 
     posts: list[PostChoiceOut]
     workflows: list[WorkflowChoiceOut]
+
+
+# S12: authorised signatories (workflow/signatories.py)
+
+
+class UsedForOut(BaseModel):
+    workflow: str
+    workflow_name: str
+    position: str
+    position_title: str  # "while every Director of Industry and Investment is away"
+
+
+class SignatoryOut(BaseModel):
+    id: int  # for POST /signatories/members/{id}/remove
+    user_id: int
+    name: str
+    posts: list[str]
+    added_at: datetime
+    added_by: str
+    removed_at: datetime | None
+    removed_by: str | None
+
+
+class SignatoryListOut(BaseModel):
+    code: str
+    name: str
+    absence_wording: str
+    used_for: list[UsedForOut]
+    current: list[SignatoryOut]
+    past: list[SignatoryOut]  # most recently removed first
+
+
+class SignatoryCandidateOut(BaseModel):
+    user_id: int
+    name: str
+    posts: list[str]
+
+
+class AddSignatoryRequest(BaseModel):
+    user_id: int

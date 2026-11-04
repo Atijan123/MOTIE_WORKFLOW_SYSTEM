@@ -14,7 +14,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.identity.models import User
-from app.core.workflow import history, service, summaries
+from app.core.workflow import history, service, signatories, summaries
 from app.core.workflow.delegation import today
 from app.core.workflow.models import Case, Delegation, SuccessionStep, WorkflowStatus, WorkflowTransition
 
@@ -55,11 +55,13 @@ async def my_cases(session: AsyncSession, user: User) -> list[QueueItem]:
 
 async def _positions_i_might_act_as(session: AsyncSession, user: User) -> set[int]:
     """A generous superset of the posts whose moves this user could make today:
-    their own, any delegated to them now, and any whose succession line names
-    one of their posts. The exact rules are applied afterwards, per case."""
+    their own, any delegated to them now, any whose succession line names
+    one of their posts, and any with a signatories list they're on (who may
+    hold no post at all). The exact rules are applied afterwards, per case."""
     held = {p.id for p in user.positions}
+    signing = await signatories.posts_i_may_sign_for(session, user)
     if not held:
-        return set()
+        return signing
     on = today()
     delegated = await session.scalars(
         select(Delegation.from_position_id).where(
@@ -72,7 +74,7 @@ async def _positions_i_might_act_as(session: AsyncSession, user: User) -> set[in
     successions = await session.scalars(
         select(SuccessionStep.position_id).where(SuccessionStep.successor_position_id.in_(held))
     )
-    return held | set(delegated) | set(successions)
+    return held | set(delegated) | set(successions) | signing
 
 
 async def queue(

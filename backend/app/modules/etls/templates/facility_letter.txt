@@ -1,12 +1,13 @@
 ## Lines starting with ## are notes, never printed.
 ## Change "version" whenever you change the wording: every issued letter records it.
 ## Layout: a line wrapped in ** is bold. In a line with " >> ", the part after it
-## is printed at the right margin, on the same line.
+## is printed at the right margin, on the same line. A line made only of fields
+## that are all empty is left out (e.g. $signature_note unless a signatory signed).
 ## Fields: $file_reference $date $importer_name $importer_name_upper $importer_address
 ##   $product $hs_code $quantity $unit $exporter_name $exporter_country
 ##   $exporter_approval_number $product_approval_numbers $certificate_numbers
-##   $signature_title $signer_name $signer_title $acting_for
-## version: 2 (Ministry wording, 2026-10-20)
+##   $signature_name $signature_note $signature_title $signer_name $signer_title $acting_for
+## version: 3 (signer's name; "For: Permanent Secretary"; in the Director's absence. 2026-11-04)
 $file_reference >> $date
 
 The Commissioner General
@@ -27,6 +28,8 @@ Sincerely,
 
 
 
+$signature_name
+$signature_note
 $signature_title
 
 Cc: $importer_name

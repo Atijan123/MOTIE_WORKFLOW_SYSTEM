@@ -1,16 +1,21 @@
 """The ETLS facility letter to GRA, as a PDF, issued once when it is signed.
 
-When the PS (or someone acting for the PS) makes the "signed" move, the engine
-runs the effect issue_letter() below, in the same transaction:
+Who signs (SCREENS.md S3): the Director of Industry and Investment, or while
+every Director is recorded absent, an authorised signatory from the
+Director's office's list (S12); a cement letter (HS heading 2523, as the desk
+confirmed it), only the Minister or the PS. Those are the "signed" move's rows
+in the database (migration 0040), not code here. When one of them makes the
+move, the engine runs the effect issue_letter() below, in the same transaction:
 - build_fields() gathers what goes on the letter from the database;
 - render_pdf() lays those fields out on the page, using the text template in
   templates/facility_letter.txt ($placeholders; a line wrapped in ** is bold;
-  lines starting with ## are notes, one of them the template's version);
+  a line of fields that are all empty is left out; lines starting with ## are
+  notes, one of them the template's version);
 - the PDF is stored once (core/documents/issued.py) with its checksum and the
   template version. Downloads serve that stored file. It is never rendered again.
 
-To correct a signed letter, the PS (or someone acting) makes the move "Cancel
-the signed letter" with a reason; its effect cancel_letter() marks the letter
+To correct a signed letter, whoever may sign it makes the move "Cancel the
+signed letter" with a reason; its effect cancel_letter() marks the letter
 cancelled (the file is kept). The case goes back to the desk, and the next
 signing issues a corrected letter that records the one it replaces.
 
@@ -53,7 +58,7 @@ REFERENCE_NOT_SET = (
     "the Ministry's registry file reference isn't set on this server "
     "(FACILITY_LETTER_REFERENCE_FORMAT); ask the system administrator"
 )
-# The letter exists once the PS (or someone acting for them) has signed.
+# The letter exists once it has been signed.
 SIGNED_STATUSES = {"signed", "sent_to_gra"}
 
 
@@ -74,11 +79,15 @@ class LetterFields:
     product_approval_numbers: str
     certificate_numbers: str
     signer_name: str
-    signer_title: str
-    acting_for: str  # e.g. "for the Permanent Secretary", or "" when the PS signed
-    # Under "Sincerely,": the post whose signature it is, "For: ..." when someone
-    # acted for it. [CONFIRM] Whether the acting officer's name and title should
-    # also be printed (the Ministry's wording shows the title only).
+    signer_title: str  # their post, or "Authorised signatory"
+    acting_for: str  # e.g. "for the Director of Industry and Investment", or "" when the post holder signed
+    # The signature block under "Sincerely," (SCREENS.md S3, S12):
+    #   [signer's name]
+    #   [In the Director's absence]        only for an authorised signatory
+    #   For: Permanent Secretary           or the PS's or Minister's own title
+    # An empty line (no name on a preview nobody may sign) is left out.
+    signature_name: str
+    signature_note: str
     signature_title: str
 
 
@@ -155,46 +164,104 @@ def _form_fields(letter: FacilityLetter) -> dict:
     )
 
 
+SIGNATORY_TITLE = "Authorised signatory"
+# Every facility letter is the PS's letter: the Director signs it "For:
+# Permanent Secretary" (SCREENS.md S3), as does anyone acting for the Director.
+LETTER_FROM = "permanent_secretary"
+# Who signs under their own title instead: the PS, and the Minister (a cement
+# letter). [CONFIRM] The Minister's line ("Minister", or "For: Permanent Secretary").
+OWN_TITLE = {"permanent_secretary", "minister"}
+
+
+async def _signature(
+    session: AsyncSession, *, name: str, own_post: str | None, in_absence: str | None
+) -> dict:
+    """The signature block's three fields. `own_post`: the post the signer
+    signed from in their own right; None when they acted for someone."""
+    if own_post in OWN_TITLE:
+        title = await _position_title(session, own_post)
+    else:
+        title = f"For: {await _position_title(session, LETTER_FROM)}"
+    return dict(
+        signature_name=name,
+        # "in the Director's absence" starts its own line.
+        signature_note=in_absence[:1].upper() + in_absence[1:] if in_absence else "",
+        signature_title=title,
+    )
+
+
 async def build_fields(session: AsyncSession, case_id: int, signing: AuditEvent) -> LetterFields:
     """The letter's fields. Who signed, and as what, comes from `signing`, the
     audit row of the "signed" move: the same record that shows whether they
-    acted for the PS."""
+    acted for the post, and on what basis."""
     letter = await session.get(FacilityLetter, case_id)
     signer = await session.get(User, signing.actor_user_id)
-    acting_for = signing.details.get("on_behalf_of")
+    details = signing.details
+    acting_for = details.get("on_behalf_of")
     signed_on = signing.occurred_at.date()
-    # Whose signature the letter carries: the post whose step it was.
-    signing_post = await _position_title(session, acting_for or signing.details["as_position"])
+    # An authorised signatory signs as a named person, from no post.
+    signatory = details.get("basis") == "signatory"
 
     return LetterFields(
         file_reference=file_reference(case_id, signed_on.year),
         date=long_date(signed_on),
         **_form_fields(letter),
         signer_name=signer.full_name,
-        signer_title=await _position_title(session, signing.details["as_position"]),
-        acting_for=f"for the {signing_post}" if acting_for else "",
-        signature_title=f"For: {signing_post}" if acting_for else signing_post,
+        signer_title=SIGNATORY_TITLE if signatory else await _position_title(session, details["as_position"]),
+        acting_for=f"for the {await _position_title(session, acting_for)}" if acting_for else "",
+        **await _signature(
+            session,
+            # As recorded at signing, so a later change of name doesn't change the letter.
+            name=details.get("signatory_name") or signer.full_name,
+            own_post=None if acting_for else details["as_position"],
+            in_absence=details.get("in_absence"),
+        ),
     )
 
 
-async def preview_fields(session: AsyncSession, case: Case) -> LetterFields:
-    """The letter as it would read if signed today by the post whose move
-    signing is (the PS). Nobody's name: nobody has signed."""
+async def preview_fields(session: AsyncSession, case: Case, user: User) -> LetterFields:
+    """The letter as it would read if `user` signed it today. Someone who may
+    not sign sees it as the post whose move signing is on this case would
+    sign it (the Director, or the PS for cement), with no name."""
     letter = await session.get(FacilityLetter, case.id)
-    signing_post = await session.scalar(
-        select(Position.title)
-        .join(WorkflowTransition, WorkflowTransition.required_position_id == Position.id)
-        .join(WorkflowStatus, WorkflowStatus.id == WorkflowTransition.to_status_id)
-        .where(WorkflowTransition.workflow_id == case.workflow_id, WorkflowStatus.code == "signed")
+    mine = next(
+        (m for m in await workflow.available_transitions(session, case, user) if m.transition.to_status.code == "signed"),
+        None,
     )
+    if mine is not None:
+        post = mine.transition.required_position
+        acting, signatory = mine.on_behalf_of is not None, mine.signatory
+    else:
+        signing = await workflow.applicable(
+            session,
+            case,
+            list(
+                await session.scalars(
+                    select(WorkflowTransition)
+                    .join(WorkflowStatus, WorkflowStatus.id == WorkflowTransition.to_status_id)
+                    .where(
+                        WorkflowTransition.from_status_id == case.current_status_id,
+                        WorkflowStatus.code == "signed",
+                    )
+                    .order_by(WorkflowTransition.id)
+                )
+            ),
+        )
+        post = signing[0].required_position if signing else None
+        acting, signatory = False, None
     return LetterFields(
         file_reference=file_reference(case.id, today().year, preview=True),
         date=long_date(today()),
         **_form_fields(letter),
-        signer_name="",
-        signer_title=signing_post,
-        acting_for="",
-        signature_title=signing_post,
+        signer_name=user.full_name if mine else "",
+        signer_title=SIGNATORY_TITLE if signatory else (post.title if post else ""),
+        acting_for=f"for the {post.title}" if acting else "",
+        **await _signature(
+            session,
+            name=user.full_name if mine else "",
+            own_post=None if acting or post is None else post.code,
+            in_absence=signatory.list.absence_wording if signatory else None,
+        ),
     )
 
 
@@ -206,6 +273,7 @@ def _latin1(text: str) -> str:
 
 
 PREVIEW_MARK = "DRAFT FOR CHECKING - NOT SIGNED - NOT VALID AS A FACILITY LETTER"
+_FIELDS_ONLY = re.compile(r"(\s*\$\w+)+\s*")
 
 
 def render_pdf(
@@ -246,6 +314,10 @@ def render_pdf(
     # The layout marks (** and " >> ") are read from the template line *before*
     # the fields are filled in, so an importer called "A >> B" can't move text.
     for line in template.body.splitlines():
+        # A line made only of fields, all of them empty (e.g. no signatory's
+        # name), is left out rather than printed as a gap.
+        if _FIELDS_ONLY.fullmatch(line) and not fill(line).strip():
+            continue
         bold = line.startswith("**") and line.endswith("**") and len(line) > 4
         pdf.set_font("Helvetica", style="B" if bold else "", size=11)
         line = line[2:-2] if bold else line
@@ -348,8 +420,8 @@ async def mark_sent_to_gra(session: AsyncSession, *, case_id: int, actor: User, 
 
 
 async def preview(session: AsyncSession, case_id: int, user: User) -> bytes:
-    """The letter as it would be signed now, for the PS to read before signing
-    (SCREENS.md S3). Made fresh on each request and never stored: only the
+    """The letter as it would be signed now, for the signer to read before
+    signing (SCREENS.md S3). Made fresh on each request and never stored: only the
     signing move issues a letter."""
     case = await _staff_case(session, case_id, user)
     if await issued.get_current(session, case.id, KIND):
@@ -358,7 +430,7 @@ async def preview(session: AsyncSession, case_id: int, user: User) -> bytes:
     if gaps:
         # Only a draft can have gaps; there's no letter to show yet.
         raise workflow.NotReady("The application form isn't complete: " + "; ".join(gaps))
-    return render_pdf(await preview_fields(session, case), preview=True)
+    return render_pdf(await preview_fields(session, case, user), preview=True)
 
 
 async def _check_registry_reference_set(session: AsyncSession, case: Case) -> list[str]:
