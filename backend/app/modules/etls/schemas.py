@@ -133,6 +133,8 @@ class FacilityLetterOut(FacilityLetterForm):
     hs_code: str | None
     hs_code_confirmed: str | None
     certificates_of_origin: list[CertificateOut]
+    # For the applicant: their copy of the signed letter, once GRA's is sent (0041).
+    letter_copy_url: str | None = None
 
 
 class OtherCaseOut(BaseModel):
@@ -196,6 +198,13 @@ class HsCodeConfirmation(BaseModel):
     hs_code: HsCode
 
 
+class LetterCopyOut(BaseModel):
+    recipient: Literal["records_file", "gra", "applicant"]
+    label: str  # e.g. "GRA's copy"
+    # GRA's: when Records sent it. The applicant's: from when they could download it.
+    sent_on: date | None
+
+
 class IssuedLetterOut(BaseModel):
     id: int
     filename: str
@@ -210,6 +219,9 @@ class IssuedLetterOut(BaseModel):
     cancellation_reason: str | None
     sent_to_gra_on: date | None  # the dispatch date, once Records has sent it
     download_url: str
+    signature_note: str | None  # e.g. "in the Director's absence"; not printed on the letter
+    copies: list[LetterCopyOut]  # Records' file copy, GRA's, the applicant's (0041)
+
 
 
 class FormOptionsOut(BaseModel):

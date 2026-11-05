@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { LetterCopy } from "@/components/LetterCopy";
 import { Timeline } from "@/components/Timeline";
 import { api, apiOrNull } from "@/lib/api";
 import { goods } from "@/lib/labels";
@@ -47,6 +48,7 @@ export default async function TrackApplication({ params }: { params: Promise<{ i
           </Link>
         ) : null}
       </div>
+      <LetterCopy letter={letter} />
       <section className="card">
         <Timeline entries={timeline} />
       </section>

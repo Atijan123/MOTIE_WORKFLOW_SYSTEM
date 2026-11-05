@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
+import { LetterCopy } from "@/components/LetterCopy";
 import { Timeline } from "@/components/Timeline";
 import { api, apiOrNull } from "@/lib/api";
 import { longDate } from "@/lib/dates";
@@ -127,6 +128,7 @@ async function SelectedCase({ id }: { id: number }) {
         ) : null}
       </div>
       <Timeline entries={timeline} explanation={kase.status.explanation} />
+      <LetterCopy letter={letter} />
       <div className="spread small">
         <span className="muted">We’ll email you at each step.</span>
         <Link href={`/applications/${id}`}>Open on its own page</Link>

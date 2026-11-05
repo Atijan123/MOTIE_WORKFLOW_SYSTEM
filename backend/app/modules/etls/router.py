@@ -27,6 +27,7 @@ from app.modules.etls.schemas import (
     NewListItem,
     HsCodeConfirmation,
     IssuedLetterOut,
+    LetterCopyOut,
     WalkInApplication,
 )
 
@@ -36,7 +37,10 @@ router = APIRouter(prefix="/etls", tags=["etls"])
 
 async def _out(session: AsyncSession, letter: FacilityLetter, user: User) -> FacilityLetterOut:
     case = await workflow.get_case(session, letter.case_id, user)
+    # The applicant's own copy of the signed letter, once GRA's is sent.
+    copy_ready = workflow.acts_as_applicant(case, user) and await facility_letter.applicant_copy_ready(session, case)
     return FacilityLetterOut(
+        letter_copy_url=f"/etls/facility-letters/{letter.case_id}/my-copy.pdf" if copy_ready else None,
         case_id=letter.case_id,
         reference=case.reference,
         # Applicants get the plain label only (core service.status_view()).
@@ -212,7 +216,24 @@ async def list_letters(
     """Every letter issued on this case, oldest first, with cancelled ones marked."""
     letters = await facility_letter.letters(session, case_id, user)
     sent = await facility_letter.dispatches(session, case_id)
-    return [_letter_out(case_id, d, sent.get(d.id)) for d in letters]
+    copies = await facility_letter.copies(session, case_id)
+    return [_letter_out(case_id, d, sent.get(d.id), copies.get(d.id, [])) for d in letters]
+
+
+@router.get(
+    "/facility-letters/{case_id}/my-copy.pdf",
+    response_class=Response,
+    responses={200: {"content": {"application/pdf": {}}}},
+)
+async def download_applicant_copy(
+    case_id: int,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """The applicant's copy of the letter in force, once GRA's copy is marked
+    sent (409 before that). For the applicant, or Records for a walk-in."""
+    document, content = await facility_letter.applicant_copy(session, case_id, user)
+    return _pdf(document, content)
 
 
 @router.post("/facility-letters/{case_id}/sent-to-gra", response_model=CaseOut)
@@ -261,7 +282,7 @@ def _pdf(document: IssuedDocument, content: bytes) -> Response:
     )
 
 
-def _letter_out(case_id: int, d: IssuedDocument, dispatch=None) -> IssuedLetterOut:
+def _letter_out(case_id: int, d: IssuedDocument, dispatch=None, copies=()) -> IssuedLetterOut:
     return IssuedLetterOut(
         id=d.id,
         filename=d.filename,
@@ -276,6 +297,16 @@ def _letter_out(case_id: int, d: IssuedDocument, dispatch=None) -> IssuedLetterO
         cancellation_reason=d.cancellation_reason,
         sent_to_gra_on=dispatch.dispatched_on if dispatch else None,
         download_url=f"/etls/facility-letters/{case_id}/letters/{d.id}/file",
+        signature_note=d.signature_note,
+        copies=[
+            LetterCopyOut(
+                recipient=c.recipient,
+                label=facility_letter.COPIES[c.recipient],
+                # GRA's goes with the dispatch; the applicant may download theirs from then on.
+                sent_on=dispatch.dispatched_on if dispatch and c.recipient in ("gra", "applicant") else None,
+            )
+            for c in copies
+        ],
     )
 
 

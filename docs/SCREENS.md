@@ -16,9 +16,13 @@ Items marked `[CONFIRM]` are assumptions still to check with the ETLS desk.
 - **Case history is newest first**, with the actor's name and post title, and absence or delegation dates when someone acted for another post.
 - **Dates** in the Ministry format: "16th October, 2026".
 - **Case reference numbers** per service, a sequence per service per year, assigned when the applicant submits: `MOTIE/ETLS/FL/2026/0001` (facility letter), `MOTIE/ETLS/AP/…` (approval), `MOTIE/ETLS/CO/…` (certificate of origin). This is the tracking number shown to applicants and staff.
-- **The Ministry's registry file reference** (e.g. `ADM 151/420/01/PART IV`) is separate: it is what the facility letter prints at the top. Kept as a setting until the desk explains its parts `[CONFIRM]`. A real server must have it set: until then the PS's Sign is disabled, saying why.
+- **The Ministry's registry file reference** (e.g. `ADM 151/420/01/PART IV`) is separate: it is what the facility letter prints at the top. Kept as a setting until the desk explains its parts `[CONFIRM]`. A real server must have it set: until then the Director's Sign is disabled, saying why (built 8k).
 - **Uploads:** PDF, PNG or JPEG, max 10 MB, type checked from content.
-- **Notifications:** applicants are emailed at each status change and when a case is returned.
+- **Email (one service for everything):** the system sends email through an outbox and a background sender, never inside the user's request. Recipients can be applicants, staff, or **external contacts with no account** (e.g. NAC members from other institutions). Every email is logged: to whom, what, when, delivery status, linked to its case or meeting. Wording comes from editable templates.
+  - Applicants: at each status change and when a case is returned.
+  - Staff: optionally when a case lands in their queue (daily digest, not one email per case) `[CONFIRM]`.
+  - NAC members: meeting invitations, packs, inspection notices, minutes and decisions (S6, S7).
+- **Sensitive content is never attached.** Meeting packs contain companies' cost figures, so emails carry a **link** to download the pack, valid for a limited time and logged when opened, not the file itself. Notification emails say what changed, not the case details.
 - **Queues** show how long each case has waited at its current step.
 - **Walk-ins:** Records can create any application on behalf of an applicant; recorded as such.
 
@@ -35,9 +39,9 @@ Items marked `[CONFIRM]` are assumptions still to check with the ETLS desk.
 - Goods: product, quantity (number), unit, HS code (optional).
 - Exporter: name, country, ETLS approval number, one or more product approval numbers, one or more certificates of origin, **each with its number and issue date** (so the system can check the six-month validity).
 - Documents checklist: business registration, annual returns certificate, certificate of origin (with note: bring the original to Records), invoice, export declaration, receipt (cement only, shown as "not known yet" until the **desk confirms** the HS code; a code the applicant declares does not decide it).
-- Save draft, with any fields still empty; Submit is disabled until the form is complete and the required documents are uploaded, with a count of what is missing.
-- **Certificate warning at submission:** if a certificate of origin expires (six months after its issue date) within 30 days, the applicant is warned but may still submit.
-- **Applicant labels (facility letter):** Draft → Submitted ("Bring the original certificate of origin to Records") → Originals checked → Being verified → Awaiting signature → Letter signed → Letter sent to GRA. Plus: Returned: action needed (with the message), Rejected (with the reason). Cancelling a signed letter is invisible to the applicant: the cancel itself is hidden and the case simply shows "Being verified" again. If the cancelled letter had already been sent to GRA, the corrected letter's "sent to GRA" shows as **"Corrected letter issued"** (decided 2026-10-24).
+- Save draft; Submit is disabled until required documents are uploaded, with a count of what is missing.
+- **Certificate warning at submission:** if a certificate of origin expires (six months after its issue date) within 30 days, the applicant is warned but may still submit (built 8c).
+- **Applicant labels (facility letter):** Draft → Submitted ("Bring the original certificate of origin to Records") → Originals checked → Being verified → Awaiting signature → Letter signed → Letter sent to GRA. Plus: Returned: action needed (with the message), Rejected (with the reason). A cancelled and reissued letter is invisible to the applicant: the case simply shows "Being verified" again.
 
 ### A3. Status on a phone (`Track`)
 - One case: reference, goods, exporter, current applicant status with a one-line explanation, timeline.
@@ -63,7 +67,7 @@ Items marked `[CONFIRM]` are assumptions still to check with the ETLS desk.
 
 ## Staff screens: facility letters
 
-Route: Records (originals seen) → ETLS desk (verify) → PS (sign) → **Records dispatches the signed letter to GRA** (outgoing correspondence is Records' job) → sent to GRA. "Sent to GRA" is the final status; there is no separate manual "Close" step unless GRA turns out to report back `[CONFIRM]`.
+Route: Records (originals seen) → ETLS officer (verify) → **Director of Industry & Investment signs "For: Permanent Secretary"** (the PS does not sign facility letters). **When the Director is absent, any officer on the authorised signatories list can sign** (see "Authorised signatories" below). **Every facility letter, cement included, follows this route**; cement only adds the receipt to the documents, decided by the HS code the desk confirms. Every signature records who signed and, in the audit log and the stored letter, that they signed in the Director's absence. → **one stored letter, three copies: Records' file copy, GRA's copy (Records dispatches it from Outgoing), and the applicant's copy (downloadable from their case page once GRA's copy is marked sent)** → sent. "Letter sent to GRA" is the final status; there is no separate manual "Close" step unless GRA turns out to report back `[CONFIRM]`. How the applicant collects a paper copy, if they need one, `[CONFIRM]`.
 
 ### S1. Records queue (`Records`)
 - Queue of all services, oldest first, with service, applicant, goods and days waiting.
@@ -72,21 +76,32 @@ Route: Records (originals seen) → ETLS desk (verify) → PS (sign) → **Recor
 - **Outgoing tab:** signed facility letters to dispatch. Download the stored letter, then "Mark sent to GRA" with the dispatch date.
 
 ### S2. ETLS desk verification (`Desk`)
-- Duplicate certificate flag: which earlier case used the number, its status and date; finding (required) to clear; **or reject or return directly while the flag is open** (the reason also resolves the flag; a resubmission is checked again) `[CONFIRM]`.
+- Duplicate certificate flag: which earlier case used the number, its status and date; finding (required) to clear; **or reject or return directly while the flag is open** (the reason also resolves the flag; a resubmission is checked again) `[CONFIRM]` (built 8l).
 - Application summary.
 - HS code: enter or confirm; shows whether the cement receipt applies.
 - Checks against the ECOWAS ETLS list, each a recorded tick: exporter approval listed; product approval covers the goods.
-- Certificate validity is **computed** from the issue dates on the form: Verify is blocked while any certificate is more than six months past its issue date (decided 2026-10-24). Whether GRA also needs it still valid on the day of clearance is not confirmed `[CONFIRM]`.
+- Certificate validity is **computed** from the issue dates on the form: Verify is blocked while any certificate is more than six months past its issue date (decided 2026-10-24, built 8c). Whether GRA also needs it still valid on the day of clearance is not confirmed `[CONFIRM]`.
 - Verify (disabled until flag cleared, HS code confirmed, checks ticked, documents complete) or return to applicant.
 - History panel.
 
-### S3. PS signs the letter (`PS`)
+### S3. Director signs the letter for the PS (`PS` board, to be renamed)
 - Letters awaiting signature; summary of checks done (originals seen, ECOWAS list checked, no duplicates).
-- Letter preview in the Ministry's wording.
-- Sign (stores the letter) or return to desk. Cancel and reissue for signed letters.
+- Letter preview in the Ministry's wording, signature block "[Name] / For: Permanent Secretary". The letter does not print "in the Director's absence"; the audit log and the stored letter record it.
+- Sign (stores the letter) or return to the ETLS officer; any officer on the list may return a letter nobody has signed yet. **Cancel and reissue a signed letter: only the Director, or the officer who signed that letter** `[CONFIRM]`.
+- Shown in the Director's queue; while the Director is recorded absent, also in the queue of every officer on the authorised signatories list (S12). The first to sign takes it; the others' queues clear.
+- Signing stores one letter and records its three copies: Records' file copy; GRA's copy, in Records' Outgoing tab to dispatch; the applicant's copy, downloadable from their case page (A1, A3) once GRA's copy is marked sent. A cancelled letter's copies stay on record; the corrected letter gets three of its own.
+
+### S12. Authorised signatories (Director's office)
+- **The Director's office keeps the list** of officers authorised to sign for the Director when the Director is absent. There is **no fixed rule** that a DPS acts; DPSs, senior officers and others can be on the list.
+- The list names officers (people), each with: post, date added, date removed, added by. Changes are audited.
+- Applies to **facility letters and ETLS approvals** (sign and assign). One list for both unless the Director's office wants separate lists `[CONFIRM]`.
+- While the Director is recorded absent, the item appears in the queue of every officer on the list; the first to act takes it and it leaves the others' queues.
+- The audit log and the stored letter record the officer's name and "in the Director's absence". The printed letter shows only their name and "For: Permanent Secretary", as the Ministry's letters do.
+- Cancel and reissue of a letter a signatory signed: that officer or the Director only `[CONFIRM]`. Any officer on the list may return a letter not yet signed.
+- **Cement facility letters are no exception:** they are signed like any other (decided 2026-11-04). Only the receipt requirement differs (A2).
 
 ### S11. Absences and delegations (all staff)
-- **My absences:** a post holder records their own absence (dates, reason optional) or delegates to another post (dates, all workflows or one). Shows who will act for them under the succession order.
+- **My absences:** a post holder records their own absence (dates, reason optional) or delegates to another post (dates, all workflows or one). For the Director: shows that officers on the authorised signatories list can sign while they are away. For other posts: shows who acts for them under the succession order.
 - **Record for someone else:** staff with the `absence_recorder` role (PS's office, HR `[CONFIRM]`) record an absence on a post holder's behalf; audited as "recorded by".
 - List of current and upcoming absences, with revoke for delegations.
 
@@ -95,23 +110,26 @@ Route: Records (originals seen) → ETLS desk (verify) → PS (sign) → **Recor
 The approval workflow is a new `etls_approval` workflow; the placeholder `etls_application` is retired.
 **Per-product outcomes:** the case status tracks the file (with NAC, with ECOWAS, done); each product carries its own decision (NAC: approve / not approve / defer; ECOWAS: approved / not approved).
 
-Route: Records (samples received) → Minister → PS → Director of Industry & Investment (signs and assigns; DPS Admin & Finance when absent) → officer (technical review and inspection) → NAC → ECOWAS submission → ECOWAS outcome → approved register.
+Route: Records (samples received) → Minister → PS → Director of Industry & Investment (signs and assigns; when absent, any officer on the authorised signatories list) → officer (technical review and inspection) → NAC → ECOWAS submission → ECOWAS outcome → approved register.
 
 ### S4. Minute a file (`Minute`), used by the Minister and the PS
 - Summary: products with tariff items, criteria and value added; documents complete; samples received.
 - Minute text; minute to the next position (Minister → PS, PS → Director); return to Records.
 
-### S5. Sign and assign (`Assign`), Director or DPS Admin & Finance acting
+### S5. Sign and assign (`Assign`), Director or an authorised signatory acting
 - Minutes so far; choose officer; minute to officer; sign and assign, or return to PS.
 
 ### S6. Technical review (`Review`), assigned officer
 - Per product: finding (meets criterion / query applicant / does not meet).
 - Cost price limits from part IV of the form: officer enters ex-factory cost price, salaries and wages, external works and services, financial charges; system shows each as % of cost price against the form's limits (20%, 10%, 3%) and flags any over the limit.
-- Factory inspection: date (shown to applicant), inspection team, report upload. `[CONFIRM]` inspections are by the NAC.
+- Factory inspection: date (shown to applicant), inspection team chosen from the NAC members list, report upload. "Email the inspection notice" sends the date, place and company to the team. `[CONFIRM]` inspections are by the NAC.
 - Recommendation to the committee; send to NAC (disabled until inspection report uploaded) or ask the applicant for information.
 
 ### S7. NAC decisions (`NAC`), secretary records the meeting
-- Meeting date; downloadable meeting pack (PDF).
+- **NAC members list** (kept by the secretary): name, institution, email, phone, active or not. Members do not need system accounts.
+- Meeting date, time and place; downloadable meeting pack (PDF).
+- **Members for this meeting:** each member with invitation status (not sent / sent / delivered / failed), pack link opened or not, and attendance (ticked after the meeting).
+- "Email invitation and pack link" to all or selected members; "Send reminder" the day before `[CONFIRM]`; "Email minutes and decisions" after the meeting.
 - **Decision per product**, not per case: approve / not approve / defer, with reason for not approve or defer.
 - Signed minutes upload; record decisions. Approved products go to the portal holder; applicants are told of other decisions.
 

@@ -4,14 +4,13 @@ Every status change is checked against core.workflow_transitions and recorded
 in core.audit_log in the same transaction.
 """
 
-import logging
-from typing import Any, NamedTuple
+from typing import NamedTuple
 
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit.service import record_event
-from app.core.documents import conditions, facts
+from app.core.documents.models import IssuedDocument
 from app.core.identity.models import User
 from app.core.workflow.delegation import active_delegations_to, is_delegated_away, today
 from app.core.workflow import checks, effects, signatories
@@ -47,8 +46,6 @@ from app.core.workflow.models import (
 from app.core.workflow.succession import Succession, acting_successor
 
 AUDIT_ENTITY = "case"
-
-logger = logging.getLogger(__name__)
 
 
 class PermittedMove(NamedTuple):
@@ -243,28 +240,18 @@ async def next_reference(session: AsyncSession, workflow: Workflow) -> str:
     return f"{workflow.reference_prefix}/{year}/{number:04d}"
 
 
-def _holds(condition: dict[str, Any], known: dict[str, Any]) -> bool:
-    """Does a move's applies_when hold? Unlike a document rule, anything
-    uncertain means no: a fact the module doesn't supply (a set-up mistake) or
-    one not known yet (no confirmed HS code) leaves the move out, so nobody
-    signs a letter under a rule that may not be theirs."""
-    if condition["field"] not in known:
-        logger.error("A move's condition uses unknown fact %r; leaving the move out", condition["field"])
-        return False
-    return conditions.holds(condition, known) is True
-
-
-async def applicable(
-    session: AsyncSession, case: Case, transitions: list[WorkflowTransition]
-) -> list[WorkflowTransition]:
-    """The transitions that are this case's moves at all: those whose
-    applies_when holds (e.g. a cement letter's signing is the Minister's or the
-    PS's, any other letter's the Director's). The others aren't blocked, they
-    simply don't exist for this case."""
-    if not any(t.applies_when for t in transitions):
-        return transitions  # the usual case: no facts needed
-    known = await facts.facts_for(session, case.workflow.code, case.id)
-    return [t for t in transitions if not t.applies_when or _holds(t.applies_when, known)]
+async def _issued_current_document(session: AsyncSession, case: Case, user: User) -> bool:
+    """Did this user issue one of the case's current (not cancelled) documents?"""
+    found = await session.scalar(
+        select(IssuedDocument.id)
+        .where(
+            IssuedDocument.case_id == case.id,
+            IssuedDocument.cancelled_at.is_(None),
+            IssuedDocument.issued_by == user.id,
+        )
+        .limit(1)
+    )
+    return found is not None
 
 
 async def _permitted(
@@ -275,16 +262,21 @@ async def _permitted(
     workflow names one for the post, its signatories list.
 
     The applicant's moves (Submit) belong to the case's applicant only: no post
-    holds them, so delegation and succession never apply. Neither do they to a
-    move marked own_post_only."""
-    transitions = await applicable(session, case, transitions)
+    holds them, so delegation and succession never apply.
+
+    A move marked stand_in_must_be_issuer ("Cancel the signed letter") is open
+    to someone acting for the post only if they issued the case's current
+    document: the Director may cancel any letter, a signatory only the one
+    they signed. [CONFIRM]"""
     applicant_moves = [t for t in transitions if t.by_applicant]
     own = [PermittedMove(t) for t in applicant_moves] if acts_as_applicant(case, user) else []
     transitions = [t for t in transitions if not t.by_applicant]
 
     held = {p.id for p in user.positions}
     own += [PermittedMove(t) for t in transitions if t.required_position_id in held]
-    rest = [t for t in transitions if t.required_position_id not in held and not t.own_post_only]
+    rest = [t for t in transitions if t.required_position_id not in held]
+    if any(t.stand_in_must_be_issuer for t in rest) and not await _issued_current_document(session, case, user):
+        rest = [t for t in rest if not t.stand_in_must_be_issuer]
     if not rest:
         return own  # nothing left that someone acting for a post could add
 

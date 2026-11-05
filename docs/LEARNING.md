@@ -16,7 +16,26 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 10b — One signing flow for every letter; who may cancel; three copies of each letter (2026-11-05)
+Follow-ups to step 10a.
+
+**Built:**
+- **No special rule for cement.** Cement letters go Records → ETLS officer → Director (or a signatory while the Director is away), like every other facility letter. Migration 0041 deletes the Minister's and the PS's cement rows from 0040, and the two columns only they used (`applies_when`, `own_post_only`), with the engine code behind them (`applicable()`) and the `not_equals` operator. **The cement receipt is unchanged:** a document requirement decided by the HS code the desk confirms (step 6g). The demo's cement case 9 is gone.
+- **The printed signature block is just the name and "For: Permanent Secretary"** (template version 4), as the Ministry's letters are now. "In the Director's absence" is no longer printed. It is still in the signing's audit row (`in_absence`) and now also on the stored letter: the new column `core.issued_documents.signature_note` (the database trigger keeps it unchangeable like the rest of the row; letters signed under 10a were filled in from their audit rows).
+- **Cancel and reissue: only the Director, or the officer who signed that letter** `[CONFIRM]`. New move setting `workflow_transitions.stand_in_must_be_issuer`, on "Cancel the signed letter": someone acting for the Director (a signatory, or a delegate) may make the move only if they issued the case's current letter. The Director, in their own right, may always. Any signatory may still **return** a letter nobody has signed yet. See `_permitted()` and `_issued_current_document()` in backend/app/core/workflow/service.py.
+- **Three copies of each letter.** Signing still stores one PDF; it now also writes three rows in the new table `etls.facility_letter_copies`: **Records' file copy**, **GRA's copy** (dispatched from Outgoing, as before) and **the applicant's copy**. A corrected letter gets three of its own; a cancelled one's stay on record. The app can add copy rows, never change or delete them. `GET /etls/facility-letters/{id}/letters` lists each letter's copies and its `signature_note`.
+- **The applicant downloads their copy** from A1 (the selected case) and A3 ("Download your copy of the facility letter (PDF)") once GRA's copy is marked sent: `GET /etls/facility-letters/{id}/my-copy.pdf`, for the applicant (or Records for a walk-in) only, the same stored file with its checksum. Before the dispatch, or while a corrected letter is awaited, it answers 409. How the applicant collects a paper copy is `[CONFIRM]`.
+- **SCREENS.md is the master copy** and now matches what's built: the four built rules are written back (S2: return while the duplicate flag is open, a certificate over six months blocks Verify; Sign disabled until the registry reference is set; A2's 30-day expiry warning), the cement exception is gone from S12, and S3 and the route describe the copies and the cancel rule. The three-copies gap is removed from GAPS.md.
+
+**Files:** backend/alembic/versions/0041_one_signing_flow_and_letter_copies.py; backend/app/core/workflow/service.py, models.py; backend/app/core/documents/conditions.py, issued.py (`issue(..., signature_note=)`), models.py; backend/app/modules/etls/letter.py (`COPIES`, `issue_letter()`, `copies()`, `applicant_copy_ready()`, `applicant_copy()`, `_signature()`), templates/facility_letter.txt, models.py (`FacilityLetterCopy`), router.py (`download_applicant_copy()`), schemas.py (`LetterCopyOut`, `letter_copy_url`); backend/app/demo_seed.py; tests: backend/tests/modules/etls/test_letter_copies.py (new), test_signing_rules.py, test_letter.py, test_letter_corrections.py, test_facility_letter.py, test_ps_support.py, backend/tests/core/test_applicant_labels.py, backend/tests/test_demo_seed.py; frontend/components/LetterCopy.tsx (new), frontend/app/applications/page.tsx, frontend/app/applications/[id]/page.tsx, frontend/app/files/[...path]/route.ts, frontend/lib/types.ts, frontend/e2e/tests/facility-letter.spec.ts; docs/SCREENS.md, docs/GAPS.md.
+**Try it:**
+- `bash scripts/seed-demo.sh --yes`, then log in as `fatou.jallow@demo.test`: case 0001 has been sent to GRA, so its panel offers "Download your copy of the facility letter". Case 0007 (not signed yet) doesn't.
+- As `signer1@motie.test` (the Director is recorded away in the demo), sign 0003; as `signer2@motie.test` you may not cancel it, as `signer1@` you may.
+- `docker compose run --rm tools pytest tests/modules/etls/test_letter_copies.py tests/modules/etls/test_signing_rules.py -v`
+**New concepts:** [Copies as records, not files](#copies-as-records-not-files).
+
 ### Step 10a — Authorised signatories sign in the Director's absence (S12); cement letters need the Minister or the PS (2026-11-04)
+*The cement rule and the printed "In the Director's absence" line were removed again in step 10b.*
 The rule for signing in the Director's absence changed (SCREENS.md S3, S5, S12 and both routes).
 
 **Built:**
@@ -48,7 +67,7 @@ The rule for signing in the Director's absence changed (SCREENS.md S3, S5, S12 a
 - `bash scripts/seed-demo.sh --yes`, then log in as `signer1@motie.test`: the banner, and case 0003 in My queue. Sign it, then log in as `signer2@motie.test`: it's gone from their queue. As `ps@motie.test`: case 0008 (cement) is there; as `director@motie.test` it isn't.
 - `docker compose run --rm tools pytest tests/core/test_signatories.py tests/core/test_signatory_race.py tests/modules/etls/test_signing_rules.py -v`
 - `docker compose run --rm e2e npx playwright test tests/s12-signatories.spec.ts`
-**New concepts:** [Named signatories instead of a successor post](#named-signatories-instead-of-a-successor-post), [Moves that apply only to some cases](#moves-that-apply-only-to-some-cases), [Separation of duties](#separation-of-duties). Also see [Row locking](#row-locking-select--for-update) for "first to act claims it".
+**New concepts:** [Named signatories instead of a successor post](#named-signatories-instead-of-a-successor-post), Moves that apply only to some cases (removed in 10b, with the cement rule), [Separation of duties](#separation-of-duties). Also see [Row locking](#row-locking-select--for-update) for "first to act claims it".
 
 ### Step 9k — Demo data: `scripts/seed-demo.sh` (2026-10-26)
 For the Ministry demo. Development only.
@@ -1589,15 +1608,15 @@ Because the token is 256 random bits, a plain SHA-256 hash is enough. Passwords 
 **Here:** `core.authorised_signatories` and `core.signatory_rules` (0040); `acting_signatory()` in backend/app/core/workflow/signatories.py; `_permitted()` in backend/app/core/workflow/service.py uses the list *instead of* the succession order wherever a rule names one.
 **Learn more:** [Wikipedia: Signing authority](https://en.wikipedia.org/wiki/Signing_authority)
 
-### Moves that apply only to some cases
-**What:** usually a workflow says "from Verified, the Director may Sign". Sometimes who signs depends on the case itself: cement letters go to the Minister or the PS. Rather than an `if cement:` in the code, each move row can carry a condition (`applies_when`), tested against facts the module supplies. A move whose condition fails doesn't exist for that case: it's not in anyone's queue and not offered as a disabled button. "Not known yet" counts as "no", so nobody signs under a rule that might not be theirs.
-**Here:** `applicable()` and `_holds()` in backend/app/core/workflow/service.py; the condition language in backend/app/core/documents/conditions.py (shared with document requirements, see [Rules as data](#rules-as-data-a-small-condition-language)); the facts in `facility_letter_facts()` in backend/app/modules/etls/service.py.
-**Learn more:** [Martin Fowler: Rules Engine](https://martinfowler.com/bliki/RulesEngine.html) (and why to keep one small).
-
 ### Separation of duties
 **What:** the person who grants a power shouldn't be able to grant it to themselves. The signatory admin can add anyone on the staff to the list, except themselves: someone else in the office must do that. It's a cheap control that makes a single bad actor's job harder, and the audit log shows who added whom.
 **Here:** `add_signatory()` in backend/app/core/workflow/signatories.py refuses `user_id == actor.id`; the S12 page leaves you out of the "Add an officer" list.
 **Learn more:** [Wikipedia: Separation of duties](https://en.wikipedia.org/wiki/Separation_of_duties)
+
+### Copies as records, not files
+**What:** a signed letter "goes out in three copies", but they are the same letter. Storing three PDFs would invite them to drift apart (a later fix to one but not the others). So there is one stored file, with its checksum, and three small rows that say "this letter has a copy for Records, one for GRA and one for the applicant". What happens to each copy (GRA's dispatched, the applicant's downloadable) hangs off its row or off the letter's dispatch, and every download serves the one checksummed file.
+**Here:** `etls.facility_letter_copies` (0041), written by `issue_letter()` in backend/app/modules/etls/letter.py; `applicant_copy()` serves the applicant's. Compare [Issue once, store with a checksum](#issue-once-store-with-a-checksum).
+**Learn more:** [Wikipedia: Single source of truth](https://en.wikipedia.org/wiki/Single_source_of_truth)
 
 ## 3. Decisions
 
@@ -1613,8 +1632,10 @@ These were open questions; the Ministry has answered them. The code follows them
 - **When the Minister is away, the PS acts; when the PS is away too, a DPS acts (2026-10-19).** This follows the general chain of command, through the succession order (steps 5b and 5d), not a standing transition. (Which DPS is still open.)
 - ~~**When the Director of Industry and Investment is away, the DPS Administration and Finance may sign and assign ETLS files (2026-10-19).**~~ Replaced on 2026-11-04 (see below).
 - **Signing in the Director's absence (2026-11-04, SCREENS.md S12):** there is no fixed rule that a DPS acts. The Director's office keeps a list of named officers; while the Director is recorded absent, any of them may sign, for facility letters and ETLS approvals (sign and assign). The signature records their name and "in the Director's absence".
-- **Facility letters are signed by the Director "For: Permanent Secretary" (2026-11-04, SCREENS.md S3).** The PS doesn't sign them, except cement.
-- **Cement facility letters are signed by the Minister or the PS only (2026-11-04),** following the Ministry's notices to GRA of 17th and 26th November 2025.
+- **Facility letters are signed by the Director "For: Permanent Secretary" (2026-11-04, SCREENS.md S3).** The PS doesn't sign them.
+- ~~**Cement facility letters are signed by the Minister or the PS only (2026-11-04).**~~ Withdrawn on 2026-11-05: cement letters follow the same flow as every other; only the cement receipt differs.
+- **The printed signature block is the signer's name and "For: Permanent Secretary" (2026-11-05),** as the Ministry's letters are now. "In the Director's absence" is recorded, not printed.
+- **Each signed letter has three copies (2026-11-05):** Records' file copy, GRA's, and the applicant's, which the applicant may download once GRA's is sent.
 - **A position holder, or an authorised officer on their behalf, records absences (2026-10-19).** The audit log shows who recorded it. (Who counts as "authorised" is still open.)
 - **Certificate of origin validity (2026-10-24):** the desk can't verify while any certificate is more than six months past its issue date; at submission the applicant is warned, not stopped, if one expires within 30 days. (Whether GRA also needs it valid at clearance is *not* confirmed; see Open questions.)
 - **The applicant's timeline after a cancelled letter (2026-10-24):** only the cancel move is hidden. A corrected letter replacing one already sent to GRA reads "Corrected letter issued" when it is sent.
@@ -1941,9 +1962,15 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-11-04 | The list replaces only the succession order; a Director's own delegation still comes first | the list replaces delegation too | Literal reading of the request ("replace the succession step"), and it keeps the existing rule "a personal delegation beats the standing order". `[CONFIRM]` |
 | 2026-11-04 | Whoever may sign a letter may also return it to the desk and cancel it | keep those moves with the PS | Same person, same file; otherwise the PS would be cancelling letters signed by the Director. `[CONFIRM]` |
 | 2026-11-04 | "First to act claims it" by the existing row lock in `change_status()`, no "claim" record | a separate claim step or table | The lock already guarantees only one move succeeds. A claim record would add a state (claimed but not signed) that someone must clear when a signatory walks away. |
-| 2026-11-04 | Cement is decided by `applies_when` on each move row (`hs_heading` equals / not_equals 2523) | a check that blocks the Director's Sign on cement | A blocking check would put cement letters in the Director's queue with a button they can never press. |
-| 2026-11-04 | Cement moves are `own_post_only` | let succession and delegation apply | "Only the Minister or the PS": with succession, a DPS would sign when both are away. |
-| 2026-11-04 | No HS code confirmed means neither the Director's nor the Minister's/PS's moves apply | guess "not cement" | Fail closed. It can't happen today, because the desk can't verify without confirming the code. |
+| 2026-11-04 | Cement is decided by `applies_when` on each move row; cement moves are `own_post_only` | a check that blocks the Director's Sign on cement | **Withdrawn in 10b** with the cement rule. |
+| 2026-11-05 | The cement rule's columns and engine code are deleted, not kept for later | keep `applies_when` and `own_post_only` as general features | Nothing else uses them, and unused rules in the engine are something the ICT unit would have to understand and test. They're easy to bring back from 0040 if a real rule needs them. |
+| 2026-11-05 | Cancel is limited by a move setting, `stand_in_must_be_issuer` | a check function; hard-code it in the ETLS module | Checks only see the case, not who is asking. The setting keeps the rule data, and any workflow with an issued document can use it. |
+| 2026-11-05 | A signatory may cancel only while they can still act for the Director (on the list, Director away) | let the signer cancel at any time | Literal "the officer who signed" would give a signatory a power after the Director is back; the Director can cancel then. `[CONFIRM]` |
+| 2026-11-05 | The same rule holds for a delegate: they cancel only letters they signed | let a delegate cancel any letter | "Only the Director, or the officer who signed that letter." |
+| 2026-11-05 | "In the Director's absence" stored on the issued letter (`signature_note`) as well as the audit row | only the audit row | You asked for it in the stored letter record; it also shows in the letters listing without reading the audit log. |
+| 2026-11-05 | Three copies are rows (`etls.facility_letter_copies`) of one stored file | three stored PDFs, perhaps stamped "COPY" | One file, one checksum: the copies can't differ. Stamped copies would be a new template, if the Ministry wants them. |
+| 2026-11-05 | GRA's dispatch stays recorded against the letter, not the GRA copy row | move it to the copy | Nothing changes for Records' Outgoing tab, and the applicant's copy follows the same dispatch. |
+| 2026-11-05 | The applicant's copy is a separate endpoint (`my-copy.pdf`) | open `letter.pdf` to applicants | Staff and applicant downloads have different rules (the applicant's waits for the dispatch); separate endpoints keep each rule simple. |
 | 2026-11-04 | Signatories must be active staff; an absent signatory (one with a post and a recorded absence) is skipped | allow anyone | Same idea as succession skipping a post whose holders are away. `[CONFIRM]` |
 | 2026-11-04 | A signatory acts as a named person, so the audit row's `as_position` is empty and their name is stored in the row | record their own post | They sign because they're on the list, not because of their post (DPSs and others alike). Storing the name keeps the record right after a change of name. |
 | 2026-11-04 | The signer's name is always printed, with "For: Permanent Secretary" unless the PS or Minister signs in their own right | name only for signatories | SCREENS.md S3: the block is "[Name] / For: Permanent Secretary". This settles the earlier `[CONFIRM]` on naming whoever acted. |
@@ -1977,7 +2004,7 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 - [ ] **Facility letter form lists:** are there fixed lists for exporter country (ECOWAS members), unit and product? They would make checks such as the cement rule exact.
 - [ ] **Duplicate certificates:** does a number from a *rejected* case count as used? (Right now every earlier use counts.) May anyone besides the ETLS desk clear the flag?
 - [ ] **Originals:** besides the certificate of origin, must any other paper original be seen in person (e.g. the invoice)? It's one column per document (`original_required`).
-- [ ] **Facility letter layout:** the wording is in (step 6i) and the signature block follows SCREENS.md S3 (step 10a). Still to check: the letterhead (printed paper, or a logo and address we should add?); whether the subject line is bold; and what the Minister's line says on a cement letter (now "Minister"; or "For: Permanent Secretary"?). See backend/app/modules/etls/templates/facility_letter.txt and `OWN_TITLE` in backend/app/modules/etls/letter.py.
+- [ ] **Facility letter layout:** the wording is in (step 6i) and the signature block is the signer's name and "For: Permanent Secretary" (step 10b). Still to check: the letterhead (printed paper, or a logo and address we should add?) and whether the subject line is bold. See backend/app/modules/etls/templates/facility_letter.txt.
 - [ ] **Issued letters:** storing (step 6f) and cancel-and-correct (step 6l) are built. Still open: may the importer download it? Does a corrected letter get a new file reference? Should the case go back to the desk (now) or straight to the PS? Is cancelling allowed after "Sent to GRA" (now yes), and must GRA be told in writing when a letter they hold is cancelled?
 - [ ] **The cement receipt:** which receipt is it (e.g. a payment receipt for a cement levy)? Is "HS heading 2523" the right trigger, or only some subheadings (e.g. 2523.29 Portland cement, not 2523.10 clinker)? Are other headings subject to receipts too? See backend/alembic/versions/0020_facility_letter_hs_code.py.
 - [ ] **HS code:** it's optional for applicants now (step 6k). Which officer enters or confirms it: the ETLS desk (placeholder) or someone else? How many digits does GRA use (we accept 6, 8 or 10)?
@@ -2006,21 +2033,31 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 
 - [ ] **Authorised signatories (step 10a):** may a Director's own delegation still hand signing to a post (now yes; the list replaces only the succession order)? Should a signatory who is recorded absent be skipped (now yes)? Is "you can't add yourself" right? Who in the Director's office gets the `signatory_admin` role? When the Director's post is vacant (no holder at all), should the list apply (now no, as for succession)?
 - [ ] **One list or two:** facility letters and ETLS approvals share the list `director_absence`. Does the Director's office want separate lists? (A new list and one UPDATE of `core.signatory_rules`.)
-- [ ] **Returning and cancelling:** whoever may sign may also return a letter to the desk and cancel a signed one (the Director or a signatory; the Minister or the PS for cement). Right?
-- [ ] **Cement when the Minister and the PS are both away:** nobody else may sign (own post only), so cement letters wait. Right? Is "HS heading 2523" still the exact trigger (see the cement receipt question)?
+- [ ] **Returning and cancelling (step 10b):** any signatory may return an unsigned letter to the desk; a signed letter is cancelled only by the Director or by the officer who signed it. Should that officer keep the power after the Director is back (now no; the Director cancels then)?
+- [ ] **The applicant's copy (step 10b):** downloadable from the case page once GRA's copy is sent. Does the importer also collect a paper copy, and if so from whom (Records?) and is that recorded? Should Records' file copy be printed and filed, and recorded as filed?
 
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
 
+### Step 10b
+1. A signatory signs while the Director is away. Where can you still find that they signed "in the Director's absence", now that the letter doesn't print it?
+2. The applicant opens their case after Records has marked the letter sent to GRA, and the Director then cancels the letter. What happens to the applicant's download, and when does it come back?
+3. Why are the three copies rows rather than three PDFs?
+
+#### Show answers
+1. In the signing's audit row (`details.in_absence`, with the absences it relied on, shown in the case history) and on the stored letter itself, `core.issued_documents.signature_note` (also in `GET .../letters`).
+2. `my-copy.pdf` serves only the *current* letter whose GRA copy has been dispatched. After the cancel there is no current letter, so it answers 409 and the link disappears. The corrected letter gets its own three copies; the link comes back once Records marks that letter sent to GRA.
+3. They're the same letter. One stored file with one checksum can't drift apart; the rows only record that each copy exists and what happens to it.
+
 ### Step 10a
 1. The Director is recorded absent and Awa and Lamin are both on the list. Both press Sign on the same letter in the same second. What does each see, and why can't two letters be issued?
-2. A cement letter is verified. Why isn't it in the Director's queue at all, rather than shown with a disabled Sign button? And why can't the DPS sign it when the Minister and the PS are both away?
+2. (Since 10b the cement rule is gone.) A letter is signed by Awa, a signatory. Who may cancel it?
 3. The Director's office wants a separate list for ETLS approvals. What has to change: code, data, or both?
 
 #### Show answers
 1. One gets 200 and the letter; the other gets 409 ("someone may have just acted on it: reload"). `change_status()` reads the case with `SELECT ... FOR UPDATE`, so the second request waits for the first to commit, then reads status "signed". There's no move from "signed" to "signed", so it's refused before any effect (issuing the letter) runs. The unique index on current issued letters is a second guard.
-2. The Director's Sign row has `applies_when` "hs_heading not_equals 2523". `applicable()` drops it for a cement case before anything else, so the queue (which uses the engine's own `available_transitions()`) never offers it. The Minister's and the PS's rows are `own_post_only`, so `_permitted()` never considers delegation, succession or a list for them.
+2. The Director, and Awa while she can still act for the Director. Lamin, also on the list, may not: "Cancel the signed letter" has `stand_in_must_be_issuer`, and he didn't issue the current letter (step 10b).
 3. Only data: a migration that inserts a new row in `core.signatory_lists` and points the `etls_application` (later `etls_approval`) row of `core.signatory_rules` at it. The S12 screen shows every list by itself.
 
 ### Step 9k

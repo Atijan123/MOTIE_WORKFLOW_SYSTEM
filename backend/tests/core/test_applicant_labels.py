@@ -90,6 +90,6 @@ async def test_the_moves_say_how_the_timeline_describes_them(db_session):
             ("Resubmit", "Resubmitted", True),  # 0027
         ]
         # Cancelling a signed letter is invisible to the applicant (SCREENS.md A2):
-        # from "signed" and from "sent to GRA", for each of the three signers (0040).
-        + [("Cancel the signed letter", None, False)] * 6
+        # from "signed" and from "sent to GRA".
+        + [("Cancel the signed letter", None, False)] * 2
     )

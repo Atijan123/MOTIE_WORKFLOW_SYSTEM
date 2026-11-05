@@ -33,7 +33,7 @@ async def test_facility_letter_workflow_is_seeded(db_session):
     rows = (
         await db_session.execute(
             text(
-                "SELECT f.code, t.code, p.code, x.applies_when->>'op', x.own_post_only "
+                "SELECT f.code, t.code, p.code, x.stand_in_must_be_issuer "
                 "FROM core.workflow_transitions x "
                 "JOIN core.workflows w ON w.id = x.workflow_id "
                 "JOIN core.workflow_statuses f ON f.id = x.from_status_id "
@@ -43,34 +43,24 @@ async def test_facility_letter_workflow_is_seeded(db_session):
             )
         )
     ).all()
-    always = (None, False)
-    assert {tuple(r) for r in rows} == {
-        ("draft", "submitted", None, *always),  # the applicant's own move (0026)
+    assert sorted(tuple(r) for r in rows) == sorted([
+        ("draft", "submitted", None, False),  # the applicant's own move (0026)
         # Returns and the applicant's resubmission (0027).
-        ("submitted", "returned", "records_officer", *always),
-        ("originals_received", "returned", "etls_desk_officer", *always),
-        ("returned", "submitted", None, *always),
-        ("submitted", "originals_received", "records_officer", *always),
-        ("originals_received", "verified", "etls_desk_officer", *always),
-        ("originals_received", "rejected", "etls_desk_officer", *always),
-        ("signed", "sent_to_gra", "records_officer", *always),  # Records dispatches (0030)
-    } | {
-        # The signer's moves: sign; cancel a signed letter so a corrected one can
-        # be issued (0022); return to the desk (0031). The Director's unless the
-        # letter is for cement, then only the Minister's or the PS's (0040).
-        (from_code, to_code, post, op, own_only)
-        for from_code, to_code in [
-            ("verified", "signed"),
-            ("signed", "originals_received"),
-            ("sent_to_gra", "originals_received"),
-            ("verified", "originals_received"),
-        ]
-        for post, op, own_only in [
-            ("director_of_industry", "not_equals", False),
-            ("minister", "equals", True),
-            ("permanent_secretary", "equals", True),
-        ]
-    }
+        ("submitted", "returned", "records_officer", False),
+        ("originals_received", "returned", "etls_desk_officer", False),
+        ("returned", "submitted", None, False),
+        ("submitted", "originals_received", "records_officer", False),
+        ("originals_received", "verified", "etls_desk_officer", False),
+        ("originals_received", "rejected", "etls_desk_officer", False),
+        ("signed", "sent_to_gra", "records_officer", False),  # Records dispatches (0030)
+        # The Director's moves, for every letter, cement too (0041): sign, and
+        # return to the desk (0031); cancel a signed letter so a corrected one
+        # can be issued (0022), which a stand-in may do only to a letter they signed.
+        ("verified", "signed", "director_of_industry", False),
+        ("verified", "originals_received", "director_of_industry", False),
+        ("signed", "originals_received", "director_of_industry", True),
+        ("sent_to_gra", "originals_received", "director_of_industry", True),
+    ])
 
 
 async def test_the_applicant_starts_a_draft(act, people):

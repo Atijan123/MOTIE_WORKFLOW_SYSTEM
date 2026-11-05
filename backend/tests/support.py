@@ -148,7 +148,7 @@ async def ready_to_verify(act, people, case_id, hs_code="7210.49"):
     return response
 
 
-CEMENT = "2523.29"  # Portland cement: only the Minister or the PS signs (0040)
+CEMENT = "2523.29"  # Portland cement: the cement receipt applies once the desk confirms it
 
 
 async def verified_case(act, people, hs_code="7210.49", **form) -> int:

@@ -132,6 +132,9 @@ class IssuedDocument(Base):
     template_sha256: Mapped[str] = mapped_column(Text)
     issued_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("core.users.id"))
     issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Why the signer could sign, e.g. "in the Director's absence" (0041). Not
+    # printed on the letter; kept here and in the signing's audit row.
+    signature_note: Mapped[str | None] = mapped_column(Text)
     # The earlier, cancelled document this one corrects.
     replaces_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("core.issued_documents.id"))
     # Set once, when it's cancelled; a database trigger refuses any later change.

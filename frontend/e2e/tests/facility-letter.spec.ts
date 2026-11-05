@@ -113,6 +113,12 @@ test("a facility letter goes from draft to Sent to GRA", async ({ browser }) => 
   // --- A1/A3: the importer sees the letter has gone to GRA ---------------------
   await applicant.reload();
   await expect(selected).toContainText("Letter sent to GRA");
+  // Their copy of the signed letter, now that GRA's has been sent.
+  const copy = selected.getByRole("link", { name: "Download your copy of the facility letter (PDF)" });
+  const file = await applicant.request.get((await copy.getAttribute("href")) as string);
+  expect(file.status()).toBe(200);
+  expect(file.headers()["content-type"]).toBe("application/pdf");
   await applicant.getByRole("link", { name: "Open on its own page" }).click();
   await expect(applicant.getByRole("status")).toContainText("Letter sent to GRA");
+  await expect(applicant.getByRole("link", { name: /Download your copy/ })).toBeVisible();
 });

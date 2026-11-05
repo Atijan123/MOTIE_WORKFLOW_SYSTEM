@@ -80,6 +80,7 @@ export type FacilityLetter = {
   exporter_etls_approval_number: string | null;
   product_approval_numbers: string[];
   certificates_of_origin: Certificate[];
+  letter_copy_url: string | null; // the applicant's copy of the signed letter, once GRA's is sent
 };
 
 export type UploadedDocument = {

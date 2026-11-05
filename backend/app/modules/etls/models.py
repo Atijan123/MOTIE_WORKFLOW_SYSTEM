@@ -18,6 +18,7 @@ from sqlalchemy import (
     Numeric,
     SmallInteger,
     Text,
+    UniqueConstraint,
     func,
     text,
     true,
@@ -72,6 +73,26 @@ class FacilityLetterDispatch(Base):
     dispatched_on: Mapped[date] = mapped_column(Date)
     recorded_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("core.users.id"))
     recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class FacilityLetterCopy(Base):
+    """One of the three copies of a signed letter (0041): Records' file copy,
+    GRA's, and the applicant's. Written once, when the letter is issued."""
+
+    __tablename__ = "facility_letter_copies"
+    __table_args__ = (
+        CheckConstraint("recipient IN ('records_file', 'gra', 'applicant')", name="facility_letter_copies_recipient"),
+        UniqueConstraint("issued_document_id", "recipient", name="facility_letter_copies_one_each"),
+        Index("facility_letter_copies_case_idx", "case_id"),
+        {"schema": "etls"},
+    )
+    __mapper_args__ = {"eager_defaults": True}
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    case_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("etls.facility_letters.case_id"))
+    issued_document_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("core.issued_documents.id"))
+    recipient: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class FacilityLetter(Base):

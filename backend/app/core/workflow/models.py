@@ -105,13 +105,6 @@ class WorkflowTransition(Base):
         CheckConstraint(
             "by_applicant = (required_position_id IS NULL)", name="workflow_transitions_post_or_applicant"
         ),
-        CheckConstraint(
-            "applies_when IS NULL OR ("
-            "jsonb_typeof(applies_when) = 'object' "
-            "AND applies_when ?& array['field', 'op', 'value'] "
-            "AND applies_when->>'op' IN ('equals', 'not_equals', 'contains'))",
-            name="workflow_transitions_applies_when_shape",
-        ),
         {"schema": "core"},
     )
 
@@ -137,13 +130,10 @@ class WorkflowTransition(Base):
     # Puts a mistake right (cancelling a letter): may leave a final status, and
     # puts the case in nobody's queue (0030).
     is_correction: Mapped[bool] = mapped_column(Boolean, server_default=false())
-    # The move is only this case's move when the condition holds against the
-    # module's facts, e.g. "HS heading is 2523" (0040). Empty = always. Tested
-    # by service.applicable().
-    applies_when: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
-    # Only holders of the post itself: no delegation, succession or signatory
-    # list (0040), e.g. "only the Minister or the PS signs a cement letter".
-    own_post_only: Mapped[bool] = mapped_column(Boolean, server_default=false())
+    # Someone acting for the post (delegation, succession, signatories list)
+    # may make the move only if they issued the case's current document (0041):
+    # a signed letter is cancelled by the Director or by whoever signed it.
+    stand_in_must_be_issuer: Mapped[bool] = mapped_column(Boolean, server_default=false())
 
     # Two links to the same table (from and to), so each says which column it uses.
     from_status: Mapped[WorkflowStatus] = relationship(

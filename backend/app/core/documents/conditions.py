@@ -1,9 +1,9 @@
-"""The small condition language used by document requirements, and by moves (applies_when).
+"""The small condition language used by document requirements.
 
 A condition is JSON: {"field": "hs_heading", "op": "equals", "value": "2523"}.
 It is tested against the case's facts (a dict the module supplies, see facts.py).
 Text is compared ignoring case and surrounding spaces. Nothing is ever eval()-ed:
-only the operators below exist, and the database refuses any other shape.
+only the two operators below exist, and the database refuses any other shape.
 """
 
 import logging
@@ -18,9 +18,6 @@ def _text(value: Any) -> str:
 
 OPERATORS = {
     "equals": lambda actual, expected: _text(actual) == _text(expected),
-    # Only moves use it so far ("not cement", 0040); document requirements'
-    # own database check still allows just equals and contains.
-    "not_equals": lambda actual, expected: _text(actual) != _text(expected),
     "contains": lambda actual, expected: _text(expected) in _text(actual),
 }
 

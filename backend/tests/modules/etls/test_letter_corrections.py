@@ -117,15 +117,13 @@ async def test_the_cancel_button_says_it_needs_a_reason(act, people):
 
 
 @pytest.mark.parametrize("who", ["desk", "records_officer", "minister", "permanent_secretary"])
-async def test_only_the_signer_may_cancel(act, people, who):
-    """The Director, for anything but cement (the Minister and the PS cancel
-    cement letters: test_signing_rules.py)."""
+async def test_only_the_director_may_cancel(act, people, who):
+    """Or the officer who signed it, acting for the Director (test_signing_rules.py)."""
     case_id = await _signed_case(act, people)
     assert (await _cancel(act, people, case_id, who=who)).status_code == 403
 
 
-async def test_someone_acting_for_the_director_may_cancel(act, people, db_session):
-    case_id = await _signed_case(act, people)
+async def test_someone_acting_for_the_director_may_cancel_the_letter_they_signed(act, people, db_session):
     start, end = today().isoformat(), (today() + timedelta(days=3)).isoformat()
     delegated = await act(
         people["director"],
@@ -134,6 +132,10 @@ async def test_someone_acting_for_the_director_may_cancel(act, people, db_sessio
         json={"from_position": "director_of_industry", "to_position": "dps_admin_finance", "starts_on": start, "ends_on": end},
     )
     assert delegated.status_code == 201, delegated.text
+    case_id = (await act(people["applicant"], "post", "/etls/facility-letters", json=facility_letter_form())).json()["case_id"]
+    await ready_for_records(act, people, case_id)
+    assert (await move(act, people["records_officer"], case_id, "originals_received")).status_code == 200
+    await _verify_and_sign(act, people, case_id, signer="dps")
 
     assert (await _cancel(act, people, case_id, who="dps")).status_code == 200
     moves = await _events(db_session, case_id, "case.status_changed")

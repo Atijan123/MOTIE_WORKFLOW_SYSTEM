@@ -94,11 +94,7 @@ async def test_the_letter_has_every_field(act, people, db_session):
     assert fields.signer_name == people["director"].full_name
     assert fields.signer_title == "Director of Industry and Investment"
     assert fields.acting_for == ""
-    assert (fields.signature_name, fields.signature_note, fields.signature_title) == (
-        people["director"].full_name,
-        "",
-        "For: Permanent Secretary",
-    )
+    assert (fields.signature_name, fields.signature_title) == (people["director"].full_name, "For: Permanent Secretary")
 
 
 async def test_the_pdf_shows_the_fields_on_the_page(act, people, db_session):
@@ -171,11 +167,7 @@ async def test_someone_the_director_delegated_to_signs_in_their_own_name(act, pe
     assert fields.signer_name == people["dps"].full_name
     assert fields.signer_title == "Deputy Permanent Secretary, Administration and Finance"
     assert fields.acting_for == "for the Director of Industry and Investment"
-    assert (fields.signature_name, fields.signature_note, fields.signature_title) == (
-        people["dps"].full_name,
-        "",
-        "For: Permanent Secretary",
-    )
+    assert (fields.signature_name, fields.signature_title) == (people["dps"].full_name, "For: Permanent Secretary")
     pdf = letter.render_pdf(fields, compress=False).decode("latin-1")
     assert people["dps"].full_name in pdf and "For: Permanent Secretary" in pdf
     # ...and the stored letter records who issued it.
@@ -365,5 +357,5 @@ def test_the_date_is_written_the_ministrys_way(day, expected):
 
 
 def test_the_template_version_is_the_signature_block_one():
-    # Version 3 (0040) added the signer's name and "in the Director's absence".
-    assert letter.load_template().version.startswith("3 ")
+    # Version 4 (0041): the signer's name and "For: Permanent Secretary" only.
+    assert letter.load_template().version.startswith("4 ")

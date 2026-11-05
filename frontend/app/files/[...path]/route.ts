@@ -8,6 +8,7 @@ const ALLOWED = [
   /^etls\/facility-letters\/\d+\/letter\.pdf$/,
   /^etls\/facility-letters\/\d+\/letter-preview\.pdf$/,
   /^etls\/facility-letters\/\d+\/letters\/\d+\/file$/,
+  /^etls\/facility-letters\/\d+\/my-copy\.pdf$/, // the applicant's copy
 ];
 
 // Headers from the API worth keeping: what it is, how to show it, and its checksum.

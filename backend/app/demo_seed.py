@@ -8,7 +8,8 @@ history, audit rows, references and emails are exactly what real use would
 give. It refuses to run unless APP_ENV=development.
 
 The cases, one per stage of the route:
-  1. sent to GRA            (whole route, signed by the Director; its certificate is reused by case 6)
+  1. sent to GRA            (whole route, signed by the Director; the importer can download
+                             their copy; its certificate is reused by case 6)
   2. signed, to dispatch    (the Director away: an authorised signatory signs, "in the Director's absence")
   3. verified, to sign      (waiting for the Director, or while they're away, a signatory)
   4. at the desk            (cement: the receipt applies; ready to check)
@@ -16,7 +17,6 @@ The cases, one per stage of the route:
   6. flagged duplicate      (at the desk, on hold: same certificate as case 1)
   7. submitted              (waiting for Records)
   8. draft                  (half filled in)
-  9. cement, verified       (only the Minister or the PS may sign it)
 """
 
 import asyncio
@@ -126,12 +126,9 @@ class Demo:
                 await self.call(records, "POST", f"/cases/{case_id}/documents/{item['documents'][0]['id']}/original-seen")
         await self.move(records, case_id, "originals_received")
 
-    async def verified(self, case_id: int, hs_code: str = "2309.90", applicant: str | None = None) -> None:
+    async def verified(self, case_id: int, hs_code: str = "2309.90") -> None:
         desk = "desk@motie.test"
         await self.call(desk, "POST", f"/etls/facility-letters/{case_id}/hs-code", json={"hs_code": hs_code})
-        if applicant:
-            # Cement: the receipt is needed once the desk has confirmed the code.
-            await self.upload_all(applicant, case_id, "cement receipt")
         for tick in await self.call(desk, "GET", f"/cases/{case_id}/checklist"):
             if tick["at_current_step"] and not tick["ticked"]:
                 await self.call(desk, "PUT", f"/cases/{case_id}/checklist/{tick['code']}", json={"ticked": True})
@@ -279,18 +276,6 @@ async def seed_cases(client: httpx.AsyncClient, password: str) -> list[tuple[str
     )
     made.append(("Draft, half filled in", c8))
 
-    # 9. Cement, verified: only the Minister or the PS may sign (SCREENS.md S12).
-    c9 = await d.submitted(
-        fatou, "Kombo Feeds Ltd: cement",
-        product="Portland cement", hs_code="2523.29", quantity="500", unit="tonnes",
-        exporter_name="Lagos Cement Plc", exporter_country="Nigeria",
-        exporter_etls_approval_number="NG-ETLS-1204", product_approval_numbers=["NG-PA-1204-01"],
-        certificates_of_origin=[{"number": "NG-CO-2026-0811", "issued_on": days_ago(12)}],
-    )
-    await d.accepted(c9)
-    await d.verified(c9, hs_code="2523.29", applicant=fatou)
-    made.append(("Cement, verified: waiting for the Minister or the PS", c9))
-
     refs = {}
     for _, case_id in made:
         case = await d.call("records@motie.test", "GET", f"/cases/{case_id}")
@@ -316,7 +301,6 @@ def main() -> None:
     print("  Director:    director@motie.test      (recorded as away for 3 days: the signatories sign)")
     print("  Signatories: signer1@motie.test, signer2@motie.test")
     print("  List keeper: signatories@motie.test   (Signatories screen, S12)")
-    print("  Minister/PS: minister@motie.test, ps@motie.test  (cement letters)")
     print("  Recorder:    recorder@motie.test")
     print("  Admin:       admin@motie.test         (Lists)")
     print("\nOpen http://localhost:3001")

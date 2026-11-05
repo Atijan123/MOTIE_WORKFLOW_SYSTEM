@@ -64,7 +64,7 @@ async def test_the_preview_is_marked_and_never_stored(act, people, db_session):
 
 async def test_the_preview_says_it_is_a_draft_with_the_ministrys_wording(act, people, db_session):
     case_id = await _verified(act, people)
-    # As the desk sees it: the desk can't sign, so no name; the Director's letter is "For: Permanent Secretary".
+    # As the desk sees it: the desk can't sign, so no name.
     fields = await letter.preview_fields(db_session, await db_session.get(Case, case_id), people["desk"])
     assert fields.signature_title == "For: Permanent Secretary"
     assert (fields.signer_name, fields.signature_name) == ("", "")

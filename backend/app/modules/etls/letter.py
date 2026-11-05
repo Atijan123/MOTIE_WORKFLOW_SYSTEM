@@ -1,20 +1,24 @@
 """The ETLS facility letter to GRA, as a PDF, issued once when it is signed.
 
-Who signs (SCREENS.md S3): the Director of Industry and Investment, or while
-every Director is recorded absent, an authorised signatory from the
-Director's office's list (S12); a cement letter (HS heading 2523, as the desk
-confirmed it), only the Minister or the PS. Those are the "signed" move's rows
-in the database (migration 0040), not code here. When one of them makes the
-move, the engine runs the effect issue_letter() below, in the same transaction:
+Who signs (SCREENS.md S3): the Director of Industry and Investment, "For:
+Permanent Secretary", or while every Director is recorded absent, an
+authorised signatory from the Director's office's list (S12). That's the
+"signed" move's row and core.signatory_rules (migrations 0040, 0041), not code
+here. When one of them makes the move, the engine runs the effect
+issue_letter() below, in the same transaction:
 - build_fields() gathers what goes on the letter from the database;
 - render_pdf() lays those fields out on the page, using the text template in
   templates/facility_letter.txt ($placeholders; a line wrapped in ** is bold;
   a line of fields that are all empty is left out; lines starting with ## are
   notes, one of them the template's version);
-- the PDF is stored once (core/documents/issued.py) with its checksum and the
-  template version. Downloads serve that stored file. It is never rendered again.
+- the PDF is stored once (core/documents/issued.py) with its checksum, the
+  template version and why the signer could sign ("in the Director's
+  absence"), and three copies of it are recorded (etls.facility_letter_copies):
+  Records' file copy, GRA's, and the applicant's. Downloads serve that stored
+  file. It is never rendered again.
 
-To correct a signed letter, whoever may sign it makes the move "Cancel the
+To correct a signed letter, the Director (or the officer who signed that
+letter, while still acting for the Director) makes the move "Cancel the
 signed letter" with a reason; its effect cancel_letter() marks the letter
 cancelled (the file is kept). The case goes back to the desk, and the next
 signing issues a corrected letter that records the one it replaces.
@@ -44,8 +48,8 @@ from app.core.identity.models import Position, User
 from app.core.workflow import checks, effects
 from app.core.workflow import service as workflow
 from app.core.workflow.delegation import today
-from app.core.workflow.models import Case, WorkflowStatus, WorkflowTransition
-from app.modules.etls.models import FacilityLetter, FacilityLetterDispatch
+from app.core.workflow.models import Case
+from app.modules.etls.models import FacilityLetter, FacilityLetterCopy, FacilityLetterDispatch
 from app.modules.etls.service import FACILITY_LETTER, form_gaps
 
 TEMPLATE = Path(__file__).parent / "templates" / "facility_letter.txt"
@@ -58,6 +62,10 @@ REFERENCE_NOT_SET = (
     "the Ministry's registry file reference isn't set on this server "
     "(FACILITY_LETTER_REFERENCE_FORMAT); ask the system administrator"
 )
+# Signing records these copies of the one stored letter (0041), in this order.
+# GRA's is the one Records dispatches; the applicant's can be downloaded once
+# GRA's is sent. [CONFIRM] How the applicant collects a paper copy.
+COPIES = {"records_file": "Records' file copy", "gra": "GRA's copy", "applicant": "The applicant's copy"}
 # The letter exists once it has been signed.
 SIGNED_STATUSES = {"signed", "sent_to_gra"}
 
@@ -81,13 +89,13 @@ class LetterFields:
     signer_name: str
     signer_title: str  # their post, or "Authorised signatory"
     acting_for: str  # e.g. "for the Director of Industry and Investment", or "" when the post holder signed
-    # The signature block under "Sincerely," (SCREENS.md S3, S12):
+    # The signature block under "Sincerely,", as the Ministry's letters have it:
     #   [signer's name]
-    #   [In the Director's absence]        only for an authorised signatory
-    #   For: Permanent Secretary           or the PS's or Minister's own title
-    # An empty line (no name on a preview nobody may sign) is left out.
+    #   For: Permanent Secretary
+    # Why a signatory could sign ("in the Director's absence") isn't printed; it's
+    # kept with the stored letter and in the audit log. A preview for someone
+    # who may not sign has no name, and the empty line is left out.
     signature_name: str
-    signature_note: str
     signature_title: str
 
 
@@ -168,26 +176,10 @@ SIGNATORY_TITLE = "Authorised signatory"
 # Every facility letter is the PS's letter: the Director signs it "For:
 # Permanent Secretary" (SCREENS.md S3), as does anyone acting for the Director.
 LETTER_FROM = "permanent_secretary"
-# Who signs under their own title instead: the PS, and the Minister (a cement
-# letter). [CONFIRM] The Minister's line ("Minister", or "For: Permanent Secretary").
-OWN_TITLE = {"permanent_secretary", "minister"}
 
 
-async def _signature(
-    session: AsyncSession, *, name: str, own_post: str | None, in_absence: str | None
-) -> dict:
-    """The signature block's three fields. `own_post`: the post the signer
-    signed from in their own right; None when they acted for someone."""
-    if own_post in OWN_TITLE:
-        title = await _position_title(session, own_post)
-    else:
-        title = f"For: {await _position_title(session, LETTER_FROM)}"
-    return dict(
-        signature_name=name,
-        # "in the Director's absence" starts its own line.
-        signature_note=in_absence[:1].upper() + in_absence[1:] if in_absence else "",
-        signature_title=title,
-    )
+async def _signature(session: AsyncSession, name: str) -> dict:
+    return dict(signature_name=name, signature_title=f"For: {await _position_title(session, LETTER_FROM)}")
 
 
 async def build_fields(session: AsyncSession, case_id: int, signing: AuditEvent) -> LetterFields:
@@ -209,59 +201,28 @@ async def build_fields(session: AsyncSession, case_id: int, signing: AuditEvent)
         signer_name=signer.full_name,
         signer_title=SIGNATORY_TITLE if signatory else await _position_title(session, details["as_position"]),
         acting_for=f"for the {await _position_title(session, acting_for)}" if acting_for else "",
-        **await _signature(
-            session,
-            # As recorded at signing, so a later change of name doesn't change the letter.
-            name=details.get("signatory_name") or signer.full_name,
-            own_post=None if acting_for else details["as_position"],
-            in_absence=details.get("in_absence"),
-        ),
+        # A signatory's name as recorded at signing, so a later change of name doesn't change the letter.
+        **await _signature(session, details.get("signatory_name") or signer.full_name),
     )
 
 
 async def preview_fields(session: AsyncSession, case: Case, user: User) -> LetterFields:
-    """The letter as it would read if `user` signed it today. Someone who may
-    not sign sees it as the post whose move signing is on this case would
-    sign it (the Director, or the PS for cement), with no name."""
+    """The letter as it would read if `user` signed it today: with their name
+    if they may sign it, with no name otherwise."""
     letter = await session.get(FacilityLetter, case.id)
     mine = next(
         (m for m in await workflow.available_transitions(session, case, user) if m.transition.to_status.code == "signed"),
         None,
     )
-    if mine is not None:
-        post = mine.transition.required_position
-        acting, signatory = mine.on_behalf_of is not None, mine.signatory
-    else:
-        signing = await workflow.applicable(
-            session,
-            case,
-            list(
-                await session.scalars(
-                    select(WorkflowTransition)
-                    .join(WorkflowStatus, WorkflowStatus.id == WorkflowTransition.to_status_id)
-                    .where(
-                        WorkflowTransition.from_status_id == case.current_status_id,
-                        WorkflowStatus.code == "signed",
-                    )
-                    .order_by(WorkflowTransition.id)
-                )
-            ),
-        )
-        post = signing[0].required_position if signing else None
-        acting, signatory = False, None
+    post = mine.transition.required_position.title if mine else ""
     return LetterFields(
         file_reference=file_reference(case.id, today().year, preview=True),
         date=long_date(today()),
         **_form_fields(letter),
         signer_name=user.full_name if mine else "",
-        signer_title=SIGNATORY_TITLE if signatory else (post.title if post else ""),
-        acting_for=f"for the {post.title}" if acting else "",
-        **await _signature(
-            session,
-            name=user.full_name if mine else "",
-            own_post=None if acting or post is None else post.code,
-            in_absence=signatory.list.absence_wording if signatory else None,
-        ),
+        signer_title=(SIGNATORY_TITLE if mine.signatory else post) if mine else "",
+        acting_for=f"for the {post}" if mine and mine.on_behalf_of else "",
+        **await _signature(session, user.full_name if mine else ""),
     )
 
 
@@ -338,7 +299,7 @@ async def issue_letter(session: AsyncSession, move: effects.Move) -> effects.Und
     template = load_template()
     # [CONFIRM] A corrected letter keeps the same file reference, with a new date.
     number = len(await issued.all_issued(session, move.case.id, KIND)) + 1
-    _, undo = await issued.issue(
+    document, undo = await issued.issue(
         session,
         case=move.case,
         kind=KIND,
@@ -347,7 +308,12 @@ async def issue_letter(session: AsyncSession, move: effects.Move) -> effects.Und
         template_version=template.version,
         template_sha256=template.sha256,
         actor=move.actor,
+        # Not printed (template version 4), but kept with the letter.
+        signature_note=move.event.details.get("in_absence"),
     )
+    # One stored file, three copies of it to account for.
+    for recipient in COPIES:
+        session.add(FacilityLetterCopy(case_id=move.case.id, issued_document_id=document.id, recipient=recipient))
     return undo
 
 
@@ -499,3 +465,37 @@ async def letter_by_id(
     if document is None:
         raise workflow.NotFound("Letter not found.")
     return document, issued.read(document)
+
+
+async def copies(session: AsyncSession, case_id: int) -> dict[int, list[FacilityLetterCopy]]:
+    """{issued letter id: its copies, in COPIES order}, for the letters listing."""
+    order = list(COPIES)
+    found: dict[int, list[FacilityLetterCopy]] = {}
+    for c in await session.scalars(select(FacilityLetterCopy).where(FacilityLetterCopy.case_id == case_id)):
+        found.setdefault(c.issued_document_id, []).append(c)
+    return {k: sorted(v, key=lambda c: order.index(c.recipient)) for k, v in found.items()}
+
+
+async def applicant_copy_ready(session: AsyncSession, case: Case) -> IssuedDocument | None:
+    """The letter in force, if its GRA copy has been sent: the applicant's copy
+    may then be downloaded. None before that, or while a corrected letter is awaited."""
+    current = await issued.get_current(session, case.id, KIND)
+    if current is None:
+        return None
+    sent = await session.scalar(
+        select(FacilityLetterDispatch.id).where(FacilityLetterDispatch.issued_document_id == current.id)
+    )
+    return current if sent else None
+
+
+async def applicant_copy(session: AsyncSession, case_id: int, user: User) -> tuple[IssuedDocument, bytes]:
+    """The applicant's copy of the letter in force (SCREENS.md S3, A3), for the
+    applicant (or Records, for a walk-in), once GRA's copy is marked sent."""
+    case = await workflow.get_case(session, case_id, user)
+    if case.workflow.code != FACILITY_LETTER or not workflow.acts_as_applicant(case, user):
+        raise workflow.NotFound("Facility letter not found.")
+    document = await applicant_copy_ready(session, case)
+    if document is None:
+        raise workflow.NotReady("Your copy of the letter is available once the Ministry has sent the letter to GRA.")
+    return document, issued.read(document)
+

@@ -29,12 +29,10 @@ async def test_one_case_per_stage_made_through_the_api(db_session, client):
         "originals_received",
         "submitted",
         "draft",
-        "verified",  # cement, for the Minister or the PS
     ]
     # Every case but the draft has its reference, in the order made.
     year = date.today().year
-    refs = [f"MOTIE/ETLS/FL/{year}/{n:04d}" for n in range(1, 9)]
-    assert [c["reference"] for c in cases] == refs[:7] + [None, refs[7]]
+    assert [c["reference"] for c in cases] == [f"MOTIE/ETLS/FL/{year}/{n:04d}" for n in range(1, 8)] + [None]
 
     # The duplicate is on hold at the desk; the earlier case isn't.
     assert (cases[5]["on_hold"], cases[3]["on_hold"]) == (True, False)

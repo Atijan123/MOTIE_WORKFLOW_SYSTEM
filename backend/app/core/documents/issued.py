@@ -59,6 +59,7 @@ async def issue(
     template_version: str,
     template_sha256: str,
     actor: User,
+    signature_note: str | None = None,
 ) -> tuple[IssuedDocument, Undo]:
     """Store `content` as the case's current `kind` and audit it. Does NOT commit.
 
@@ -83,6 +84,7 @@ async def issue(
             template_sha256=template_sha256,
             issued_by=actor.id,
             replaces_id=replaces.id if replaces else None,
+            signature_note=signature_note,
         )
         session.add(document)
         # Flush now so a second current document of the same kind fails here,
@@ -102,6 +104,7 @@ async def issue(
                 "template_version": template_version,
                 "template_sha256": template_sha256,
                 "replaces_issued_document_id": document.replaces_id,
+                **({"signature_note": signature_note} if signature_note else {}),
             },
         )
     except BaseException:
