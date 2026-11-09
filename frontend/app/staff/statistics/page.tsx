@@ -23,9 +23,9 @@ function query(sp: Search): string {
 
 const numberFormat = new Intl.NumberFormat("en-GB", { maximumFractionDigits: 3 });
 
-// S13 (docs/SCREENS.md): live and historical facility letters together, repeat
-// copies of a historical letter left out. Every table says how many letters
-// it's based on; the CSV is exactly the letters behind the figures.
+// S13 (docs/SCREENS.md): live and historical facility letters together. Every
+// table says how many letters it's based on; the CSV is exactly the letters
+// behind the figures.
 export default async function StatisticsPage({ searchParams }: { searchParams: Promise<Search> }) {
   const me = await requireUser("staff");
   if (!mayViewStatistics(me)) notFound();
@@ -39,8 +39,8 @@ export default async function StatisticsPage({ searchParams }: { searchParams: P
       <div className="stack">
         <h1 className="title">ETLS statistics</h1>
         <p className="muted">
-          Facility letters signed in this system and those imported from the historical register. A historical letter’s repeat
-          copies count once. Names written differently (capitals, spaces) count as one.
+          Facility letters signed in this system and those imported from the historical register. Names written differently
+          (capitals, spaces) count as one.
         </p>
       </div>
 

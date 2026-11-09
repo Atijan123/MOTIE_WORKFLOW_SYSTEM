@@ -222,7 +222,7 @@ def read_register(path: Path) -> Register:
     try:
         workbook = load_workbook(path, read_only=True, data_only=True)
     except Exception as error:  # openpyxl raises several kinds for a file that isn't a workbook
-        raise RegisterError([f"{path.name} can't be opened as an Excel workbook: {error}"]) from error
+        raise RegisterError([f"{path.name} can't be opened as an Excel workbook"]) from error
     problems, register = [], Register()
     try:
         for sheet_name, columns in SHEETS.items():
@@ -261,7 +261,9 @@ class Records:
 
 
 def build_records(register: Register) -> Records:
-    """Check the rows and make the records. Raises RegisterError listing every problem."""
+    """Check the rows and make the records. Raises RegisterError listing every
+    problem, by sheet and row only: the messages reach a terminal, so they
+    never quote a cell (CLAUDE.md, data rules)."""
     problems: list[str] = []
     letters: list[HistoricalLetter] = []
     certificates: list[tuple[int, HistoricalCertificate]] = []
@@ -271,10 +273,10 @@ def build_records(register: Register) -> Records:
         where = f'"{LETTERS_SHEET}" row {row["_row"]}'
         letter_no = read_int(row["letter_no"])
         if letter_no is None:
-            problems.append(f'{where}: "Letter no." must be a whole number (it is {as_written(row["letter_no"])!r})')
+            problems.append(f'{where}: "Letter no." must be a whole number')
             continue
         if letter_no in seen:
-            problems.append(f"{where}: letter no. {letter_no} is also on row {seen[letter_no]}")
+            problems.append(f'{where}: same "Letter no." as row {seen[letter_no]}')
             continue
         seen[letter_no] = row["_row"]
         text = {key: as_written(row[key]) for key in LETTER_COLUMNS.values() if key != "letter_no"}
@@ -299,7 +301,7 @@ def build_records(register: Register) -> Records:
         where = f'"{GOODS_SHEET}" row {row["_row"]}'
         letter_no = read_int(row["letter_no_as_written"])
         if letter_no not in seen:
-            problems.append(f'{where}: "Letter no." {as_written(row["letter_no_as_written"])!r} isn\'t a letter in the register')
+            problems.append(f'{where}: "Letter no." isn\'t a letter in the register')
             continue
         goods.append(
             (
@@ -481,6 +483,10 @@ def main(argv: list[str] | None = None) -> None:
         summary = asyncio.run(_main(path))
     except RegisterError as error:
         sys.exit(f"Nothing was imported. {error}")
+    except Exception as error:
+        # A database error's text and a traceback can both quote the row being
+        # written, so only the kind of error is shown.
+        sys.exit(f"Nothing was imported. The import stopped with an error of type {type(error).__name__}.")
     print(f"Imported {path.name}, replacing any earlier import:")
     for line in summary.lines():
         print(f"  {line}")

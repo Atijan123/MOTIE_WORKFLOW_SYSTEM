@@ -39,6 +39,10 @@ Quality bar for every step:
 - Point out and fix security issues (auth, permissions, file uploads, injection) as you go.
 - Smoke tests (trying things against the running app or database by hand) run only against the dev database, never a shared or production database. Clean up afterwards with `scripts/reset-dev.sh`.
 
+## Data rules
+
+- Never open, read, print or summarise a real register or any file with real applicant data, even headers, unless I ask in that message. Work only from the synthetic fixture. Import scripts may report counts and errors with row numbers only, never cell values.
+
 ## The learning doc: docs/LEARNING.md
 
 I am a CS graduate, comfortable with FastAPI, Next.js and PostgreSQL, but new to AI engineering and to building a system this size. I will maintain this system and hand it over to the Ministry's ICT unit, so I need to understand everything you build.
@@ -60,7 +64,7 @@ Write for me, not for a reviewer: plain words, short paragraphs, real file paths
 - Start services: `docker compose up`
 - Run the API: `uvicorn app.main:app --reload`
 - The web app: `docker compose up -d web`, then http://localhost:3001 (3000 is often taken on the host). Typecheck and unit tests: `docker compose run --rm --no-deps web sh -c "npm run typecheck && npm test"`
-- Browser walk-throughs (Playwright, dev stack only): `docker compose up -d web`, then `docker compose run --rm e2e`. Failures leave screenshots and traces in frontend/e2e/test-results/.
+- Browser walk-throughs (Playwright, dev stack only): `bash scripts/seed-demo.sh --yes` (S13 needs its fictional register), `docker compose up -d web`, then `docker compose run --rm e2e`. Failures leave screenshots and traces in frontend/e2e/test-results/.
 - Run migrations: `docker compose run --rm tools alembic upgrade head` (runs as `motie_owner`)
 - Run tests: `docker compose run --rm tools pytest -v`
 - Send waiting emails once: `docker compose run --rm tools python -m app.core.notifications.worker --once`. The `notifier` service (`docker compose up notifier`) does it continuously. Only the fake sender exists: it logs emails (`docker compose logs notifier`) and sends nothing.

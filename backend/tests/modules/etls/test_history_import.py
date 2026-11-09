@@ -97,8 +97,10 @@ async def test_a_register_with_problems_changes_nothing(import_history, db_sessi
     with pytest.raises(importer.RegisterError) as raised:
         await import_history(bad)
     problems = "\n".join(raised.value.problems)
-    for expected in ("letter no. 1 is also on row 2", "must be a whole number", "'42' isn't a letter"):
+    for expected in ('row 3: same "Letter no." as row 2', 'row 4: "Letter no." must be a whole number', 'row 2: "Letter no." isn\'t a letter'):
         assert expected in problems, expected
+    for cell in ("two", "42", "Same number again"):  # rows are named; cells are never quoted
+        assert cell not in problems, cell
     assert sorted(await _letters(db_session)) == [1, 3, 4, 5]  # the earlier import, untouched
 
 
@@ -136,6 +138,19 @@ async def test_the_api_user_can_only_read_history(db_session):
         with pytest.raises(DBAPIError, match="permission denied"):
             async with db_session.begin_nested():
                 await db_session.execute(text(statement))
+
+
+def test_a_failed_import_never_prints_cell_values(tmp_path, monkeypatch):
+    path = tmp_path / "register.xlsx"
+    path.touch()
+
+    async def fails(_path):
+        raise ValueError("invalid input for query argument: 'Secret Importer Ltd'")
+
+    monkeypatch.setattr(importer, "_main", fails)
+    with pytest.raises(SystemExit) as stopped:
+        importer.main([str(path)])
+    assert "ValueError" in str(stopped.value) and "Secret Importer" not in str(stopped.value)
 
 
 def test_the_command_refuses_a_register_inside_the_repository():

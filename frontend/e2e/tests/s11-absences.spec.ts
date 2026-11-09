@@ -68,12 +68,12 @@ test("a recorder records someone else's absence", async ({ browser }) => {
   await form.getByLabel("Who is away").selectOption({ label: "Director of Industry and Investment: Dev Director of Industry" });
   await form.getByLabel("From", { exact: true }).fill(isoDay(5));
   await form.getByLabel("To", { exact: true }).fill(isoDay(9));
-  await form.getByLabel("Reason (optional)").fill("Annual leave");
+  await form.getByLabel("Reason (optional)").fill("Walk-through leave");
   await form.getByRole("button", { name: "Record absence" }).click();
   await expect(form.getByRole("status")).toContainText("The absence is recorded");
 
-  const row = recorder.getByRole("row", { name: /Dev Director of Industry/ });
-  await expect(row).toContainText("Annual leave");
+  // By its reason: the demo seed has other absences for this Director.
+  const row = recorder.getByRole("row", { name: /Dev Director of Industry/ }).filter({ hasText: "Walk-through leave" });
   await expect(row).toContainText("Dev Absence Recorder");
   await row.getByRole("button", { name: "Cancel" }).click();
   await expect(row).toHaveCount(0);
