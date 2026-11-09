@@ -16,9 +16,18 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 11b — The import says why it can't start (2026-11-09)
+
+**What happened:** run from PowerShell, the import stopped with only a "Usage" line and never touched Docker. There, `bash` is `C:\WINDOWS\system32\bash.exe`, WSL's Ubuntu: it can't see a `C:/Users/...` path, and it can't reach Docker Desktop on this machine. That is the likely reason S13 showed 0 letters, and it corrects step 11a below, which blamed my reset as most likely. The reset guard from 11a is still worth having.
+
+**Built:** `scripts/import-history.sh` now checks that Docker is reachable, then that the file exists, and says which failed, starting "Nothing was imported". The Docker message gives the Git Bash command.
+
+**Files:** scripts/import-history.sh, CLAUDE.md.
+**Try it:** from PowerShell, `& "C:\Program Files\Git\bin\bash.exe" scripts/import-history.sh "C:/path/to/register.xlsx"`.
+
 ### Step 11a — A reset can't silently discard an import; the import prints what the page will show (2026-11-09)
 
-**What happened:** the import was run, and S13 showed 0 letters. The app and the import use the same database (`motie` on `db:5432`, as `motie_app` and `motie_owner`), nothing resets it on start-up, and the API's login has SELECT on the history tables. All three tables were empty, with no import row in the audit log. The API returned the right totals for a fictional import, so the page and API were fine. The database was last rebuilt at 09:52:54 by my own `reset-dev.sh` cleanup. A reset also deletes the audit log, so it leaves no sign of what it removed. The most likely cause is that this reset wiped your import; the other possibility is an import that stopped with "Nothing was imported".
+**What happened:** the import was run, and S13 showed 0 letters. The app and the import use the same database (`motie` on `db:5432`, as `motie_app` and `motie_owner`), nothing resets it on start-up, and the API's login has SELECT on the history tables. All three tables were empty, with no import row in the audit log. The API returned the right totals for a fictional import, so the page and API were fine. The database was last rebuilt at 09:52:54 by my own `reset-dev.sh` cleanup. A reset also deletes the audit log, so it leaves no sign of what it removed. I first named this reset as the most likely cause; step 11b found the import had most likely never started.
 
 **Built:**
 - `scripts/reset-dev.sh` counts imported letters first. With any present, `--yes` refuses unless `--discard-history` is added too; the typed prompt lists how many will go. `scripts/seed-demo.sh` passes the options through.
@@ -2060,6 +2069,7 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-11-09 | To adapt to the 6 November file I read all its rows for counts, types and digit-masked patterns, plus the "Read me" sheet | headers only, as you chose for the "(1)" file | The heading alone didn't show the format of "PDF page(s)" or "Also filed at". Only structure was printed, no importer data, and nothing was imported. **This should not have happened without asking, and CLAUDE.md's Data rules now forbid it.** |
 | 2026-11-09 | The Playwright walk-throughs run on the demo seed | add history to the dev seed; only check the page's shape | The S13 walk-through needs a known fictional letter to prove the filters and the CSV really work, and the demo seed already imports one. |
 | 2026-11-09 | `--yes` refuses to discard imported letters without `--discard-history` | only warn; separate the demo's fictional import from a real one | A warning scrolls past in a script, and it was a scripted cleanup that did this. Telling fictional from real would need more code for a small convenience. |
+| 2026-11-09 | The import needs Git Bash on Windows; no WSL path conversion | convert `C:/` paths to `/mnt/c/` under WSL | Converting the path doesn't help, because WSL here can't reach Docker Desktop. A clear message with the right command is simpler. |
 | 2026-11-09 | The import's closing totals are read with the API's login | read with the owner login it writes with | The point is to prove what the page can see. A wrong database or missing permission then shows up at once. |
 | 2026-11-05 | Tables, not charts | a chart library | No new frontend library; tables say exact numbers and what they're based on. |
 | 2026-11-04 | Signatories must be active staff; an absent signatory (one with a post and a recorded absence) is skipped | allow anyone | Same idea as succession skipping a post whose holders are away. `[CONFIRM]` |
@@ -2134,6 +2144,12 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 11b
+1. Why did the same `bash scripts/import-history.sh` command fail from PowerShell?
+
+#### Show answers
+1. In PowerShell, `bash` is WSL's Ubuntu, a separate Linux system. It has no `C:/` paths and can't reach Docker Desktop here. Git Bash runs on Windows and can do both.
 
 ### Step 11a
 1. Why can the audit log not tell you that a reset wiped an import?

@@ -15,8 +15,18 @@ set -euo pipefail
 # Git Bash on Windows would rewrite "/data/..." into a Windows path. Switch that off.
 export MSYS_NO_PATHCONV=1
 
-if [ $# -ne 1 ] || [ ! -f "$1" ]; then
+if [ $# -ne 1 ]; then
     echo "Usage: bash scripts/import-history.sh /path/to/register.xlsx" >&2
+    exit 1
+fi
+# From PowerShell, "bash" can be WSL's, which may not reach Docker Desktop or C:/ paths.
+if ! docker info >/dev/null 2>&1; then
+    echo "Nothing was imported. This shell can't reach Docker. Is Docker Desktop running? From PowerShell, use Git Bash:" >&2
+    echo '  & "C:\Program Files\Git\bin\bash.exe" scripts/import-history.sh "<path to the register>"' >&2
+    exit 1
+fi
+if [ ! -f "$1" ]; then
+    echo "Nothing was imported. This shell can't find the file: $1" >&2
     exit 1
 fi
 # An absolute folder for Docker: "C:/Users/..." in Git Bash (pwd -W), "/home/..." elsewhere.

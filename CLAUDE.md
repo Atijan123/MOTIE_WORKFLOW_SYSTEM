@@ -61,6 +61,8 @@ Write for me, not for a reviewer: plain words, short paragraphs, real file paths
 
 (Fill in as the project grows.)
 
+The `bash scripts/...` commands need Git Bash. In PowerShell, `bash` is WSL's Ubuntu, which can't reach Docker Desktop on this machine: use `& "C:\Program Files\Git\bin\bash.exe" scripts/...`.
+
 - Start services: `docker compose up`
 - Run the API: `uvicorn app.main:app --reload`
 - The web app: `docker compose up -d web`, then http://localhost:3001 (3000 is often taken on the host). Typecheck and unit tests: `docker compose run --rm --no-deps web sh -c "npm run typecheck && npm test"`
