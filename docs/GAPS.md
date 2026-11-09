@@ -156,7 +156,7 @@ Built route (0015–0030): `draft` →(applicant: Submit)→ `submitted` →(Rec
 
 | Item | Status | Backed by / what's missing |
 | --- | --- | --- |
-| Import the historical register, read-only, not cases; one row per letter; every column as written; "Also filed at" as text; re-run replaces | **Built** | 11: migration 0042; modules/etls/import_history.py; `scripts/import-history.sh`. Not yet run on the real register. |
+| Import the historical register, read-only, not cases; one row per letter; every column as written; "Also filed at" as text; re-run replaces | **Built** | 11: migration 0042; modules/etls/import_history.py; `scripts/import-history.sh`. Run on the real register on the dev database, 2026-11-09: 245 letters, 293 goods lines, 259 certificates, 59 data checks. Not yet run on a Ministry server. |
 | Certificates split into their own table, searched by the live duplicate check | **Built** | 11: `etls.historical_certificates`. |
 | Letters by month and year; top importers, exporters, countries, products; quantities by category and unit; certificates used more than once; letters by signatory; each with how many letters it's based on | **Built** | 11: modules/etls/statistics.py; `GET /etls/statistics`; frontend/app/staff/statistics/page.tsx. |
 | Filters (date range, importer); CSV of the filtered table | **Built** | 11: `GET /etls/statistics/letters.csv` (formula cells defused). |
