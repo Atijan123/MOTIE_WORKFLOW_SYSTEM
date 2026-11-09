@@ -5,6 +5,9 @@
 #     scripts/seed-demo.sh          asks you to type "reset" first
 #     scripts/seed-demo.sh --yes    doesn't ask
 #
+# Add --discard-history when the database already holds imported letters, as
+# it does after an earlier demo seed (see reset-dev.sh).
+#
 # Everything it creates is made up (backend/app/demo_seed.py). It only runs
 # when .env says APP_ENV=development, and the reset it starts with deletes
 # every case, user and upload in the dev database: there is no undo.

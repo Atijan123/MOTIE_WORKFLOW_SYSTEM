@@ -4,6 +4,10 @@
 #     scripts/reset-dev.sh          asks you to type "reset" first
 #     scripts/reset-dev.sh --yes    doesn't ask (for when you're sure)
 #
+# With imported historical letters in the database, --yes refuses unless
+# --discard-history is given too: an import is lost without a trace (its audit
+# row goes with the database), and only the register can bring it back.
+#
 # What it does:
 #   1. stops the API, so nothing is using the database or the volume;
 #   2. drops and recreates the database named POSTGRES_DB in .env;
@@ -48,10 +52,33 @@ if [ -z "$db" ] || [ -z "$superuser" ] || [ -z "$project" ]; then
     exit 1
 fi
 
+yes=""
+discard_history=""
+for arg in "$@"; do
+    case "$arg" in
+        --yes) yes=1 ;;
+        --discard-history) discard_history=1 ;;
+        *) echo "Unknown option: $arg" >&2; exit 1 ;;
+    esac
+done
+
+docker compose up --detach --wait db
+# 0 if the database or the table doesn't exist yet.
+imported="$(docker compose exec -T db psql -U "$superuser" -d "$db" -Atc \
+    "SELECT count(*) FROM etls.historical_letters" 2>/dev/null | tr -d "\r" || true)"
+imported="${imported:-0}"
+
 echo "This deletes, in Compose project '$project':"
 echo "  - the database '$db' (every case, user and audit row)"
 echo "  - the documents volume (every upload and issued letter)"
-if [ "${1:-}" != "--yes" ]; then
+if [ "$imported" != "0" ]; then
+    echo "  - $imported imported historical letters (re-run scripts/import-history.sh to get them back)"
+    if [ -n "$yes" ] && [ -z "$discard_history" ]; then
+        echo "Refusing: --yes won't discard imported letters. Add --discard-history if you mean to." >&2
+        exit 1
+    fi
+fi
+if [ -z "$yes" ]; then
     read -r -p "Type 'reset' to continue: " answer
     if [ "$answer" != "reset" ]; then
         echo "Nothing changed."

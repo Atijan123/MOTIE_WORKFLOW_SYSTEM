@@ -12,6 +12,7 @@ from sqlalchemy import select
 
 from app.core.workflow.models import CaseFlag
 from app.modules.etls.history_models import HistoricalLetter
+from app.modules.etls.import_history import page_totals
 from tests.support import (
     HISTORICAL_CERTIFICATE,
     HISTORY_IMPORTER,
@@ -64,6 +65,29 @@ async def test_the_director_and_stats_viewers_only(act, people, viewer, who, all
     user = viewer if who == "viewer" else people[who]
     for url in ("/etls/statistics", "/etls/statistics/letters.csv"):
         assert (await act(user, "get", url)).status_code == (200 if allowed else 403)
+
+
+# --- After an import --------------------------------------------------------------
+
+
+async def test_after_an_import_the_statistics_endpoint_returns_the_imported_total(act, viewer, history, db_session):
+    response = await act(viewer, "get", "/etls/statistics")  # no filters: what the page first shows
+    assert response.status_code == 200
+    found = response.json()
+    assert found["historical"] == history.letters == 4
+
+    # What the import prints at the end is what the page shows.
+    totals = await page_totals(db_session)
+    assert (totals.letters, totals.live, totals.historical, totals.undated) == (
+        found["letters"], found["live"], found["historical"], found["undated"],
+    )
+    assert (totals.goods_lines, totals.certificates) == (history.goods_lines, history.certificates)
+
+
+async def test_the_closing_totals_report_counts_and_no_names(history, db_session):
+    printed = "\n".join((await page_totals(db_session)).lines())
+    assert "4 from the historical register" in printed
+    assert HISTORY_IMPORTER not in printed
 
 
 # --- The figures -----------------------------------------------------------------

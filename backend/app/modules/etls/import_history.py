@@ -35,7 +35,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from openpyxl import Workbook, load_workbook
-from sqlalchemy import delete
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit.service import record_event
@@ -47,6 +47,7 @@ from app.modules.etls.history_models import (
     HistoricalLetter,
 )
 from app.modules.etls.schemas import normalize_certificate_number
+from app.modules.etls.statistics import all_letters
 
 LETTERS_SHEET = "Facility letters"
 GOODS_SHEET = "Goods lines"
@@ -425,6 +426,38 @@ async def import_file(session: AsyncSession, path: Path) -> Summary:
     return await replace_history(session, records, source_file=path.name, sha256=hashlib.sha256(content).hexdigest())
 
 
+@dataclass
+class PageTotals:
+    """What the Statistics page shows with no filters, and the tables behind it."""
+
+    letters: int
+    live: int
+    historical: int
+    undated: int
+    goods_lines: int
+    certificates: int
+
+    def lines(self) -> list[str]:
+        return [
+            f"{self.letters} letters: {self.live} signed in this system, {self.historical} from the historical register "
+            f"({self.undated} with no readable date)",
+            f"Behind them: {self.goods_lines} historical goods lines, {self.certificates} historical certificate numbers",
+        ]
+
+
+async def page_totals(session: AsyncSession) -> PageTotals:
+    """`session` should be the API's own: then these are the rows the page can see."""
+    found = await all_letters(session)
+    return PageTotals(
+        letters=len(found),
+        live=sum(l.source == "live" for l in found),
+        historical=sum(l.source == "historical" for l in found),
+        undated=sum(l.date is None for l in found),
+        goods_lines=await session.scalar(select(func.count()).select_from(HistoricalGoodsLine)),
+        certificates=await session.scalar(select(func.count()).select_from(HistoricalCertificate)),
+    )
+
+
 # --- A made-up register, for tests and the demo ---------------------------------------
 
 
@@ -451,6 +484,24 @@ def write_register(path: Path, letters: list[dict], goods: list[dict] = (), chec
 # --- The command --------------------------------------------------------------------
 
 REPO = Path(__file__).resolve().parents[3]  # backend/ (mounted at /app in the containers)
+
+
+async def _read_back() -> tuple[str, PageTotals | str]:
+    """The database the app uses, and the totals it sees there (or why they couldn't be read)."""
+    from sqlalchemy.engine import make_url
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    from app.core.config import settings
+
+    url = make_url(settings.database_url)
+    engine = create_async_engine(settings.database_url)
+    try:
+        async with AsyncSession(engine) as session:
+            return f"{url.database} on {url.host}:{url.port}", await page_totals(session)
+    except Exception as error:  # the import is already committed: don't report it as failed
+        return f"{url.database} on {url.host}:{url.port}", type(error).__name__
+    finally:
+        await engine.dispose()
 
 
 async def _main(path: Path) -> Summary:
@@ -489,6 +540,15 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(f"Nothing was imported. The import stopped with an error of type {type(error).__name__}.")
     print(f"Imported {path.name}, replacing any earlier import:")
     for line in summary.lines():
+        print(f"  {line}")
+    # Read back as the API's own login, so what's printed is what the page can see.
+    database, shown = asyncio.run(_read_back())
+    print(f"The database the app uses: {database}")
+    if isinstance(shown, str):
+        print(f"The import is saved, but its totals couldn't be read back as the app ({shown}).")
+        return
+    print("The Statistics page will show, with no filters:")
+    for line in shown.lines():
         print(f"  {line}")
 
 

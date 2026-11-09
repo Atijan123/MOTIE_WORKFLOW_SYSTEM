@@ -169,10 +169,15 @@ async def _historical(session: AsyncSession) -> list[Letter]:
     ]
 
 
+async def all_letters(session: AsyncSession) -> list[Letter]:
+    """Every letter, with no permission check: callers answer for that."""
+    return await _live(session) + await _historical(session)
+
+
 async def letters(session: AsyncSession, user: User, filters: Filters) -> list[Letter]:
     """Every letter the filters keep, oldest first (undated last)."""
     _require(user)
-    found = [l for l in await _live(session) + await _historical(session) if filters.keeps(l)]
+    found = [l for l in await all_letters(session) if filters.keeps(l)]
     return sorted(found, key=lambda l: (l.date is None, l.date or date.min, l.source, l.id))
 
 
