@@ -13,6 +13,11 @@ export function isStaff(me: Me): boolean {
   return me.roles.some((r) => r !== "applicant");
 }
 
+/** S13: the Director, or the stats_viewer role (the API checks it again: statistics.py may_view()). */
+export function mayViewStatistics(me: Me): boolean {
+  return me.roles.includes("stats_viewer") || me.positions.includes("director_of_industry");
+}
+
 /** The logged-in user, or null. Asked once per request (React's cache). */
 export const getMe = cache(async (): Promise<Me | null> => {
   if (!(await cookies()).get(SESSION_COOKIE)) return null;

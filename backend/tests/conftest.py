@@ -28,6 +28,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import delete
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
@@ -127,6 +128,26 @@ def committing_engine():
     tests must use their own unique emails and must not count rows globally.
     """
     return test_engine
+
+
+@pytest.fixture
+async def import_history():
+    """Import a made-up register as the schema owner, committed, as the real
+    command does: `summary = await import_history(path)`. The API's user can't
+    write these tables, and db_session can only see committed rows from another
+    connection, so this commits; the history tables are emptied again at the end.
+    """
+    from app.modules.etls import import_history as importer
+
+    async def _import(path):
+        async with AsyncSession(owner_engine, expire_on_commit=False) as session:
+            return await importer.import_file(session, path)
+
+    yield _import
+    async with AsyncSession(owner_engine) as session:
+        for table in importer.HISTORY_TABLES:
+            await session.execute(delete(table))
+        await session.commit()
 
 
 @asynccontextmanager

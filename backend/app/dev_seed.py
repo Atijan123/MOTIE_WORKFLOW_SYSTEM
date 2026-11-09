@@ -39,6 +39,8 @@ USERS = [
     # ...and these two are on it: they sign while the Director is recorded absent.
     ("signer1@motie.test", "Dev Signatory One", ["officer"], []),
     ("signer2@motie.test", "Dev Signatory Two", ["officer"], []),
+    # Sees the ETLS statistics (S13), as the Director does.
+    ("stats@motie.test", "Dev Statistics Viewer", ["officer", "stats_viewer"], []),
     ("admin@motie.test", "Dev Admin", ["admin"], []),
 ]
 

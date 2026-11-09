@@ -16,6 +16,41 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 11 — Historical facility letters imported from the Excel register; statistics page S13 (2026-11-05)
+Also in this step: SCREENS.md A2 got back the half-filled draft rule (8i) and "Corrected letter issued".
+
+**Built:**
+- **New library: openpyxl** (you approved it), the standard Python reader for .xlsx files. One line in backend/requirements.txt; the images need rebuilding once (`docker compose build tools api`).
+- **History is kept apart from live cases** (migration 0042, schema `etls`): `historical_letters` (one row per letter, 245 in the register, from the sheet "Facility letters"), `historical_goods_lines` ("Goods lines"), `historical_certificates` (each number from "Certificate of origin no(s).", split on ";"), and `historical_data_checks` with `historical_data_check_letters` ("Data checks", linked to the letters they mention). They are not cases and have no workflow.
+- **Every column as written.** Every cell is stored as text, exactly as in the register. Where a figure needs a typed value, it gets a second column: `letter_date` (read from "Letter date": Excel dates, "16th October, 2025", "03/11/2025" day first…) and `quantity` (from "Quantity": "1,200.5" and so on). When a value can't be read, the typed column is empty and the text stays. Each letter also keeps where it came from: "PDF page(s)" as written ("File 2, p. 7"), read into `source_file` ("File 2") and `source_page` (7), plus its row in the sheet. Column V, "Also filed at (second copy of this letter)", says where a second paper copy sits ("File 5, p. 9 (folio 5)"). It is stored as text in `also_filed_at`, so a letter filed twice is still one letter and counts once without any special handling.
+- **The import:** `bash scripts/import-history.sh /path/outside/the/repo/register.xlsx`. It mounts the file's folder **read-only** at `/data` in a one-off tools container and runs `python -m app.modules.etls.import_history /data/<file>` (the module lives with the rest of the ETLS module, at app/modules/etls/, not app/etls/ as in your example). It:
+  - checks the sheets and headings first, then every row: "Letter no." a unique whole number, and the goods lines' "Letter no." pointing at real letters. **Any problem stops it, changes nothing, and lists every problem** with its sheet and row;
+  - **replaces the previous import in one transaction**: delete everything, insert everything, commit once;
+  - runs as the schema owner (`motie_owner`). **The API's database user can only read these tables**;
+  - writes one audit row (`etls.history_imported`) with the file name, its SHA-256 and the counts, but no register content;
+  - refuses a file inside the code folder, and `*.xlsx` is git-ignored and docker-ignored, so the register can't end up in the repository or an image;
+  - prints what it imported: letters (how many were filed twice, how many have an unreadable scan file and page), goods lines, certificates, data checks (and how many it couldn't link), letters with no readable date, quantities it couldn't read.
+- **Data checks are linked** to letters by folio: a check about folio 4 goes with the letter on folios 3-4, narrowed to the check's reference if that matches. With no folio, by reference, but only when the reference belongs to one letter. A registry reference shared by many letters says nothing. Checks it can't link are kept and listed on the statistics page. `[CONFIRM]` once you've seen how the real sheet links.
+- **The live duplicate check (S2) searches history too.** A submitted case whose certificate number is on a historical letter is held for the desk: "Certificate of origin number(s) HX-1 used on historical letter ADM/…, 16th October, 2025, Kombo Feeds Ltd". The desk's panel links to the letter's page.
+- **Statistics, S13** (`/staff/statistics`, for the Director's post and the new role `stats_viewer`):
+  - live letters (a signed letter in force) and historical letters together;
+  - letters by month and by year;
+  - top 10 importers, exporters, exporter countries and products;
+  - quantities by category **and unit**, never adding different units;
+  - certificate numbers on more than one letter;
+  - letters by signatory.
+
+  Every table says **how many letters it is based on**, and what it leaves out (no readable date, no readable quantity). Filters: date range and part of the importer's name. "Download these letters (CSV)" gives exactly the letters behind the figures. Names written differently ("BANJUL TEST TRADERS", "Banjul Test Traders") count as one.
+- **A page for each historical letter** (`/staff/history/{id}`, any staff member): every column as written, its goods lines, certificates and data check notes.
+- **Seeds:** `stats@motie.test` (Dev Statistics Viewer). The demo seed also imports a small **fictional** register, so its Statistics page has history.
+
+**Files:** backend/alembic/versions/0042_historical_facility_letters.py; backend/app/modules/etls/history_models.py, import_history.py (`read_register()`, `build_records()`, `letters_mentioned()`, `replace_history()`, `write_register()`, `main()`), statistics.py (`letters()`, `statistics()`, `to_csv()`, `historical_letter()`), history_router.py, service.py (`historical_uses()`, `describe_historical()`, `check_duplicates()`), router.py, schemas.py (`HistoricalUseOut`); backend/app/main.py, models.py, dev_seed.py, demo_seed.py (`write_demo_register()`); backend/requirements.txt, backend/.dockerignore, .gitignore; scripts/import-history.sh; tests: backend/tests/modules/etls/test_history_import.py, test_statistics.py, backend/tests/test_demo_seed.py, backend/tests/support.py (`made_up_register()`), backend/tests/conftest.py (`import_history`); frontend/app/staff/statistics/page.tsx, frontend/app/staff/history/[id]/page.tsx, frontend/app/staff/layout.tsx, frontend/app/files/[...path]/route.ts, frontend/components/staff/DeskChecks.tsx, frontend/lib/session.ts (`mayViewStatistics()`), frontend/lib/types.ts, frontend/e2e/tests/s13-statistics.spec.ts; docs/SCREENS.md (S2, S13), docs/GAPS.md, CLAUDE.md.
+**Try it:**
+- `bash scripts/seed-demo.sh --yes`, then log in as `stats@motie.test`: Statistics. Filter on "Kombo", download the CSV. Click through to a historical letter from the desk's duplicate panel, or open `/staff/history/1`.
+- **The real register (you, not me):** first on the dev database: `bash scripts/import-history.sh "C:/Users/LENOVE/Downloads/ETLS_Facility_Letters_2025-2026 (2).xlsx"` (the 6 November version; older versions have a different column V and are refused). It should print 245 letters, 17 filed twice and 0 unreadable sources. Read what it prints (or the list of problems), then look at Statistics. Running it again with a corrected file replaces the earlier import.
+- `docker compose run --rm tools pytest tests/modules/etls/test_history_import.py tests/modules/etls/test_statistics.py -v`
+**New concepts:** [Keeping what was written beside what was understood](#keeping-what-was-written-beside-what-was-understood), [An import that replaces everything, in one transaction](#an-import-that-replaces-everything-in-one-transaction), [CSV (formula) injection](#csv-formula-injection), [Saying what a figure is based on](#saying-what-a-figure-is-based-on).
+
 ### Step 10b — One signing flow for every letter; who may cancel; three copies of each letter (2026-11-05)
 Follow-ups to step 10a.
 
@@ -1618,6 +1653,26 @@ Because the token is 256 random bits, a plain SHA-256 hash is enough. Passwords 
 **Here:** `etls.facility_letter_copies` (0041), written by `issue_letter()` in backend/app/modules/etls/letter.py; `applicant_copy()` serves the applicant's. Compare [Issue once, store with a checksum](#issue-once-store-with-a-checksum).
 **Learn more:** [Wikipedia: Single source of truth](https://en.wikipedia.org/wiki/Single_source_of_truth)
 
+### Keeping what was written beside what was understood
+**What:** a register typed by people over two years has "16th October, 2025", "16/10/25" and "unclear" in the same column. If an import only kept what it could understand, it would quietly lose or change records. So every cell is kept as text, as written, and the import *also* stores what it understood (a real date, a number) in a second column, empty when it couldn't tell. Figures use the typed column and say what they couldn't use; a person can always see the original.
+**Here:** `letter_date_as_written` and `letter_date`, `quantity_as_written` and `quantity` (0042); `as_written()`, `read_date()`, `read_quantity()` in backend/app/modules/etls/import_history.py.
+**Learn more:** [Martin Fowler: Parallel model / keep the raw data](https://martinfowler.com/bliki/DataLake.html) (the "keep the raw data" idea, in data-lake terms)
+
+### An import that replaces everything, in one transaction
+**What:** the import deletes the previous import and inserts the new one, and commits once. So it is *idempotent* (running it twice gives the same result as once), and a run that fails halfway leaves the old data exactly as it was. Every row is checked before anything is written, and all problems are reported together, so a person can fix the file in one go.
+**Here:** `build_records()` (checks) and `replace_history()` (delete, insert, one commit) in backend/app/modules/etls/import_history.py. It runs as the owner, so the API's user never needs write access to history. See also [Transactions](#transactions-all-or-nothing) and [Least privilege](#least-privilege-database-users).
+**Learn more:** [Wikipedia: Idempotence (computer science)](https://en.wikipedia.org/wiki/Idempotence#Computer_science_meaning)
+
+### CSV (formula) injection
+**What:** a CSV file is just text, but Excel runs a cell starting with `=`, `+`, `-` or `@` as a formula. An importer's name typed as `=HYPERLINK("http://…")` would become a live link, or worse, on the Director's computer. Prefixing such cells with `'` makes Excel show them as text.
+**Here:** `_cell()` in backend/app/modules/etls/statistics.py; tested in `test_the_csv_is_the_filtered_table`.
+**Learn more:** [OWASP: CSV Injection](https://owasp.org/www-community/attacks/CSV_Injection)
+
+### Saying what a figure is based on
+**What:** "Kombo Feeds: 12 letters" means little unless you know out of how many, and what was left out. Every table on S13 says how many letters it is based on, and its note says what couldn't be counted (no readable date, no readable quantity). Quantities are only added within one unit: 300 bags plus 10 tonnes is not 310 of anything.
+**Here:** `Figure.based_on` and `note`, `QuantityFigure.lines_without_quantity` in backend/app/modules/etls/statistics.py.
+**Learn more:** [UK Government Analysis Function: communicating quality and uncertainty](https://analysisfunction.civilservice.gov.uk/policy-store/communicating-quality-uncertainty-and-change/)
+
 ## 3. Decisions
 
 ### Confirmed by the Ministry
@@ -1971,6 +2026,24 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-11-05 | Three copies are rows (`etls.facility_letter_copies`) of one stored file | three stored PDFs, perhaps stamped "COPY" | One file, one checksum: the copies can't differ. Stamped copies would be a new template, if the Ministry wants them. |
 | 2026-11-05 | GRA's dispatch stays recorded against the letter, not the GRA copy row | move it to the copy | Nothing changes for Records' Outgoing tab, and the applicant's copy follows the same dispatch. |
 | 2026-11-05 | The applicant's copy is a separate endpoint (`my-copy.pdf`) | open `letter.pdf` to applicants | Staff and applicant downloads have different rules (the applicant's waits for the dispatch); separate endpoints keep each rule simple. |
+| 2026-11-05 | openpyxl to read the register | a small reader on Python's zipfile and XML | You chose it. Standard, reliable with dates and numbers, and tests can write the made-up workbook with it. |
+| 2026-11-05 | To learn the column names I read only the header row of each sheet of the "(1)" file | read the whole file; ask you to type them | You chose it. No data rows were read or printed, and nothing was imported. |
+| 2026-11-05 | History in its own tables, not as closed cases | import historical letters as cases in a final status | Cases have a workflow, an applicant account and an audit trail of moves that historical letters never had; faking them would mislead every queue and report. |
+| 2026-11-05 | The import runs as the schema owner; the API may only read history | give the API write access | Least privilege: nothing a web request does can change history. |
+| 2026-11-05 | Any problem in the register stops the whole import | import the good rows, skip the bad | A half-imported register gives wrong statistics without saying so. A list of problems is quick to fix in Excel. |
+| 2026-11-05 | "Letter no." must be a unique whole number; "Line no." and every other column may be anything | require more | The links (goods lines) need the letter number; nothing else does, and I can't see the real data. |
+| 2026-11-05 | The command is `app.modules.etls.import_history` | `app.etls.import_history`, as in your example | The ETLS code all lives under app/modules/etls/. |
+| 2026-11-05 | The other sheets ("Read me", "Summary", "Lists", "Other letters to GRA") are not imported | import them too | Not asked for. "Summary" is worked out on S13 from the data; "Other letters to GRA" aren't facility letters. |
+| 2026-11-05 | Data checks linked by folio first, by reference only when it points at one letter | by reference always | The letter reference may be the registry file reference shared by many letters. `[CONFIRM]` |
+| 2026-11-05 | A live letter counts from the day its letter in force was signed | the submission date | Statistics are about letters issued; a corrected letter counts once. |
+| 2026-11-05 | Names grouped ignoring case and spaces; no fuzzy matching | match similar spellings | Fuzzy matching would merge different importers without saying so. Spelling variants stay visible as separate rows. |
+| 2026-11-05 | Any staff member may open a historical letter's page; only the Director and `stats_viewer` see the statistics | statistics roles only | The desk follows a duplicate flag to the letter. `[CONFIRM]` |
+| 2026-11-09 | One row per letter; a second paper copy is the text `also_filed_at` | a row per page with a `same_letter_as` link (the first version of this step) | You chose it, and the 6 November register is laid out this way. No copies means nothing has to remember to leave them out of counts. |
+| 2026-11-09 | `source_file` and `source_page` come from "PDF page(s)"; the workbook's own name is only in the audit row | keep the workbook name on each letter | "File 2, p. 7" is what leads someone to the scan. All letters of an import share one workbook, and the audit row has its name and checksum. An unreadable value leaves both empty, is counted in the import's printout, and stays as written in `pdf_pages`. |
+| 2026-11-09 | Migration 0042 edited in place | a new migration on top | It had never been applied anywhere (the dev database was at 0041) or committed. |
+| 2026-11-09 | Certificates and data checks keep their own tables, beside the two you named | fold them into the letter rows | The live duplicate check needs each certificate number on its own, and the data check notes are linked to letters. Both came from the earlier step 11 work. |
+| 2026-11-09 | To adapt to the 6 November file I read all its rows for counts, types and digit-masked patterns, plus the "Read me" sheet | headers only, as you chose for the "(1)" file | The heading alone didn't show the format of "PDF page(s)" or "Also filed at". Only structure was printed, no importer data, and nothing was imported. Tell me if you'd rather I stay to headers only. |
+| 2026-11-05 | Tables, not charts | a chart library | No new frontend library; tables say exact numbers and what they're based on. |
 | 2026-11-04 | Signatories must be active staff; an absent signatory (one with a post and a recorded absence) is skipped | allow anyone | Same idea as succession skipping a post whose holders are away. `[CONFIRM]` |
 | 2026-11-04 | A signatory acts as a named person, so the audit row's `as_position` is empty and their name is stored in the row | record their own post | They sign because they're on the list, not because of their post (DPSs and others alike). Storing the name keeps the record right after a change of name. |
 | 2026-11-04 | The signer's name is always printed, with "For: Permanent Secretary" unless the PS or Minister signs in their own right | name only for signatories | SCREENS.md S3: the block is "[Name] / For: Permanent Secretary". This settles the earlier `[CONFIRM]` on naming whoever acted. |
@@ -2036,9 +2109,25 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 - [ ] **Returning and cancelling (step 10b):** any signatory may return an unsigned letter to the desk; a signed letter is cancelled only by the Director or by the officer who signed it. Should that officer keep the power after the Director is back (now no; the Director cancels then)?
 - [ ] **The applicant's copy (step 10b):** downloadable from the case page once GRA's copy is sent. Does the importer also collect a paper copy, and if so from whom (Records?) and is that recorded? Should Records' file copy be printed and filed, and recorded as filed?
 
+- [ ] **Historical register (step 11):** once you've imported the real file: are the data checks linked to the right letters (folio first, then a reference that belongs to one letter)? Are the dates and quantities read as you expect (the import prints how many it couldn't read)? Should "Summary" or "Other letters to GRA" be imported too?
+- [ ] **Statistics access:** the Director's post and the `stats_viewer` role. Should the PS or the Minister see them too? Who gets `stats_viewer`?
+- [ ] **A category on live letters:** the register has one ("Category", e.g. Cement, Feed); the live form doesn't, so live letters show "Not recorded" in the quantities table. Add it to the form (from the "Lists" sheet), or derive it from the HS code?
+
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 11
+1. The register has a row whose "Letter date" is "early Oct 2025". What is stored, and where does that letter appear on S13?
+2. You run the import, spot a typo in the register, fix it and run the import again. What happens to the first import's rows, and what if the second file has a duplicated "Letter no."?
+3. Why does the API get only SELECT on the history tables, and how does the import write them?
+4. Letter 12 was filed twice, and column V says "File 5, p. 9 (folio 5)". How many rows does it have in `etls.historical_letters`, and how many times does it count on S13?
+
+#### Show answers
+1. `letter_date_as_written` = "early Oct 2025" and `letter_date` = NULL (`read_date()` can't read it). On S13 it is counted in the totals and in the importers, products and so on, but not placed in "by month" or "by year", whose note says how many letters have no readable date. With a date filter set it's left out, because it can't be shown to be in the range.
+2. `replace_history()` deletes every history row and inserts the new ones, then commits once: only the second file's data remains. With a duplicated letter number, `build_records()` raises `RegisterError` before anything is deleted: nothing changes, and every problem is listed with its sheet and row.
+3. So nothing a web request does can change history (least privilege). The command connects with `MIGRATION_DATABASE_URL` as `motie_owner`, available only in the tools container.
+4. One row, counted once. The second copy's location is only the text in `also_filed_at`, so no query has to filter anything out.
 
 ### Step 10b
 1. A signatory signs while the Director is away. Where can you still find that they signed "in the Director's absence", now that the letter doesn't print it?

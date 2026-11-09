@@ -2,3 +2,7 @@ __pycache__/
 *.pyc
 .venv/
 .pytest_cache/
+# Registers hold real importer data; keep them out of the image too.
+*.xlsx
+*.xlsm
+*.xls

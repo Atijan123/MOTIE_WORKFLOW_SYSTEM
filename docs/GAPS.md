@@ -115,6 +115,7 @@ Built route (0015–0030): `draft` →(applicant: Submit)→ `submitted` →(Rec
 | Item | Status | Backed by / what's missing |
 | --- | --- | --- |
 | Duplicate flag: earlier case, its status and date | **Built** | 8d: `GET /etls/facility-letters/{id}/duplicates`: every other submitted case with the number, its reference, current status and date. The flag (for the desk) holds only the desk's moves, so the case reaches the desk. |
+| Duplicate flag also searches the historical letters: "used on historical letter [ref], [date], [importer]" | **Built** | 11: `historical_uses()` in modules/etls/service.py; `historical_letters` in `.../duplicates`; link to the letter's page. |
 | Finding (required) to clear | **Built** | `POST /cases/{id}/flags/{flag_id}/resolve`. |
 | **Or reject (or return) directly while the flag is open; the reason resolves the flag** `[CONFIRM]` | **Built** | 8d: `allowed_on_hold` on the desk's Reject; the engine resolves the flag with the minute (or the applicant message). 8l: the desk's Return to applicant too (0037); resubmitting runs the duplicate check again. |
 | Application summary | **Built** | `GET /etls/facility-letters/{id}`. |
@@ -150,6 +151,17 @@ Built route (0015–0030): `draft` →(applicant: Submit)→ `submitted` →(Rec
 | Record for someone else (`absence_recorder` role `[CONFIRM: PS's office, HR]`), audited as "recorded by" | **Built** | `POST /absences` with `user_id`; the audit row records `recorded_by` and `on_behalf` (step 5c). |
 | **List of current and upcoming absences**, with revoke for delegations | **Built** | `GET /absences/current` (everyone away now or later, for all staff, with `may_cancel`, 9g); revoke ids in `GET /acting/for-me`. The form's choices (posts with holders, workflows): `GET /acting/options` (9g). Screen: frontend/app/staff/absences/page.tsx. |
 | (Banner, all screens) "You are acting for …" | **Built** | `GET /acting`. |
+
+### S13. ETLS statistics (the Director, `stats_viewer`)
+
+| Item | Status | Backed by / what's missing |
+| --- | --- | --- |
+| Import the historical register, read-only, not cases; one row per letter; every column as written; "Also filed at" as text; re-run replaces | **Built** | 11: migration 0042; modules/etls/import_history.py; `scripts/import-history.sh`. Not yet run on the real register. |
+| Certificates split into their own table, searched by the live duplicate check | **Built** | 11: `etls.historical_certificates`. |
+| Letters by month and year; top importers, exporters, countries, products; quantities by category and unit; certificates used more than once; letters by signatory; each with how many letters it's based on | **Built** | 11: modules/etls/statistics.py; `GET /etls/statistics`; frontend/app/staff/statistics/page.tsx. |
+| Filters (date range, importer); CSV of the filtered table | **Built** | 11: `GET /etls/statistics/letters.csv` (formula cells defused). |
+| Data checks as notes on each historical letter's page | **Built** | 11: `etls.historical_data_checks` and its links; `GET /etls/history/{id}`; frontend/app/staff/history/[id]/page.tsx. Unlinked checks listed on the statistics page. |
+| A category for live letters | **Missing** `[CONFIRM]` | The live form has no category; live letters show "Not recorded" in the quantities table. |
 
 ---
 

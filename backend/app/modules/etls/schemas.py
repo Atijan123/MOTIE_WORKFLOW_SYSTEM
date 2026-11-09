@@ -146,9 +146,22 @@ class OtherCaseOut(BaseModel):
     importer_name: str
 
 
+class HistoricalUseOut(BaseModel):
+    """A letter from the imported register that used the same number (step 11)."""
+
+    letter_id: int  # GET /etls/history/{letter_id}
+    letter_no: int
+    reference: str | None
+    letter_date: date | None
+    letter_date_as_written: str | None
+    importer: str | None
+    described: str  # "historical letter [ref], [date], [importer]"
+
+
 class DuplicateNumberOut(BaseModel):
     number: str  # as typed on this case
     other_cases: list[OtherCaseOut]  # oldest first
+    historical_letters: list[HistoricalUseOut] = []  # oldest first; repeat copies left out
 
 
 class OriginalSeenOut(BaseModel):

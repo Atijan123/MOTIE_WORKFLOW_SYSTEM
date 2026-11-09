@@ -9,4 +9,5 @@ from app.core.documents import models as document_models  # noqa: F401
 from app.core.identity import models as identity_models  # noqa: F401
 from app.core.notifications import models as notification_models  # noqa: F401
 from app.core.workflow import models as workflow_models  # noqa: F401
+from app.modules.etls import history_models as etls_history_models  # noqa: F401
 from app.modules.etls import models as etls_models  # noqa: F401

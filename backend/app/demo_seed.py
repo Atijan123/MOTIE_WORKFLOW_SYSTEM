@@ -17,6 +17,10 @@ The cases, one per stage of the route:
   6. flagged duplicate      (at the desk, on hold: same certificate as case 1)
   7. submitted              (waiting for Records)
   8. draft                  (half filled in)
+
+Plus a small fictional register of historical letters (write_demo_register()),
+imported the way the real one is, so the Statistics page (S13) has history:
+three letters, one of them filed twice, and one data check.
 """
 
 import asyncio
@@ -24,6 +28,7 @@ import os
 import sys
 import time
 from datetime import date, timedelta
+from pathlib import Path
 
 import httpx
 from fpdf import FPDF
@@ -283,14 +288,69 @@ async def seed_cases(client: httpx.AsyncClient, password: str) -> list[tuple[str
     return [(f"{refs[case_id]:<26} {label}", case_id) for label, case_id in made]
 
 
+def write_demo_register(folder: Path) -> Path:
+    """A made-up register in the real one's format. Every name and number is fictional."""
+    from app.modules.etls.import_history import write_register
+
+    letters = [
+        {"Letter no.": 1, "Folio(s) in file": "2", "Letter reference": "ADM 151/420/01/PART III",
+         "Letter date": "14th August, 2025", "Importer": "Kombo Feeds Ltd", "Goods (as in letter)": "Poultry feed",
+         "Category": "Animal feed", "Exporter": "Dakar Agro SA", "Exporter country": "Senegal",
+         "Exporter approval no. (standard)": "SN-ETLS-0042", "Certificate of origin no(s).": "SN-CO-2025-0700",
+         "Signed by": "Demo Director (fictional)", "Signed as": "For: Permanent Secretary",
+         "Also filed at (second copy of this letter)": "File 2, p. 3 (folio 3)"},
+        {"Letter no.": 3, "Folio(s) in file": "7", "Letter reference": "ADM 151/420/01/PART III",
+         "Letter date": "2nd December, 2025", "Importer": "Ceesay Building Supplies", "Goods (as in letter)": "Cement",
+         "Category": "Cement", "Exporter": "Lagos Cement Plc", "Exporter country": "Nigeria",
+         "Certificate of origin no(s).": "NG-CO-2025-0310; NG-CO-2025-0311",
+         "Signed by": "Demo Director (fictional)", "Signed as": "For: Permanent Secretary"},
+        {"Letter no.": 4, "Folio(s) in file": "9", "Letter reference": "ADM 151/420/01/PART III",
+         "Letter date": "20th January, 2026", "Importer": "Touray Trading Company", "Goods (as in letter)": "Palm oil",
+         "Category": "Food", "Exporter": "Abidjan Oils SARL", "Exporter country": "Côte d’Ivoire",
+         "Certificate of origin no(s).": "NG-CO-2025-0311", "Signed by": "Demo Signatory (fictional)",
+         "Signed as": "In the Director's absence"},
+    ]
+    goods = [
+        {"Line no.": 1, "Letter no.": 1, "Product": "Poultry feed", "Category": "Animal feed", "Quantity": 900, "Unit": "bags"},
+        {"Line no.": 2, "Letter no.": 3, "Product": "Portland cement", "Category": "Cement", "Quantity": 250, "Unit": "tonnes"},
+        {"Line no.": 3, "Letter no.": 4, "Product": "Refined palm oil", "Category": "Food", "Quantity": 300, "Unit": "cartons"},
+    ]
+    checks = [
+        {"Check no.": 1, "Folio(s)": "9", "What looks wrong": "Certificate NG-CO-2025-0311 also on folio 7",
+         "What to check": "Ask the desk which consignment it covers"},
+    ]
+    return write_register(folder / "demo-register.xlsx", letters, goods, checks)
+
+
+async def _history() -> list[str]:
+    """Import the fictional register as the schema owner, as the real import does."""
+    import tempfile
+
+    from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+
+    from app.modules.etls.import_history import import_file
+
+    engine = create_async_engine(settings.migration_database_url)
+    try:
+        with tempfile.TemporaryDirectory() as folder:
+            async with AsyncSession(engine) as session:
+                return (await import_file(session, write_demo_register(Path(folder)))).lines()
+    finally:
+        await engine.dispose()
+
+
 def main() -> None:
     if settings.app_env != "development":
         sys.exit(f"Refusing to seed demo cases: APP_ENV is '{settings.app_env}', not 'development'.")
     password = os.environ.get("DEV_SEED_PASSWORD") or DEFAULT_PASSWORD
     asyncio.run(_users(password))
     made = asyncio.run(_cases(password))
+    history = asyncio.run(_history())
     print("\nDemo cases (all fictional):")
     for line, _ in made:
+        print(f"  {line}")
+    print("\nFictional historical register imported:")
+    for line in history:
         print(f"  {line}")
     print(f"\nDemo logins, all with the password: {password}")
     print("  Applicants:  fatou.jallow@demo.test   (Kombo Feeds Ltd)")
@@ -301,6 +361,7 @@ def main() -> None:
     print("  Director:    director@motie.test      (recorded as away for 3 days: the signatories sign)")
     print("  Signatories: signer1@motie.test, signer2@motie.test")
     print("  List keeper: signatories@motie.test   (Signatories screen, S12)")
+    print("  Statistics:  stats@motie.test, or director@motie.test  (S13)")
     print("  Recorder:    recorder@motie.test")
     print("  Admin:       admin@motie.test         (Lists)")
     print("\nOpen http://localhost:3001")

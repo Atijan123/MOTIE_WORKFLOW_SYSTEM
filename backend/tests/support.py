@@ -200,3 +200,63 @@ async def ready_for_records(act, people, case_id) -> None:
                 f"/cases/{case_id}/documents/{item['documents'][0]['id']}/original-seen",
             )
             assert seen.status_code == 200, seen.text
+
+
+# --- A made-up register of historical letters (step 11) ----------------------
+# Every name and number here is invented. The real register is never used in tests.
+
+HISTORY_IMPORTER = "Banjul Test Traders"  # filter on this: other tests commit live letters too
+HISTORICAL_CERTIFICATE = "HX-CO-2025-0001"
+
+
+def made_up_register(folder, **changes) -> "Path":
+    """Write a small register with the real sheets and headings. Letter 1 is
+    filed twice; letters 1 and 3 share a certificate; letter 4 has no readable
+    date. `changes` replaces whole sheets (letters, goods, checks)."""
+    from datetime import datetime
+
+    from app.modules.etls.import_history import write_register
+
+    letters = [
+        {
+            "Letter no.": 1, "Folio(s) in file": "3-4", "PDF page(s)": "File 2, p. 7", "Letter reference": "ADM/TEST/1",
+            "Letter date": "16th October, 2025", "Importer": HISTORY_IMPORTER, "Importer address / cc": "1 Test Street, Banjul",
+            "Goods (as in letter)": "Poultry feed and maize", "Category": "Feed", "Exporter": "Dakar Test SA",
+            "Exporter country": "Senegal", "Exporter approval no. (as written)": "sn etls 1",
+            "Exporter approval no. (standard)": "SN-ETLS-0001", "Product approval no(s).": "SN-PA-1",
+            "Tariff code(s)": "2309.90", "Certificate of origin no(s).": f"{HISTORICAL_CERTIFICATE}; HX-CO-2025-0002",
+            "No. of certificates": 2, "Bill of lading / container": "BL-1", "Signed by": "A. Test Director",
+            "Signed as": "For: Permanent Secretary", "Check notes": "Folio 4 is faint",
+            "Also filed at (second copy of this letter)": "File 5, p. 9 (folio 5)",
+        },
+        {
+            "Letter no.": 3, "Folio(s) in file": "9", "Letter reference": "ADM/TEST/3",
+            "Letter date": datetime(2026, 1, 20), "Importer": "  BANJUL TEST   TRADERS ",
+            "Exporter": "Accra Test Ltd", "Exporter country": "Ghana",
+            "Certificate of origin no(s).": "HX-CO-2025-0002", "Signed by": "B. Test Officer",
+            "Signed as": "In the Director's absence",
+        },
+        {
+            "Letter no.": 4, "Folio(s) in file": "11", "Letter reference": "ADM/TEST/4", "Letter date": "unclear",
+            "Importer": HISTORY_IMPORTER, "Goods (as in letter)": "Cement", "Category": "Cement",
+            "Certificate of origin no(s).": "HX-CO-2025-0004", "Signed by": "A. Test Director",
+        },
+        {
+            # A cell that would run as a formula in Excel: the CSV must defuse it.
+            "Letter no.": 5, "Letter reference": "ADM/TEST/5", "Letter date": "2026-02-03",
+            "Importer": "=HYPERLINK(\"http://bad.test\") Banjul Test Traders",
+        },
+    ]
+    goods = [
+        {"Line no.": 1, "Letter no.": 1, "Product": "Poultry feed", "Category": "Feed", "Quantity": 1200, "Unit": "bags"},
+        {"Line no.": 2, "Letter no.": 1, "Product": "Maize", "Category": "Feed", "Quantity": "10.5", "Unit": "tonnes"},
+        {"Line no.": 3, "Letter no.": 3, "Product": "Poultry feed", "Category": "feed", "Quantity": "1,000", "Unit": "Bags"},
+        {"Line no.": 4, "Letter no.": 4, "Product": "Cement", "Category": "Cement", "Quantity": "about 300", "Unit": "tonnes"},
+    ]
+    checks = [
+        {"Check no.": 1, "Folio(s)": "4", "What looks wrong": "Date hard to read", "What to check": "Compare with the file"},
+        {"Check no.": 2, "Letter reference": "ADM/TEST/3", "What looks wrong": "Importer in capitals"},
+        {"Check no.": 3, "Letter reference": "ADM/NOWHERE", "What looks wrong": "Not in the file"},
+    ]
+    sheets = {"letters": letters, "goods": goods, "checks": checks, **changes}
+    return write_register(folder / "made-up-register.xlsx", sheets["letters"], sheets["goods"], sheets["checks"])

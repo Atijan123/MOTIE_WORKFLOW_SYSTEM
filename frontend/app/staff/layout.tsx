@@ -2,7 +2,7 @@ import { ActingBanner } from "@/components/ActingBanner";
 import { NavLink } from "@/components/NavLink";
 import { TopBar } from "@/components/TopBar";
 import { api } from "@/lib/api";
-import { requireUser } from "@/lib/session";
+import { mayViewStatistics, requireUser } from "@/lib/session";
 import type { ActingNow, CaseSummary } from "@/lib/types";
 
 // Every staff page: header with the post, the acting banner, and the menu.
@@ -33,6 +33,7 @@ export default async function StaffLayout({ children }: { children: React.ReactN
           <NavLink href="/staff/absences">Absences</NavLink>
           {me.roles.includes("admin") ? <NavLink href="/staff/lists">Lists</NavLink> : null}
           {me.roles.includes("signatory_admin") ? <NavLink href="/staff/signatories">Signatories</NavLink> : null}
+          {mayViewStatistics(me) ? <NavLink href="/staff/statistics">Statistics</NavLink> : null}
         </nav>
         <main className="staff-main">{children}</main>
       </div>

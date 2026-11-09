@@ -22,6 +22,7 @@ from app.modules.etls.models import (
     FacilityLetterCertificate,
     FacilityLetterProductApproval,
 )
+from app.modules.etls.history_models import HistoricalCertificate, HistoricalLetter
 from app.modules.etls.schemas import FacilityLetterForm, normalize_certificate_number
 
 MODULE = "etls"
@@ -66,6 +67,32 @@ async def _earlier_uses(session: AsyncSession, case_id: int, numbers: list[str])
     for number, earlier_case_id in rows:
         uses.setdefault(number, []).append(earlier_case_id)
     return uses
+
+
+async def historical_uses(session: AsyncSession, numbers: list[str]) -> dict[str, list[HistoricalLetter]]:
+    """{normalized number: historical letters that used it}, oldest first."""
+    if not numbers:
+        return {}
+    rows = await session.execute(
+        select(HistoricalCertificate.number_normalized, HistoricalLetter)
+        .join(HistoricalLetter, HistoricalLetter.id == HistoricalCertificate.letter_id)
+        .where(HistoricalCertificate.number_normalized.in_(numbers))
+        .order_by(HistoricalLetter.letter_date.nulls_last(), HistoricalLetter.letter_no)
+    )
+    uses: dict[str, list[HistoricalLetter]] = {}
+    for number, letter in rows:
+        if letter not in uses.setdefault(number, []):  # a number twice on one letter is one use
+            uses[number].append(letter)
+    return uses
+
+
+def describe_historical(letter: HistoricalLetter) -> str:
+    """'historical letter ADM 151/12, 16th October, 2025, Kombo Feeds Ltd' (S2)."""
+    when = long_date(letter.letter_date) if letter.letter_date else letter.letter_date_as_written or "no date"
+    return (
+        f"historical letter {letter.reference or f'no. {letter.letter_no}'}, {when}, "
+        f"{letter.importer or 'importer not recorded'}"
+    )
 
 
 def _form_rows(form: FacilityLetterForm) -> dict:
@@ -278,10 +305,15 @@ async def check_duplicates(session: AsyncSession, move: effects.Move) -> None:
     resubmission, only numbers that no open flag covers yet raise a new one.
     [CONFIRM] Should a number from a rejected case also count as used?
     (Right now every earlier submitted use counts.)
+
+    Historical letters count too (step 11): a number on a letter in the
+    imported register is "used on historical letter [ref], [date], [importer]".
     """
     case = move.case
     letter = await session.get(FacilityLetter, case.id)
-    earlier = await _earlier_uses(session, case.id, [c.number_normalized for c in letter.certificates])
+    numbers = [c.number_normalized for c in letter.certificates]
+    earlier = await _earlier_uses(session, case.id, numbers)
+    historical = await historical_uses(session, numbers)
     flagged = {
         number
         for f in await flags.open_flags(session, case.id)
@@ -289,22 +321,32 @@ async def check_duplicates(session: AsyncSession, move: effects.Move) -> None:
         for number in f.details.get("numbers", [])
     }
     earlier = {n: ids for n, ids in earlier.items() if n not in flagged}
+    historical = {n: found for n, found in historical.items() if n not in flagged}
+    if not earlier and not historical:
+        return
+    parts = []
     if earlier:
-        await flags.raise_flag(
-            session,
-            case_id=case.id,
-            code=DUPLICATE_CERTIFICATE,
-            message="Certificate of origin number(s) already used on an earlier case: "
-            + ", ".join(sorted(earlier)),
-            for_position_code=DESK,
-            details={"numbers": sorted(earlier), "earlier_case_ids": earlier},
-        )
+        parts.append("already used on an earlier case: " + ", ".join(sorted(earlier)))
+    for number in sorted(historical):
+        parts.append(f"{number} used on " + "; ".join(describe_historical(l) for l in historical[number]))
+    await flags.raise_flag(
+        session,
+        case_id=case.id,
+        code=DUPLICATE_CERTIFICATE,
+        message="Certificate of origin number(s) " + ". ".join(parts),
+        for_position_code=DESK,
+        details={
+            "numbers": sorted(set(earlier) | set(historical)),
+            "earlier_case_ids": earlier,
+            "historical_letter_ids": {n: [l.id for l in found] for n, found in historical.items()},
+        },
+    )
 
 
 async def other_uses(session: AsyncSession, case_id: int, user: User) -> dict[str, list]:
     """For the desk (S2): each of this case's certificate numbers that another
     submitted case also used (earlier or later), with that case's reference,
-    status and date.
+    status and date. Historical letters that used it come from historical_uses().
 
     Read live, so the desk sees where the earlier case is *now* (e.g. since
     rejected), not where it was when the flag was raised."""

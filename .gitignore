@@ -4,3 +4,8 @@ __pycache__/
 .venv/
 .pytest_cache/
 .claude/settings.local.json
+
+# Registers and exports hold real importer data: never commit them (step 11).
+*.xlsx
+*.xlsm
+*.xls

@@ -9,6 +9,7 @@ from app.core.workflow import absence_router, acting_router, delegation_router, 
 from app.core.workflow import router as workflow
 from app.core.workflow.service import WorkflowError
 from app.db.session import engine
+from app.modules.etls import history_router as etls_history
 from app.modules.etls import router as etls
 
 
@@ -31,4 +32,5 @@ app.include_router(absence_router.router)
 app.include_router(acting_router.router)
 app.include_router(signatory_router.router)
 app.include_router(etls.router)
+app.include_router(etls_history.router)
 app.add_exception_handler(WorkflowError, workflow.workflow_error_handler)

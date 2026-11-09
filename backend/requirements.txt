@@ -7,3 +7,4 @@ alembic==1.14.0
 pwdlib[argon2]==0.2.1
 PyJWT==2.10.1
 fpdf2==2.8.9
+openpyxl==3.1.5

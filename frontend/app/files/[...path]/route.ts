@@ -9,15 +9,32 @@ const ALLOWED = [
   /^etls\/facility-letters\/\d+\/letter-preview\.pdf$/,
   /^etls\/facility-letters\/\d+\/letters\/\d+\/file$/,
   /^etls\/facility-letters\/\d+\/my-copy\.pdf$/, // the applicant's copy
+  /^etls\/statistics\/letters\.csv$/, // S13's table; takes the filters below
 ];
+
+// Query parameters passed on, for the CSV only: the statistics filters, checked.
+const FILTERS: Record<string, RegExp> = {
+  date_from: /^\d{4}-\d{2}-\d{2}$/,
+  date_to: /^\d{4}-\d{2}-\d{2}$/,
+  importer: /^.{1,200}$/,
+};
+
+function filters(request: Request): string {
+  const out = new URLSearchParams();
+  for (const [key, value] of new URL(request.url).searchParams) {
+    if (FILTERS[key]?.test(value)) out.set(key, value);
+  }
+  const text = out.toString();
+  return text ? `?${text}` : "";
+}
 
 // Headers from the API worth keeping: what it is, how to show it, and its checksum.
 const PASS = ["content-type", "content-disposition", "x-checksum-sha256", "x-letter-status", "x-content-type-options"];
 
-export async function GET(_: Request, { params }: { params: Promise<{ path: string[] }> }) {
+export async function GET(request: Request, { params }: { params: Promise<{ path: string[] }> }) {
   const path = (await params).path.join("/");
   if (!ALLOWED.some((pattern) => pattern.test(path))) return new Response("Not found", { status: 404 });
-  const upstream = await apiFetch(`/${path}`);
+  const upstream = await apiFetch(`/${path}${path.endsWith(".csv") ? filters(request) : ""}`);
   if (!upstream.ok) {
     const body = await upstream.json().catch(() => ({}));
     return new Response(typeof body.detail === "string" ? body.detail : "Not available", {

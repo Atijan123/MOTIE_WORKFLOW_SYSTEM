@@ -190,3 +190,79 @@ export type SignatoryList = {
 };
 
 export type SignatoryCandidate = { user_id: number; name: string; posts: string[] };
+
+// S13: statistics (backend/app/modules/etls/history_router.py).
+export type Figure = { based_on: number; rows: { label: string; letters: number }[]; note: string | null };
+
+export type DataCheck = {
+  check_no_as_written: string | null;
+  folios: string | null;
+  reference: string | null;
+  what_looks_wrong: string | null;
+  what_to_check: string | null;
+};
+
+export type Statistics = {
+  letters: number;
+  live: number;
+  historical: number;
+  undated: number;
+  by_month: Figure;
+  by_year: Figure;
+  importers: Figure;
+  exporters: Figure;
+  exporter_countries: Figure;
+  products: Figure;
+  signatories: Figure;
+  quantities: {
+    based_on: number;
+    rows: { category: string; unit: string; total: string; letters: number; lines: number }[];
+    lines_without_quantity: number;
+  };
+  shared_certificates: { based_on: number; rows: { number: string; letters: string[] }[] };
+  unlinked_checks: DataCheck[];
+  filters: { date_from: string | null; date_to: string | null; importer: string | null };
+};
+
+export type HistoricalPage = {
+  letter: {
+    id: number;
+    letter_no: number;
+    folios: string | null;
+    pdf_pages: string | null;
+    reference: string | null;
+    letter_date_as_written: string | null;
+    letter_date: string | null;
+    importer: string | null;
+    importer_address: string | null;
+    goods: string | null;
+    category: string | null;
+    exporter: string | null;
+    exporter_country: string | null;
+    exporter_approval_as_written: string | null;
+    exporter_approval_standard: string | null;
+    product_approvals: string | null;
+    tariff_codes: string | null;
+    certificates_as_written: string | null;
+    certificate_count_as_written: string | null;
+    bill_of_lading: string | null;
+    signed_by: string | null;
+    signed_as: string | null;
+    check_notes: string | null;
+    also_filed_at: string | null;
+    source_file: string | null;
+    source_page: number | null;
+    source_row: number;
+    imported_at: string;
+  };
+  goods: {
+    line_no_as_written: string | null;
+    product: string | null;
+    category: string | null;
+    quantity_as_written: string | null;
+    quantity: string | null;
+    unit: string | null;
+  }[];
+  certificates: string[];
+  checks: DataCheck[];
+};

@@ -49,3 +49,9 @@ def test_the_demo_seed_refuses_to_run_outside_development(monkeypatch):
     monkeypatch.setattr(settings, "app_env", "production")
     with pytest.raises(SystemExit, match="Refusing"):
         demo_seed.main()
+
+
+async def test_the_demo_register_imports_as_the_real_one_does(import_history, tmp_path):
+    summary = await import_history(demo_seed.write_demo_register(tmp_path))
+    assert (summary.letters, summary.filed_twice, summary.goods_lines, summary.checks) == (3, 1, 3, 1)
+    assert (summary.checks_unlinked, summary.undated_letters) == (0, 0)

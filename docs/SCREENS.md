@@ -77,6 +77,7 @@ Route: Records (originals seen) → ETLS officer (verify) → **Director of Indu
 
 ### S2. ETLS desk verification (`Desk`)
 - Duplicate certificate flag: which earlier case used the number, its status and date; finding (required) to clear; **or reject or return directly while the flag is open** (the reason also resolves the flag; a resubmission is checked again) `[CONFIRM]` (built 8l).
+- The check also searches the **imported historical letters** (S13): the flag says "used on historical letter [ref], [date], [importer]", linking to that letter's page.
 - Application summary.
 - HS code: enter or confirm; shows whether the cement receipt applies.
 - Checks against the ECOWAS ETLS list, each a recorded tick: exporter approval listed; product approval covers the goods.
@@ -104,6 +105,18 @@ Route: Records (originals seen) → ETLS officer (verify) → **Director of Indu
 - **My absences:** a post holder records their own absence (dates, reason optional) or delegates to another post (dates, all workflows or one). For the Director: shows that officers on the authorised signatories list can sign while they are away. For other posts: shows who acts for them under the succession order.
 - **Record for someone else:** staff with the `absence_recorder` role (PS's office, HR `[CONFIRM]`) record an absence on a post holder's behalf; audited as "recorded by".
 - List of current and upcoming absences, with revoke for delegations.
+
+### S13. ETLS statistics (`Statistics`), the Director and the `stats_viewer` role
+- **History:** the Ministry's Excel register of earlier facility letters (sheets "Facility letters", one row per letter; "Goods lines"; "Data checks") is imported from the server's command line (`scripts/import-history.sh`, the file read in place, never copied into the system's code). Historical letters are read-only, are not cases and have no workflow. Every column is kept as written, with the scan file and page it came from. Where a second paper copy of a letter sits ("Also filed at") is kept as text on that letter, not as another letter. Re-running the import replaces the previous one.
+- **Figures**, live and historical letters together, each saying **how many letters it is based on**:
+  - letters by month and by year (letters with no readable date are counted and said, but not placed);
+  - top importers, exporters, exporter countries and products;
+  - quantities by category and unit (**different units are never added together**);
+  - certificates of origin used on more than one letter;
+  - letters by signatory.
+- **Filters:** date range and importer. **Download the filtered table as CSV**, one row per letter.
+- **Historical letter page:** every column as written (including "Also filed at"), goods lines, certificates, and the **data check notes** from the register's "Data checks" sheet linked to it. Data checks the import can't link to a letter are listed on the statistics page.
+- Live applications record no "category": they show as "Not recorded" `[CONFIRM]`.
 
 ## Staff screens: ETLS approval
 

@@ -9,6 +9,8 @@ type Flag = { id: number; code: string; message: string; blocking: boolean; reso
 type Duplicate = {
   number: string;
   other_cases: { case_id: number; reference: string; status: string; submitted_at: string; importer_name: string }[];
+  // Letters from the imported register (step 11).
+  historical_letters: { letter_id: number; described: string }[];
 };
 type Tick = { code: string; label: string; at_current_step: boolean; ticked: boolean; ticked_at: string | null };
 
@@ -37,6 +39,12 @@ export async function DeskChecks({ caseId, letter, documents }: { caseId: number
                   {i ? "; " : ""}
                   <a href={`/staff?case=${o.case_id}`}>{o.reference.replace("MOTIE/ETLS/", "")}</a> ({o.importer_name}, {o.status.toLowerCase()},
                   submitted {longDate(o.submitted_at)})
+                </span>
+              ))}
+              {d.historical_letters.map((h, i) => (
+                <span key={h.letter_id}>
+                  {d.other_cases.length || i ? "; " : ""}
+                  used on <a href={`/staff/history/${h.letter_id}`}>{h.described}</a>
                 </span>
               ))}
               .

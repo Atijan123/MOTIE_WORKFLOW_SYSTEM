@@ -26,6 +26,7 @@ from app.modules.etls.schemas import (
     ListsOut,
     NewListItem,
     HsCodeConfirmation,
+    HistoricalUseOut,
     IssuedLetterOut,
     LetterCopyOut,
     WalkInApplication,
@@ -156,6 +157,10 @@ async def duplicate_certificates(
     """Certificate numbers on this case that other submitted cases also used,
     with each earlier case's reference, current status and date (staff only)."""
     found = await service.other_uses(session, case_id, user)
+    letter = await service.get_facility_letter(session, case_id, user)
+    typed = {c.number_normalized: c.number for c in letter.certificates}
+    historical = await service.historical_uses(session, list(typed))
+    numbers = sorted(set(found) | {typed[n] for n in historical})
     return [
         DuplicateNumberOut(
             number=number,
@@ -168,10 +173,22 @@ async def duplicate_certificates(
                     submitted_at=case.submitted_at,
                     importer_name=importer,
                 )
-                for case, status, importer in cases
+                for case, status, importer in found.get(number, [])
+            ],
+            historical_letters=[
+                HistoricalUseOut(
+                    letter_id=h.id,
+                    letter_no=h.letter_no,
+                    reference=h.reference,
+                    letter_date=h.letter_date,
+                    letter_date_as_written=h.letter_date_as_written,
+                    importer=h.importer,
+                    described=service.describe_historical(h),
+                )
+                for h in historical.get(service.normalize_certificate_number(number), [])
             ],
         )
-        for number, cases in found.items()
+        for number in numbers
     ]
 
 
