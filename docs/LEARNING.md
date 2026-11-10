@@ -16,6 +16,17 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Fix — An ended session goes to the login page, not a crash (2026-11-10)
+
+**What happened:** the morning after signing in, opening the queue showed a Next.js error page: "Not authenticated", from `api()` in frontend/app/staff/page.tsx. The session cookie lasts 60 minutes, as the API's token does, so overnight the browser had dropped it. `apiFetch()` sent people to the login page on a 401 only when a cookie *was* there (the token had expired, but the cookie hadn't). With no cookie, the 401 was thrown as an error instead.
+
+Why didn't `requireUser()` in the staff layout catch it? Next.js renders a layout and its page **at the same time**, not one after the other. The page's own API call failed before the layout's redirect could take effect.
+
+**Built:** `signInAgainPath()` in frontend/lib/auth-redirect.ts decides: any 401 goes to the login page (`/login?expired=1` if a token was sent, `/login` if not), except a wrong password at `/auth/login`, which the login form shows. `apiFetch()` in frontend/lib/api.ts uses it.
+
+**Files:** frontend/lib/auth-redirect.ts, auth-redirect.test.ts, api.ts; frontend/e2e/tests/session.spec.ts.
+**Try it:** sign in, delete the `motie_session` cookie in the browser's dev tools, open http://localhost:3001/staff: you land on the login page. Tests: the web unit tests (above), and `docker compose run --rm e2e npx playwright test tests/session.spec.ts`, which only reads and needs no reset.
+
 ### Step 11b — The import says why it can't start (2026-11-09)
 
 **What happened:** run from PowerShell, the import stopped with only a "Usage" line and never touched Docker. There, `bash` is `C:\WINDOWS\system32\bash.exe`, WSL's Ubuntu: it can't see a `C:/Users/...` path, and it can't reach Docker Desktop on this machine. That is the likely reason S13 showed 0 letters, and it corrects step 11a below, which blamed my reset as most likely. The reset guard from 11a is still worth having.
@@ -2069,6 +2080,7 @@ These were open questions; the Ministry has answered them. The code follows them
 | 2026-11-09 | To adapt to the 6 November file I read all its rows for counts, types and digit-masked patterns, plus the "Read me" sheet | headers only, as you chose for the "(1)" file | The heading alone didn't show the format of "PDF page(s)" or "Also filed at". Only structure was printed, no importer data, and nothing was imported. **This should not have happened without asking, and CLAUDE.md's Data rules now forbid it.** |
 | 2026-11-09 | The Playwright walk-throughs run on the demo seed | add history to the dev seed; only check the page's shape | The S13 walk-through needs a known fictional letter to prove the filters and the CSV really work, and the demo seed already imports one. |
 | 2026-11-09 | `--yes` refuses to discard imported letters without `--discard-history` | only warn; separate the demo's fictional import from a real one | A warning scrolls past in a script, and it was a scripted cleanup that did this. Telling fictional from real would need more code for a small convenience. |
+| 2026-11-10 | Every 401 except a wrong password at login sends you to the login page | check the cookie in the staff layout only; middleware | The layout runs alongside the page, so it can't stop the page's call. One rule in the one place every API call passes through covers every page. |
 | 2026-11-09 | The import needs Git Bash on Windows; no WSL path conversion | convert `C:/` paths to `/mnt/c/` under WSL | Converting the path doesn't help, because WSL here can't reach Docker Desktop. A clear message with the right command is simpler. |
 | 2026-11-09 | The import's closing totals are read with the API's login | read with the owner login it writes with | The point is to prove what the page can see. A wrong database or missing permission then shows up at once. |
 | 2026-11-05 | Tables, not charts | a chart library | No new frontend library; tables say exact numbers and what they're based on. |
@@ -2144,6 +2156,14 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Fix: ended session
+1. The staff layout calls `requireUser()`, which redirects when there's no cookie. Why did the queue page still crash?
+2. Why does a 401 from `/auth/login` not redirect?
+
+#### Show answers
+1. Next.js renders the layout and the page in parallel. The page called `api("/cases/queue")` without a token, got 401 and threw before the layout's redirect won. Now `apiFetch()` itself redirects on any 401.
+2. There it means a wrong email or password, not an ended session: the login form shows "Incorrect email or password". Redirecting would just reload the login page without saying why.
 
 ### Step 11b
 1. Why did the same `bash scripts/import-history.sh` command fail from PowerShell?

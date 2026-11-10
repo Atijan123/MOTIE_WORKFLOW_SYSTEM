@@ -4,6 +4,8 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
+import { signInAgainPath } from "./auth-redirect";
+
 export const SESSION_COOKIE = "motie_session";
 // Inside Compose the API is "api:8000"; the browser can't reach it, on purpose.
 const API_URL = process.env.API_URL ?? "http://localhost:8000";
@@ -30,7 +32,8 @@ export async function apiFetch(path: string, options: Options = {}): Promise<Res
     body = JSON.stringify(options.json);
   }
   const response = await fetch(API_URL + path, { method: options.method ?? "GET", headers, body, cache: "no-store" });
-  if (response.status === 401 && token) redirect("/login?expired=1");
+  const signIn = signInAgainPath(response.status, path, Boolean(token));
+  if (signIn) redirect(signIn);
   return response;
 }
 
