@@ -16,6 +16,20 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 12a — CI: every push is tested on GitHub (2026-11-11)
+
+**Built:** a GitHub Actions workflow, .github/workflows/ci.yml, that runs on every push and pull request. Three jobs run side by side on fresh GitHub machines:
+- **backend**: Postgres + pgvector as a *service container* (the same `pgvector/pgvector:pg16` image), `db/init/10-db-users.sh` to create `motie_owner` and `motie_app`, then `pytest -v`. It runs the tests directly on the machine (not in Compose), with throwaway passwords in the workflow file.
+- **frontend**: `npm ci`, `npm run typecheck`, `npm test`.
+- **e2e**: writes a `.env` with random passwords, builds the Compose images, runs `scripts/seed-demo.sh --yes --discard-history` exactly as you do, starts `web`, and runs `docker compose run --rm e2e`. When something fails it prints the API and web logs and uploads `frontend/e2e/playwright-report/` and `test-results/` (screenshots, traces) as an artifact called `playwright-report`, kept 14 days.
+
+The code now lives in a private GitHub repository, github.com/Atijan123/MOTIE_WORKFLOW_SYSTEM. README.md is new, with the CI status badge.
+
+**The rule from now on:** a step is done only when CI is green on its commit.
+
+**Files:** .github/workflows/ci.yml, README.md.
+**Try it:** push any commit and open the repository's **Actions** tab. For a failed walk-through: open the run, scroll to **Artifacts**, download `playwright-report`, unzip it, and run `npx playwright show-trace test-results/<test>/trace.zip` (or open `playwright-report/index.html`).
+
 ### Fix — An ended session goes to the login page, not a crash (2026-11-10)
 
 **What happened:** the morning after signing in, opening the queue showed a Next.js error page: "Not authenticated", from `api()` in frontend/app/staff/page.tsx. The session cookie lasts 60 minutes, as the API's token does, so overnight the browser had dropped it. `apiFetch()` sent people to the login page on a 401 only when a cookie *was* there (the token had expired, but the cookie hadn't). With no cookie, the 401 was thrown as an error instead.
@@ -1708,6 +1722,11 @@ Because the token is 256 random bits, a plain SHA-256 hash is enough. Passwords 
 **Here:** `Figure.based_on` and `note`, `QuantityFigure.lines_without_quantity` in backend/app/modules/etls/statistics.py.
 **Learn more:** [UK Government Analysis Function: communicating quality and uncertainty](https://analysisfunction.civilservice.gov.uk/policy-store/communicating-quality-uncertainty-and-change/)
 
+### Continuous integration (CI)
+**What:** every time code is pushed, a clean machine checks it out and runs all the tests. Your laptop can hide problems: a package you installed by hand, a database you migrated weeks ago, a file you forgot to commit. A fresh machine has none of that, so "green in CI" means "works from what's in the repository". It also means anyone (the ICT unit, a reviewer) can see whether a commit passed without running anything. GitHub Actions reads *workflows* from .github/workflows/: each has *jobs* (here three, in parallel), each job has *steps*. A *service container* is a Docker container GitHub starts beside a job, here Postgres. An *artifact* is a file a run keeps for download, here the Playwright report.
+**Here:** .github/workflows/ci.yml; the badge in README.md.
+**Learn more:** [GitHub Docs: Understanding GitHub Actions](https://docs.github.com/en/actions/about-github-actions/understanding-github-actions)
+
 ## 3. Decisions
 
 ### Confirmed by the Ministry
@@ -1734,6 +1753,10 @@ These were open questions; the Ministry has answered them. The code follows them
 
 | Date | Decision | Alternatives considered | Why |
 | --- | --- | --- | --- |
+| 2026-11-11 | Private GitHub repository, Actions for CI | GitLab CI; a CI server at the Ministry | You chose it. Free for private repos (2,000 minutes a month), and the workflow file is plain YAML the ICT unit can move elsewhere. |
+| 2026-11-11 | Backend tests run on the CI machine with a Postgres service container; walk-throughs run in Compose | Compose for everything | The service container is what you asked for and is quick. The walk-throughs need the whole stack, and Compose with the same seed script tests exactly what you run. |
+| 2026-11-11 | CI writes a `.env` with random passwords each run | GitHub secrets | The CI database is thrown away after the run; there's nothing to keep secret, and nothing to set up per repository. |
+| 2026-11-11 | CI permissions are `contents: read` | the default (read and write) | The jobs only need to read the code. A compromised test dependency then can't push to the repository. |
 | 2026-10-18 | SQLAlchemy 2.0 async + asyncpg | raw asyncpg; SQLModel | Chosen by you. Widely used, works with Alembic, async fits FastAPI. |
 | 2026-10-18 | API and db both in Compose; source bind-mounted with `--reload` | only Postgres in Docker | Chosen by you. One command starts everything; edits reload without rebuilding. |
 | 2026-10-18 | `pgvector/pgvector:pg16` image | plain `postgres:16` and install pgvector later | The stack needs pgvector. This image has it ready; we enable it with a migration when AI work starts. |
@@ -2156,6 +2179,16 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 12a
+1. The backend tests passed on your laptop. Name two reasons they could still fail in CI.
+2. Where do you find the screenshots of a walk-through that failed in CI?
+3. Why does the e2e job write its own `.env` instead of using yours?
+
+#### Show answers
+1. For example: a migration or file you didn't commit; a package installed in your local image but not in requirements; a test that depends on data left in your local database; a dependency on Windows paths or line endings.
+2. In the run's page on GitHub, under **Artifacts**: `playwright-report`, which holds the HTML report and `test-results/` with screenshots and traces.
+3. `.env` is git-ignored and holds your passwords, so it isn't in the repository. CI makes a fresh one with random passwords and `APP_ENV=development`, which the demo seed needs.
 
 ### Fix: ended session
 1. The staff layout calls `requireUser()`, which redirects when there's no cookie. Why did the queue page still crash?
