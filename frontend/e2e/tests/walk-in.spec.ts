@@ -53,13 +53,17 @@ test("Records enters a walk-in application and submits it", async ({ browser }) 
   await desk.getByRole("link", { name: shortRef, exact: true }).click();
   await desk.getByLabel("HS code").fill("6810.11");
   await desk.getByRole("button", { name: "Confirm code" }).click();
+  // Wait for the answer: the checks to tick appear only after it.
+  await expect(desk.getByText("Confirmed: 6810.11.")).toBeVisible();
   const tick = desk.getByRole("button", { name: "Mark as checked" });
   while ((await tick.count()) > 0) {
     const before = await tick.count();
     await tick.first().click();
     await expect(tick).toHaveCount(before - 1);
   }
-  await desk.getByRole("button", { name: "Verify and send for signature" }).click();
+  const verify = desk.getByRole("button", { name: "Verify and send for signature" });
+  await expect(verify).toBeEnabled();
+  await verify.click();
   await expect(desk.getByText("is now:")).toBeVisible();
 
   const director = await loginAs(browser, "director@motie.test");
