@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     # Emails to staff (none are sent yet): off unless the office has a mail
     # server. Emails to applicants are never sent in office mode.
     staff_emails_enabled: bool = False
+    # The nightly backup writes the time of its last success here (step 13d,
+    # office/backup/backup.sh); the API sees the backup drive read-only. The
+    # staff home page warns when it's older than BACKUP_WARN_DAYS (step 13e).
+    backup_status_file: str = "/backups/last-success"
+    backup_warn_days: int = Field(default=2, gt=0)
 
     # The schema owner (motie_owner), used by Alembic and tests only. The API
     # container doesn't get it, so a compromised API can't alter tables.

@@ -62,6 +62,8 @@ services:
       <<: *backend-env
     volumes:
       - documents:/data/documents
+      # Read-only: the staff home page warns when the last backup is old (step 13e).
+      - ${BACKUP_PATH:?Set BACKUP_PATH in .env}:/backups:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/db')"]
       interval: 15s
@@ -103,6 +105,25 @@ services:
     depends_on:
       - staff
       - api
+
+  backup:
+    # The nightly backup (step 13d): cron runs
+    #   docker compose -f docker-compose.office.yml run --rm backup
+    # and scripts/restore.sh uses the same image to restore.
+    build:
+      context: ./office/backup
+    image: motie/office-backup:${MOTIE_VERSION:-local}
+    profiles: ["tools"]
+    env_file: .env
+    volumes:
+      # The USB drive (BACKUP_PATH, e.g. /mnt/motie-backup).
+      - ${BACKUP_PATH:?Set BACKUP_PATH in .env}:/backups
+      # Only the off-site PUBLIC key; the private key is never on the server.
+      - ${OFFSITE_KEY_DIR:-./office/keys}:/keys:ro
+      - documents:/documents
+    depends_on:
+      db:
+        condition: service_healthy
 
   tools:
     # Migrations, the history import, creating staff accounts, e.g.

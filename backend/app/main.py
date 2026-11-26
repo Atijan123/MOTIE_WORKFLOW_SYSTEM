@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api import health
+from app.api import backup_status, health
 from app.core.config import settings
 from app.core.documents import router as documents
 from app.core.identity import router as identity
@@ -30,6 +30,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="MOTIE Workflow Platform", lifespan=lifespan)
 
 app.include_router(health.router)
+app.include_router(backup_status.router)
 app.include_router(identity.router)
 app.include_router(workflow.router)
 app.include_router(documents.router)

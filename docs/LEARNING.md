@@ -16,6 +16,27 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 13e — A warning on the staff home page when the last backup is old (2026-11-26)
+
+**Built:** `GET /system/backup-status` (backend/app/api/backup_status.py) reads the time of the last good backup from `last-success` on the backup drive, which the office stack mounts into the API read-only. The staff home page (frontend/app/staff/page.staff.tsx) shows "The last backup was N days ago…" when it's more than `BACKUP_WARN_DAYS` (2) old, and "No backup can be found…" when the file is missing or unreadable, e.g. the USB drive is unplugged. Only office mode checks; elsewhere there are no backups to check.
+
+**Files:** backend/app/api/backup_status.py (new), backend/app/main.py, backend/app/core/config.py (`backup_status_file`, `backup_warn_days`); backend/tests/test_backup_status.py (new); frontend/app/staff/page.staff.tsx; docker-compose.office.yml (the API's read-only mount).
+**Try it:** on the office server, unplug the backup drive: the staff home page warns. Tests: `docker compose run --rm tools pytest tests/test_backup_status.py -v`.
+
+### Step 13d — Backups: nightly to a USB drive, weekly encrypted for off-site, and a tested restore (2026-11-26)
+
+**Built:**
+- **The backup image** (office/backup/Dockerfile): the database's own Postgres 16 tools plus `age`, so the server needs nothing but Docker. The `backup` service in docker-compose.office.yml mounts the USB drive (`BACKUP_PATH`), the folder with the off-site **public** key (`OFFSITE_KEY_DIR`), and the documents volume.
+- **The nightly backup** (office/backup/backup.sh; cron runs `docker compose -f docker-compose.office.yml --profile tools run --rm backup`, see 13h): `pg_dump` of the database (as the schema owner, custom format) and a tar of every uploaded file and issued letter, into `daily/<date_time>/` with **SHA256SUMS** and a short `backup.txt`. It is written under a temporary name and renamed only when complete. It then writes `last-success` (13e reads it), keeps 30 days of daily backups, and deletes older ones.
+- **Weekly, encrypted, for off-site:** once a week the newest backup is packed and encrypted with `age` to the off-site public key: `offsite/motie-<date>.tar.age`, kept 8 weeks. Copy it to a second drive kept somewhere else. **The private key is never on the server**, so whoever takes the server or the USB drive can't read the archive.
+- **It won't write to the wrong disk:** the drive must hold the marker file `.motie-backup-drive`. Without it (drive unplugged, so the mount point is just an empty folder on the server's own disk), the backup refuses and says why.
+- **scripts/restore.sh** puts a backup back, from a daily folder or from an encrypted archive (`--key` with the private key). **First it decrypts and checks the checksums, changing nothing** (`restore-inside.sh --check`). Only then does it stop the app, empty the database, recreate the database users, restore the database and the documents, start the app and wait for its health check. A damaged backup is refused while the server still has its own data.
+- **Tested in CI** (the `office` job, scripts/ci-office-smoke.sh), after the https checks: real data (a staff account and an uploaded file); a backup refused without the drive marker; the nightly backup with its checksums, `last-success` and an encrypted weekly archive that can't be read as a plain tar. Then **every volume is destroyed**, as if the PC died, and the stack is restored from the **encrypted** archive with the private key: the account, the file and a healthy API must be back. Finally a deliberately damaged backup must be refused, leaving the data in place.
+- **Found while writing the test:** my first restore.sh emptied the database *before* checking the backup, so a damaged backup would have wiped the live data first. The test's last check exists because of that.
+
+**Files:** office/backup/Dockerfile, backup.sh, restore-inside.sh, office/keys/README.md, scripts/restore.sh (new); docker-compose.office.yml (`backup` service); office/env.example (`BACKUP_PATH`, `OFFSITE_KEY_DIR`); scripts/ci-office-smoke.sh; .gitignore (the key folder, CI scratch space).
+**Try it:** this is for the office server; docs/OFFICE-SETUP.md (13h) walks through the drive, the keys, cron and a restore drill. The CI `office` job is the automatic test.
+
 ### Step 13c — The office stack: docker-compose.office.yml with Caddy and its own certificate authority (2026-11-26)
 
 **Built:**
@@ -1937,6 +1958,13 @@ The API can't see the browser: the browser talks to a Next.js server, which call
 **Here:** `tls internal` in office/Caddyfile; the `caddy_data` volume in docker-compose.office.yml; scripts/ci-office-smoke.sh downloads the root and checks the server with it.
 **Learn more:** [Caddy docs: Automatic HTTPS, "Local HTTPS"](https://caddyserver.com/docs/automatic-https#local-https)
 
+### Backups you can trust: tested restores, checksums, off-site copies
+**What:** a backup is only as good as the last time it was restored. The usual failures are silent: a backup job that stopped weeks ago, a file that's half-written, a drive that was never plugged back in, a copy kept in the same room as the server when it floods or is stolen. The habits that prevent them: **check every backup** (checksums written at backup time, verified before any restore), **write atomically** (a temporary name, renamed when complete), **watch the age** of the last good one (13e), **keep a copy elsewhere** (the weekly archive), **encrypt what leaves the building** (with a key that isn't with the data), and **practise the restore** (CI does it on every push; do a drill on the server too). The "3-2-1 rule" sums it up: 3 copies, on 2 kinds of media, 1 of them off-site.
+**Stops:** losing everything to a dead disk, a stolen server or a fire (with the off-site copy); ransomware that encrypts the server, if the USB drive is rotated and not left plugged in (13h); someone reading the off-site copy if it's lost.
+**Doesn't stop:** losing the day's work since the last nightly backup; a mistake that's been in the backups longer than 30 days; losing the private key (then the weekly archives can't be read: keep two copies, apart). A USB drive left plugged in can be encrypted by ransomware along with the server.
+**Here:** office/backup/backup.sh, restore-inside.sh; scripts/restore.sh; scripts/ci-office-smoke.sh (the restore test); backend/app/api/backup_status.py (13e).
+**Learn more:** [Backblaze: The 3-2-1 backup strategy](https://www.backblaze.com/blog/the-3-2-1-backup-strategy/) and [age: simple, modern file encryption](https://github.com/FiloSottile/age)
+
 ## 3. Decisions
 
 ### Confirmed by the Ministry
@@ -1963,6 +1991,12 @@ These were open questions; the Ministry has answered them. The code follows them
 
 | Date | Decision | Alternatives considered | Why |
 | --- | --- | --- | --- |
+| 2026-11-26 | `pg_dump` (a logical backup) each night | copying Postgres's data files; continuous archiving (WAL) | A dump can be restored into any Postgres 16, is checked by pg_restore, and is easy to explain. Continuous archiving loses less (minutes instead of a day) but needs more care; worth it later if a day's loss is too much (open question). |
+| 2026-11-26 | `age`, with the public key on the server and the private key off it | gpg; a password | You suggested age or gpg: age is simpler, with one small key file. A password would have to be on the server for the nightly job, so a stolen server would hold it. |
+| 2026-11-26 | The backup tools in their own image | install pg_dump and age on Ubuntu | pg_dump must match the database's version; in the image it always does, and the server stays plain Ubuntu plus Docker. |
+| 2026-11-26 | The drive must carry a marker file | check only that the folder exists | An unplugged drive leaves the folder; the backup would quietly fill the server's own disk and look fine. |
+| 2026-11-26 | restore.sh checks the backup before touching anything | check while restoring | A damaged backup found halfway would leave an empty database. |
+| 2026-11-26 | CI restores from the encrypted archive, after destroying every volume | restore the daily folder into the same database | That's the case that matters: a new machine, only the off-site copy and the key. |
 | 2026-11-26 | Caddy's internal certificate authority | self-signed certificate; a Ministry or Government CA; plain http | Self-signed certificates must be re-trusted at every renewal. A Government CA would be best if the ICT unit has one (open question). http would send passwords and codes in the clear on the office Wi-Fi. |
 | 2026-11-26 | Only `/api/health` of the API goes through Caddy | the whole API | Browsers never call the API (step 9a: the Next.js server does), so exposing it would only add a door. The health check is for scripts. |
 | 2026-11-26 | Caddy binds to the office-network address only (`OFFICE_BIND_IP`) | every address (0.0.0.0) | If the server ever gets a second network card (e.g. a 4G dongle), the app isn't on it. |
@@ -2460,9 +2494,21 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 
 - [ ] **The server's name and address (ICT):** what name will staff type (`OFFICE_HOSTNAME`, e.g. `etls.office`), can the office router's DNS point it at the server, and which fixed address will the server have (`OFFICE_BIND_IP`)? Does the Government have its own certificate authority we should use instead of Caddy's?
 
+- [ ] **Backups (step 13d):** is losing up to a day's work acceptable if the server dies (backups are nightly)? Who takes the weekly encrypted archive off-site, where to, and who holds the two copies of the private key? How long must backups be kept (now 30 days of daily, 8 weeks of weekly)? Check against Gambian records rules.
+
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Steps 13d and 13e
+1. The USB drive was unplugged a week ago. What do the nightly backup and the staff home page do?
+2. Why is only the PUBLIC off-site key on the server?
+3. Why does scripts/restore.sh check the backup before it stops the app?
+
+#### Show answers
+1. backup.sh finds no `.motie-backup-drive` marker at /backups and stops with "no backup drive…", writing nothing. `last-success` stays a week old, so the staff home page (13e) shows "The last backup was 7 days ago…" (or "No backup can be found…" if the API can't see the file at all).
+2. Encrypting needs only the public key; decrypting needs the private one. With only the public key on the server, someone who steals the server or the drive still can't read the off-site archives.
+3. Restoring starts by emptying the database. If the backup turned out damaged after that, the server would be left with nothing. Checking first (decrypt, checksums) means a bad backup is refused while the server still has its own data.
 
 ### Step 13c
 1. A staff PC shows a certificate warning for https://etls.office. What's missing, and why must staff never click past it?

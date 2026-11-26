@@ -12,3 +12,9 @@ __pycache__/
 
 # CI only (scripts/ci-prepare.sh copies docker-compose.ci.yml here).
 docker-compose.override.yml
+
+# The off-site backup key belongs to the server, not the repository (step 13d).
+office/keys/*
+!office/keys/README.md
+# CI scratch space (scripts/ci-office-smoke.sh)
+.ci-office/

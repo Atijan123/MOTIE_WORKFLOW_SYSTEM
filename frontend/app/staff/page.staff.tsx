@@ -12,7 +12,10 @@ export const metadata: Metadata = { title: "My queue" };
 // on the step the case is at and on what the API lets me do.
 export default async function Queue({ searchParams }: { searchParams: Promise<{ case?: string; done?: string }> }) {
   const sp = await searchParams;
-  const queue = await api<CaseSummary[]>("/cases/queue");
+  const [queue, backup] = await Promise.all([
+    api<CaseSummary[]>("/cases/queue"),
+    api<{ warning: string | null }>("/system/backup-status"),
+  ]);
   // Letters waiting only to be dispatched are on the Outgoing tab.
   const work = queue.filter((c) => !c.available_actions.length || c.available_actions.some((a) => a.to_status !== "sent_to_gra"));
   const selectedId = Number(sp.case) || work[0]?.id;
@@ -20,6 +23,13 @@ export default async function Queue({ searchParams }: { searchParams: Promise<{ 
   return (
     <>
       <h1 className="title">My queue</h1>
+      {/* Step 13e: the office server's backup is over 2 days old (or can't be found). */}
+      {backup.warning ? (
+        <div className="notice notice-warn" role="alert">
+          <strong>Backup</strong>
+          <span>{backup.warning}</span>
+        </div>
+      ) : null}
       {sp.done ? (
         <div className="notice notice-done" role="status">
           {sp.done}
