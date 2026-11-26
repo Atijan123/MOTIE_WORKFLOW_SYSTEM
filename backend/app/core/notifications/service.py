@@ -12,6 +12,7 @@ move (cancelling a letter). The worker sends it later.
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit.models import AuditEvent
+from app.core.config import settings
 from app.core.identity.models import User
 from app.core.notifications.models import Notification
 from app.core.workflow.history import applicant_timeline
@@ -23,6 +24,8 @@ SIGN_OFF = "Ministry of Trade, Industry, Regional Integration and Employment\nTh
 
 async def notify_applicant(session: AsyncSession, case: Case, event: AuditEvent) -> Notification | None:
     """Add the email for this move to the outbox, if the applicant sees the move. Does NOT commit."""
+    if not settings.applicant_emails_on():
+        return None  # office mode (step 13a): Records tells applicants of each step
     entries = await applicant_timeline(session, case)  # also flushes `event`, giving it its id
     if not entries or entries[-1].event_id != event.id:
         return None  # hidden, or the same step again in other words (no news for the applicant)

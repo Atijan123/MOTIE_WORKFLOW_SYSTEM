@@ -139,6 +139,9 @@ async def get_case(
 
 async def start_case(session: AsyncSession, *, workflow_code: str, actor: User) -> Case:
     """Open a case of a workflow that needs no module form (POST /cases)."""
+    if not settings.applicant_portal_on():
+        # Office mode (step 13a): every application is entered by Records.
+        raise NotPermitted("On this server, applications are entered by Records as walk-ins.")
     case = await open_case(session, workflow_code=workflow_code, actor=actor, module=None)
     await session.commit()
     await session.refresh(case, ["workflow", "current_status"])

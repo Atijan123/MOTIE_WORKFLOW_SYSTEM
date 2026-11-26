@@ -59,6 +59,7 @@ services:
       # STAFF_IP_ALLOWLIST_ENABLED=true.
       STAFF_IP_ALLOWLIST: ${STAFF_IP_ALLOWLIST:-}
       STAFF_IP_ALLOWLIST_ENABLED: ${STAFF_IP_ALLOWLIST_ENABLED:-}
+      OFFICE_NETWORK: ${OFFICE_NETWORK:-}
       # Session times (step 12f) and the lockout (12d); the defaults are the code's.
       STAFF_IDLE_MINUTES: ${STAFF_IDLE_MINUTES:-30}
       STAFF_SESSION_HOURS: ${STAFF_SESSION_HOURS:-8}

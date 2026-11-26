@@ -268,6 +268,9 @@ async def me(user: User = Depends(get_current_user)):
 async def set_password(body: SetPasswordRequest, session: AsyncSession = Depends(get_session)):
     """Set a password with the token from an emailed link, then log in as usual.
     No login needed: the token is the proof. Each link works once."""
+    if not settings.applicant_portal_on():
+        # Office mode: applicants don't sign in, so no link may set a password.
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not available on this server.")
     try:
         await password_links.set_password(session, token=body.token, password=body.password)
     except WeakPassword as exc:

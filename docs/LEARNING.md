@@ -16,6 +16,23 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 13a — Office mode: `APP_ENV=office` (2026-11-26)
+
+The system will first run on one server in the Ministry's office, on its local network, with real data. Office mode is that set-up.
+
+**Built:**
+- **`APP_ENV=office`** (backend/app/core/config.py): everything production does, plus:
+  - **no applicant portal.** `came_through()` (backend/app/core/identity/channel.py) never accepts the applicant portal, so applicants can't sign in, and an applicant's token is refused. `POST /auth/set-password` answers 404. The office stack (13c) won't run the portal at all; this is the API's own guarantee.
+  - **every application is entered by Records** as a walk-in. Self-service case creation is refused in the services themselves (`create_draft()` without an applicant in backend/app/modules/etls/service.py; `start_case()` in backend/app/core/workflow/service.py), not only in the screens.
+  - **no emails to applicants:** `notify_applicant()` sends nothing, and a walk-in gets no "set your password" link. Records tells applicants of each step. Staff emails: a setting, `STAFF_EMAILS_ENABLED`, off (none exist yet).
+  - **staff only from the office network:** `OFFICE_NETWORK` (a range such as `192.168.10.0/24`) is the staff allowlist unless `STAFF_IP_ALLOWLIST` says otherwise. `[CONFIRM]` the real range: you'll give it.
+- **The API refuses to start** in office mode without `OFFICE_NETWORK`, a real `STAFF_PORTAL_KEY` and an `MFA_SECRET_KEY`, and says which (`startup_problems()`, checked in the lifespan in backend/app/main.py). A half-configured office server stops instead of running half-protected.
+- **No demo data in the office:** the dev and demo seeds and scripts/reset-dev.sh already refuse anything but `development`; tests now prove office mode is refused too. (The staging "demo-data guard" you described for step 12 isn't needed: staging was dropped, and in the office demo data can't be loaded at all.)
+- **Found on the way:** the staff app has no screen to *enter* a walk-in application (the API has had it since step 8g). In office mode that's the only way in, so step 13b builds it.
+
+**Files:** backend/app/core/config.py (`office_network`, `staff_emails_enabled`, `applicant_portal_on()`, `applicant_emails_on()`, `startup_problems()`); backend/app/main.py; backend/app/core/identity/channel.py, router.py; backend/app/core/workflow/service.py; backend/app/modules/etls/service.py; backend/app/core/notifications/service.py; backend/tests/test_office_mode.py (new); .env.example; docker-compose.yml.
+**Try it:** in `.env`, set `APP_ENV=office` without `OFFICE_NETWORK` and `docker compose up api`: it stops, listing what's missing. Put `APP_ENV=development` back afterwards. Tests: `docker compose run --rm tools pytest tests/test_office_mode.py -v`.
+
 ### Step 12i — CI on a self-hosted runner on your PC (replaces the internet staging server) (2026-11-26)
 
 **Built:**
@@ -1874,6 +1891,11 @@ The API can't see the browser: the browser talks to a Next.js server, which call
 **Here:** `runs-on` in .github/workflows/ci.yml; docker-compose.ci.yml; scripts/ci-prepare.sh and ci-cleanup.sh; docs/SELF-HOSTED-RUNNER.md.
 **Learn more:** [GitHub Docs: About self-hosted runners](https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners/about-self-hosted-runners) and its [security section](https://docs.github.com/en/actions/security-for-github-actions/security-guides/security-hardening-for-github-actions#hardening-for-self-hosted-runners)
 
+### Fail closed at start-up (configuration checks)
+**What:** a server with a missing setting can either run anyway (with the protection quietly switched off, *failing open*) or refuse to start and say why (*failing closed*). For security settings, failing closed is almost always right: a server that won't start gets noticed and fixed in minutes; a server running without its network check might run that way for months. Here the API checks its own settings before it accepts any request.
+**Here:** `startup_problems()` in backend/app/core/config.py, called by `lifespan()` in backend/app/main.py. The same idea already appeared in step 12: an empty staff allowlist lets nobody in; a "dev-" key outside development is no key.
+**Learn more:** [OWASP: Fail securely](https://owasp.org/www-community/Fail_securely)
+
 ## 3. Decisions
 
 ### Confirmed by the Ministry
@@ -1900,6 +1922,10 @@ These were open questions; the Ministry has answered them. The code follows them
 
 | Date | Decision | Alternatives considered | Why |
 | --- | --- | --- | --- |
+| 2026-11-26 | Office mode is a value of `APP_ENV`, not a set of separate switches | `APPLICANT_PORTAL_ENABLED=false`, `APPLICANT_EMAILS=false`, … | One setting can't be half-set. Everything that should differ in the office follows from it, and the tests check each one. |
+| 2026-11-26 | The API refuses the applicant portal in office mode, even though the office stack won't run it | rely on not deploying the portal | If someone starts the portal container by mistake, the API still says no. |
+| 2026-11-26 | Self-service case creation refused in the services, not only by the missing portal | screens only | Defence in depth: any future endpoint that creates a case goes through the same functions. |
+| 2026-11-26 | The office allowlist is a separate setting, `OFFICE_NETWORK`, used when `STAFF_IP_ALLOWLIST` is empty | reuse `STAFF_IP_ALLOWLIST` | You asked for "the office network range" as the office default; a list can still add a VPN range later. |
 | 2026-11-26 | The runner on your PC, as a service under your own account | the default service account (NETWORK SERVICE); a separate Linux machine | Docker Desktop only answers its own user. A separate machine would be cleaner but you don't have one spare. |
 | 2026-11-26 | Every CI step in Docker, one workflow for both kinds of runner | separate workflows for Windows and Linux | One file to maintain, and `CI_RUNS_ON` switches between them in seconds. |
 | 2026-11-26 | CI's web apps are production builds | `next dev`, as on your laptop | Two dev servers watching files ran out of memory on this PC. Production builds use far less, start faster, and test what the office server will run. |
@@ -2377,9 +2403,20 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 
 - [ ] **App icon:** may the staff app use the Ministry's or the Government's emblem as its icon? The current one is a plain "M" (frontend/scripts/make-icons.py).
 
+- [ ] **The office network (step 13a):** which address range is the office's network (`OFFICE_NETWORK`, e.g. `192.168.10.0/24`)? Is the Wi-Fi the same range as the wired PCs? You'll give the real one. `[CONFIRM]`
+- [ ] **Office mode and applicants:** in the office, applicants never sign in or get emails; Records tells them of each step (by phone? in person?). Is that what the Ministry expects? Is a printed copy of each step needed for the file?
+
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 13a
+1. Someone starts the applicant portal container on the office server by mistake. Can an applicant sign in through it? Which function decides?
+2. Why does the API refuse to start when `OFFICE_NETWORK` is missing, instead of starting without the network check?
+
+#### Show answers
+1. No. `came_through()` in backend/app/core/identity/channel.py returns False for the applicant portal whenever `applicant_portal_on()` is False (office mode), so the login gets "Incorrect email or password" and any applicant token gets 403.
+2. Starting without it would either let staff in from anywhere (failing open) or let nobody in with no explanation. Refusing to start, with the reason, gets it fixed at once (`startup_problems()`).
 
 ### Step 12i
 1. Why must a self-hosted runner never run workflows for pull requests from forks?

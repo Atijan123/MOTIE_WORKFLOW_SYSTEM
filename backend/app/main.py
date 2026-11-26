@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.api import health
+from app.core.config import settings
 from app.core.documents import router as documents
 from app.core.identity import router as identity
 from app.core.workflow import absence_router, acting_router, delegation_router, signatory_router
@@ -16,6 +17,11 @@ from app.modules.etls import router as etls
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Code before `yield` runs at startup, code after it at shutdown.
+    # A misconfigured office server stops here with the reasons, instead of
+    # running half-protected (step 13a).
+    problems = settings.startup_problems()
+    if problems:
+        raise RuntimeError("The API can't start:\n  " + "\n  ".join(problems))
     yield
     # Close every pooled database connection cleanly when the server stops.
     await engine.dispose()

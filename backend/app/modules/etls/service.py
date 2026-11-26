@@ -6,6 +6,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit.service import record_event
+from app.core.config import settings
 from app.core.dates import add_months, long_date
 from app.core.documents import facts
 from app.core.documents import service as documents
@@ -144,6 +145,9 @@ async def create_draft(
     """Open an etls_facility_letter case as a draft, with the importer's form,
     in one transaction. It gets its reference when the applicant submits.
     `applicant` is set when Records opens it for a walk-in."""
+    if applicant is None and not settings.applicant_portal_on():
+        # Office mode (step 13a): every application is entered by Records.
+        raise workflow.NotPermitted("On this server, applications are entered by Records as walk-ins.")
     form = await choices.clean_form(session, form)  # before the case: a refused form opens nothing
     case = await workflow.open_case(
         session, workflow_code=FACILITY_LETTER, actor=actor, module=MODULE, applicant=applicant
@@ -202,7 +206,9 @@ async def open_walk_in(
     elif not applicant.is_active or applicant.role_codes != {"applicant"}:
         # Never attach an application to a staff member's or a closed account.
         raise workflow.NotPermitted("That email belongs to an account that can't apply.")
-    if applicant.email is not None and applicant.password_hash is None:
+    # In the office (step 13a) applicants don't sign in and get no emails:
+    # Records keeps them informed, so no "set your password" link.
+    if applicant.email is not None and applicant.password_hash is None and settings.applicant_emails_on():
         await password_links.issue_link(session, user=applicant, actor=actor)
     return await create_draft(session, actor=actor, form=form, applicant=applicant)
 

@@ -67,6 +67,9 @@ def came_through(channel: Channel, portal: Portal) -> bool:
     """Did this request come through `portal`, on one of its own domains?"""
     if channel.portal != portal:
         return False
+    # Office mode (step 13a): there is no applicant portal at all.
+    if portal == "applicant" and not settings.applicant_portal_on():
+        return False
     other = "applicant" if portal == "staff" else "staff"
     # E.g. a staff request "from" the public site's address: the staff app is
     # being reached through the wrong domain. Refuse it.

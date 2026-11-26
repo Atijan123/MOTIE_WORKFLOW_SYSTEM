@@ -21,7 +21,20 @@ class Settings(BaseSettings):
     # "development" only on a developer's machine. Tools that delete or invent
     # data (scripts/reset-dev.sh, app/dev_seed.py) refuse to run otherwise.
     # The default is "production", so a server that forgets to set it is safe.
-    app_env: Literal["development", "production"] = "production"
+    # "office" (step 13): the Ministry's own server on its local network, with
+    # real data. Like production, plus: no applicant portal (Records enters
+    # every application as a walk-in), no emails to applicants, and staff only
+    # from OFFICE_NETWORK.
+    app_env: Literal["development", "production", "office"] = "production"
+
+    # --- Office mode (step 13a) ------------------------------------------------------
+    # The office network, as a range (CIDR), e.g. "192.168.10.0/24": staff may
+    # work from here when STAFF_IP_ALLOWLIST is empty. Required in office mode.
+    # [CONFIRM] the real range (you'll give it).
+    office_network: str = ""
+    # Emails to staff (none are sent yet): off unless the office has a mail
+    # server. Emails to applicants are never sent in office mode.
+    staff_emails_enabled: bool = False
 
     # The schema owner (motie_owner), used by Alembic and tests only. The API
     # container doesn't get it, so a compromised API can't alter tables.
@@ -123,8 +136,31 @@ class Settings(BaseSettings):
         return self.app_env != "development"
 
     def staff_networks(self) -> list[IPv4Network | IPv6Network]:
+        # In the office, the office network unless a list is given (step 13a).
+        listed = self.staff_ip_allowlist
+        if not listed.strip() and self.app_env == "office":
+            listed = self.office_network
         # strict=False accepts "10.20.1.5/16" as the range 10.20.0.0/16.
-        return [ip_network(part.strip(), strict=False) for part in self.staff_ip_allowlist.split(",") if part.strip()]
+        return [ip_network(part.strip(), strict=False) for part in listed.split(",") if part.strip()]
+
+    def applicant_portal_on(self) -> bool:
+        """Off in the office: applicants don't sign in; Records enters walk-ins."""
+        return self.app_env != "office"
+
+    def applicant_emails_on(self) -> bool:
+        return self.app_env != "office"
+
+    def startup_problems(self) -> list[str]:
+        """Why this server must not start, if anything (checked in main.py's lifespan)."""
+        problems = []
+        if self.app_env == "office":
+            if not self.staff_networks():
+                problems.append("APP_ENV=office needs OFFICE_NETWORK (the office's address range, e.g. 192.168.10.0/24).")
+            if not self.portal_key("staff"):
+                problems.append("APP_ENV=office needs STAFF_PORTAL_KEY (a long random value, not a dev- one).")
+            if not self.mfa_key():
+                problems.append("APP_ENV=office needs MFA_SECRET_KEY: staff can't sign in without it.")
+        return problems
 
     @field_validator("staff_ip_allowlist_enabled", mode="before")
     @classmethod
@@ -132,7 +168,7 @@ class Settings(BaseSettings):
         # Compose passes an empty value when .env leaves it out.
         return None if isinstance(value, str) and not value.strip() else value
 
-    @field_validator("staff_ip_allowlist")
+    @field_validator("staff_ip_allowlist", "office_network")
     @classmethod
     def _valid_networks(cls, value: str) -> str:
         # A typo should stop the server starting, not silently lock everyone out.
@@ -141,7 +177,7 @@ class Settings(BaseSettings):
                 try:
                     ip_network(part.strip(), strict=False)
                 except ValueError:
-                    raise ValueError(f"STAFF_IP_ALLOWLIST: {part.strip()!r} is not an IP address or range")
+                    raise ValueError(f"{part.strip()!r} is not an IP address or range")
         return value
 
     @field_validator("staff_portal_key", "applicant_portal_key", "mfa_secret_key", mode="before")
