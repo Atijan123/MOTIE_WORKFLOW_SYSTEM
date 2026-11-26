@@ -53,6 +53,10 @@ services:
       # The start of links in emails ("set your password"); see .env.example.
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3001}
       PASSWORD_LINK_HOURS: ${PASSWORD_LINK_HOURS:-72}
+      # Staff only from these networks (step 12c). Off in development unless
+      # STAFF_IP_ALLOWLIST_ENABLED=true.
+      STAFF_IP_ALLOWLIST: ${STAFF_IP_ALLOWLIST:-}
+      STAFF_IP_ALLOWLIST_ENABLED: ${STAFF_IP_ALLOWLIST_ENABLED:-}
       <<: *portal-keys
     volumes:
       # Dev only: mount the source so edits reload without rebuilding the image.

@@ -5,7 +5,14 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.identity.channel import Channel, came_through, read_channel, wrong_portal_message
+from app.core.identity.channel import (
+    OUTSIDE_NETWORK_MESSAGE,
+    Channel,
+    came_through,
+    read_channel,
+    staff_ip_allowed,
+    wrong_portal_message,
+)
 from app.core.identity.models import User
 from app.core.identity.security import decode_access_token
 from app.db.session import get_session
@@ -33,6 +40,10 @@ def check_channel(user: User, channel: Channel) -> None:
     site's domain, even with a stolen staff token."""
     if not came_through(channel, user.portal):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=wrong_portal_message(user.portal))
+    # Checked on every request, not only at login: a laptop signed in at the
+    # office stops working when it leaves the network (step 12c).
+    if user.is_staff and not staff_ip_allowed(channel):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=OUTSIDE_NETWORK_MESSAGE)
 
 
 async def get_current_user(

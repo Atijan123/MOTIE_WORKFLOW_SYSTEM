@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.identity import password_links
-from app.core.identity.channel import Channel, came_through
+from app.core.identity.channel import OUTSIDE_NETWORK_MESSAGE, Channel, came_through, staff_ip_allowed
 from app.core.identity.deps import get_channel, get_current_user
 from app.core.identity.models import User
 from app.core.identity.schemas import LoginRequest, SetPasswordRequest, TokenResponse, UserOut
@@ -20,6 +20,10 @@ async def login(
     channel: Channel = Depends(get_channel),
     session: AsyncSession = Depends(get_session),
 ):
+    # The staff app from outside the Ministry network: refuse before looking
+    # at the password at all, so it can't be used to guess passwords (step 12c).
+    if channel.portal == "staff" and not staff_ip_allowed(channel):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=OUTSIDE_NETWORK_MESSAGE)
     user = await authenticate(session, body.email, body.password)
     # A staff account through the applicant portal (or the reverse) gets the
     # same answer as a wrong password: a phished or guessed staff password is

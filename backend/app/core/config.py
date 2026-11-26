@@ -1,3 +1,4 @@
+from ipaddress import IPv4Network, IPv6Network, ip_network
 from string import Formatter
 from typing import Literal
 
@@ -70,6 +71,42 @@ class Settings(BaseSettings):
     # Empty (development) = not checked.
     staff_portal_hosts: str = ""
     applicant_portal_hosts: str = ""
+
+    # --- Staff only from the Ministry network (step 12c) ------------------------
+    # The networks staff may work from, comma-separated: single addresses or
+    # ranges ("10.20.0.0/16, 196.46.1.7"), e.g. the office LAN and the VPN.
+    # [CONFIRM] the ranges with the Ministry's ICT unit.
+    staff_ip_allowlist: str = ""
+    # On unless APP_ENV=development. Leave unset: then a server is safe by default.
+    # On with an empty list means no staff can sign in at all (fail closed).
+    staff_ip_allowlist_enabled: bool | None = None
+
+    def staff_ip_check_on(self) -> bool:
+        if self.staff_ip_allowlist_enabled is not None:
+            return self.staff_ip_allowlist_enabled
+        return self.app_env != "development"
+
+    def staff_networks(self) -> list[IPv4Network | IPv6Network]:
+        # strict=False accepts "10.20.1.5/16" as the range 10.20.0.0/16.
+        return [ip_network(part.strip(), strict=False) for part in self.staff_ip_allowlist.split(",") if part.strip()]
+
+    @field_validator("staff_ip_allowlist_enabled", mode="before")
+    @classmethod
+    def _blank_is_default(cls, value):
+        # Compose passes an empty value when .env leaves it out.
+        return None if isinstance(value, str) and not value.strip() else value
+
+    @field_validator("staff_ip_allowlist")
+    @classmethod
+    def _valid_networks(cls, value: str) -> str:
+        # A typo should stop the server starting, not silently lock everyone out.
+        for part in value.split(","):
+            if part.strip():
+                try:
+                    ip_network(part.strip(), strict=False)
+                except ValueError:
+                    raise ValueError(f"STAFF_IP_ALLOWLIST: {part.strip()!r} is not an IP address or range")
+        return value
 
     @field_validator("staff_portal_key", "applicant_portal_key", mode="before")
     @classmethod

@@ -16,6 +16,7 @@ valid key gets no portal, and its IP is the connection's own address.
 
 import hmac
 from dataclasses import dataclass
+from ipaddress import IPv6Address, ip_address
 from typing import Literal
 
 from fastapi import Request
@@ -73,6 +74,27 @@ def came_through(channel: Channel, portal: Portal) -> bool:
         return False
     allowed = settings.portal_hosts(portal)
     return not allowed or channel.host in allowed
+
+
+def staff_ip_allowed(channel: Channel) -> bool:
+    """Is this request from a network staff may work from (STAFF_IP_ALLOWLIST)?
+    Always yes when the check is off (development). With it on, a request whose
+    IP we don't know is refused: the staff app behind Caddy always knows it."""
+    if not settings.staff_ip_check_on():
+        return True
+    if not channel.client_ip:
+        return False
+    try:
+        ip = ip_address(channel.client_ip)
+    except ValueError:
+        return False
+    # An IPv4 address can arrive written as IPv6 ("::ffff:10.0.0.7").
+    if isinstance(ip, IPv6Address) and ip.ipv4_mapped:
+        ip = ip.ipv4_mapped
+    return any(ip in network for network in settings.staff_networks())
+
+
+OUTSIDE_NETWORK_MESSAGE = "The staff app works only on the Ministry network or VPN."
 
 
 def wrong_portal_message(needed: Portal) -> str:

@@ -16,6 +16,18 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 12c — Staff work only from the Ministry network (IP allowlist) (2026-11-26)
+
+**Built:**
+- **`STAFF_IP_ALLOWLIST`**: the networks staff may work from, comma-separated addresses or ranges (`10.20.0.0/16, 196.46.1.7`). A typo stops the API starting, rather than locking everyone out quietly (`_valid_networks()` in backend/app/core/config.py).
+- **On by default, except in development** (`staff_ip_check_on()`): a server that forgets the setting is protected, and an empty list then lets no staff in at all. `STAFF_IP_ALLOWLIST_ENABLED=true/false` overrides the default, e.g. to try it on your machine.
+- **Checked twice:** at the staff login, *before* the password is looked at (`login()` in backend/app/core/identity/router.py), so the login can't be used from outside to guess passwords; and on every staff request (`check_channel()` in deps.py), so a laptop signed in at the office stops working when it leaves the network. Both answer 403 "The staff app works only on the Ministry network or VPN."
+- **Where the IP comes from:** `staff_ip_allowed()` in backend/app/core/identity/channel.py uses the browser IP that the staff app passes on (`X-Client-IP`, from Caddy's `X-Real-IP`, step 12b), and only when it came with the staff key. With the check on and no IP known, the request is refused. An IPv4 address written as IPv6 (`::ffff:10.20.4.9`) counts as IPv4.
+- Applicants aren't limited: the portal is public.
+
+**Files:** backend/app/core/config.py, identity/channel.py, deps.py, router.py; backend/tests/core/test_ip_allowlist.py (new), conftest.py (off by default in tests); docker-compose.yml; .env.example.
+**Try it:** add `STAFF_IP_ALLOWLIST_ENABLED=true` and `STAFF_IP_ALLOWLIST=10.99.0.0/16` to `.env`, `docker compose up -d api`, and log in at http://localhost:3002: refused (on your machine there's no Caddy, so the API doesn't know your IP). Remove the two lines and restart the API afterwards. Tests: `docker compose run --rm tools pytest tests/core/test_ip_allowlist.py -v`.
+
 ### Step 12b — A separate staff app; staff work refused from the applicant portal (2026-11-26)
 
 **Built:**
@@ -1750,6 +1762,13 @@ The API can't see the browser: the browser talks to a Next.js server, which call
 **Here:** backend/app/core/identity/channel.py (`read_channel()`, `came_through()`); `check_channel()` in backend/app/core/identity/deps.py; frontend/lib/portal.ts; `pageExtensions` in frontend/next.config.mjs.
 **Learn more:** [OWASP: Attack Surface Analysis Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Attack_Surface_Analysis_Cheat_Sheet.html)
 
+### IP allowlists (network restriction)
+**What:** an allowlist says "only requests from these addresses". Here: staff work only from the Ministry's office network and its VPN. It is a second wall behind the password: a stolen password alone doesn't get anyone into the staff app from a café or another country. Two things make it work or break it. First, **which IP you look at**: behind a proxy, the connection comes from the proxy, so the real address has to be passed on, and only by something you trust (here: Caddy sets `X-Real-IP`, the staff app passes it on with its key). Second, **failing closed**: when the IP is unknown or the list is empty, say no.
+**Stops:** someone outside the Ministry network using a phished or guessed staff password, or a stolen staff session; password guessing against the staff login from the internet; a staff laptop that's stolen and opened elsewhere.
+**Doesn't stop:** anyone already on the office network or VPN (a visitor on the office Wi-Fi, malware on a staff PC); a compromised VPN account; an attacker who controls a machine inside an allowed range. If the office Wi-Fi is open to visitors, keep it in a different range from the staff network. It also isn't a substitute for two-step login (step 12e).
+**Here:** `staff_ip_check_on()` and `staff_networks()` in backend/app/core/config.py; `staff_ip_allowed()` in backend/app/core/identity/channel.py.
+**Learn more:** [OWASP: Defense in depth](https://owasp.org/www-community/Defense_in_Depth) and [Python docs: ipaddress](https://docs.python.org/3/library/ipaddress.html)
+
 ## 3. Decisions
 
 ### Confirmed by the Ministry
@@ -1776,6 +1795,10 @@ These were open questions; the Ministry has answered them. The code follows them
 
 | Date | Decision | Alternatives considered | Why |
 | --- | --- | --- | --- |
+| 2026-11-26 | The allowlist is checked in the API, not only in Caddy | only a Caddy `remote_ip` rule | The API is where the rule can't be bypassed by a misconfigured proxy, and where it can be tested. Caddy can add the same rule in front (step 12i). |
+| 2026-11-26 | Checked on every staff request, not only at login | login only | A session started at the office shouldn't keep working on another network. |
+| 2026-11-26 | The staff login from outside is refused before the password is checked | check the password, then refuse | Then the login can't tell an outsider whether a password was right. |
+| 2026-11-26 | On unless development; an empty list means nobody | off unless set | A forgotten setting on a real server should fail safe, not open. |
 | 2026-11-26 | One Next.js codebase built twice (`PORTAL`), each build picking its own pages with `pageExtensions` | two separate Next.js projects; one app with a middleware blocking routes | Two projects would duplicate the shared components and lib/. A middleware block still ships the staff code and server actions in the public build; `pageExtensions` leaves them out, and the build output shows it. |
 | 2026-11-26 | The API decides by the *account*: staff accounts only through the staff app, applicants only through the portal | mark each API route "staff" or "applicant" | Some routes serve both (a case's page, documents). Tying it to the account covers every route, including ones added later. Staff-only routes are refused from the portal either way: by role, or by portal. |
 | 2026-11-26 | Each front end proves itself with a secret key; forwarded host and IP count only with it | trust `X-Forwarded-*` from anyone; mutual TLS between containers | Trusting headers from anyone lets anyone fake them. Mutual TLS is stronger but much more to set up and explain; a key per front end is simple and can be rotated in .env. |
@@ -2206,9 +2229,21 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 - [ ] **Statistics access:** the Director's post and the `stats_viewer` role. Should the PS or the Minister see them too? Who gets `stats_viewer`?
 - [ ] **A category on live letters:** the register has one ("Category", e.g. Cement, Feed); the live form doesn't, so live letters show "Not recorded" in the quantities table. Add it to the form (from the "Lists" sheet), or derive it from the HS code?
 
+- [ ] **Staff networks (step 12c):** which address ranges are the Ministry's office network and VPN? These go in `STAFF_IP_ALLOWLIST`. Is there a VPN for staff working away from the office? Is the office Wi-Fi for visitors on a separate range from staff PCs? `[CONFIRM]` with the ICT unit.
+
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 12c
+1. The allowlist is on and the API gets a staff request with no `X-Client-IP`. What happens, and why is that the right answer?
+2. Why is the staff login refused from outside the network *before* the password is checked?
+3. Name one attack the allowlist doesn't stop.
+
+#### Show answers
+1. It's refused with 403: `staff_ip_allowed()` returns False when the IP is unknown. Behind Caddy the IP is always known, so a missing one means something is misconfigured or someone is calling the API another way. Failing closed is safer than guessing.
+2. If it checked the password first, the answer (or how long it took) could tell an outsider whether their guess was right. Refusing first means the login is useless from outside.
+3. For example: someone on the office Wi-Fi with a stolen password; malware on a staff PC; a compromised VPN account.
 
 ### Step 12b
 1. A staff member's password is phished. The attacker types it into the applicant portal's login page. What happens, and which function decides?

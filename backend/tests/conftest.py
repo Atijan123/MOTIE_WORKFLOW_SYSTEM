@@ -120,6 +120,9 @@ def portal_keys(monkeypatch):
     monkeypatch.setattr(settings, "applicant_portal_key", TEST_PORTAL_KEYS["applicant"])
     monkeypatch.setattr(settings, "staff_portal_hosts", "")
     monkeypatch.setattr(settings, "applicant_portal_hosts", "")
+    # Off, as in development; tests/core/test_ip_allowlist.py turns it on.
+    monkeypatch.setattr(settings, "staff_ip_allowlist_enabled", False)
+    monkeypatch.setattr(settings, "staff_ip_allowlist", "")
 
 
 @pytest.fixture
