@@ -3,7 +3,7 @@
 // used to crash with "Not authenticated" instead. Read-only: no reset needed.
 import { expect, test } from "@playwright/test";
 
-import { loginAs } from "./helpers";
+import { APPLICANT_URL, loginAs, PASSWORD, STAFF_URL } from "./helpers";
 
 test("a staff page with no session cookie goes to the login page", async ({ browser }) => {
   const page = await loginAs(browser, "desk@motie.test");
@@ -14,10 +14,33 @@ test("a staff page with no session cookie goes to the login page", async ({ brow
 });
 
 test("a wrong password still shows its message on the login page", async ({ browser }) => {
-  const page = await (await browser.newContext()).newPage();
+  const page = await (await browser.newContext({ baseURL: STAFF_URL })).newPage();
   await page.goto("/login");
   await page.getByLabel("Email").fill("desk@motie.test");
   await page.getByLabel("Password").fill("not the password");
   await page.getByRole("button", { name: "Log in" }).click();
   await expect(page.getByText("Incorrect email or password")).toBeVisible();
+});
+
+// Step 12b: two apps. The public portal has no staff screens, and a staff
+// password is no use there.
+test("the applicant portal has no staff screens", async ({ browser }) => {
+  const page = await (await browser.newContext({ baseURL: APPLICANT_URL })).newPage();
+  const response = await page.goto("/staff");
+  expect(response?.status()).toBe(404);
+});
+
+test("a staff account can't sign in through the applicant portal", async ({ browser }) => {
+  const page = await (await browser.newContext({ baseURL: APPLICANT_URL })).newPage();
+  await page.goto("/login");
+  await page.getByLabel("Email").fill("desk@motie.test");
+  await page.getByLabel("Password").fill(PASSWORD);
+  await page.getByRole("button", { name: "Log in" }).click();
+  await expect(page.getByText("Incorrect email or password")).toBeVisible();
+});
+
+test("the staff app has no applicant screens", async ({ browser }) => {
+  const page = await (await browser.newContext({ baseURL: STAFF_URL })).newPage();
+  const response = await page.goto("/applications");
+  expect(response?.status()).toBe(404);
 });

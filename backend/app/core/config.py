@@ -56,6 +56,40 @@ class Settings(BaseSettings):
     # Empty = not set. Read it through registry_reference_format().
     facility_letter_reference_format: str | None = None
 
+    # --- The two front ends (step 12b) ---------------------------------------
+    # Each front end's server proves which one it is with its own key, sent as
+    # X-Portal-Key on every API call. Only the staff app's server knows the
+    # staff key, so the public applicant portal can't call the API as the staff
+    # app, even if it is broken into. Unset = that portal can't be used at all.
+    # Keys starting "dev-" (docker-compose.yml's defaults) only work in development.
+    staff_portal_key: str | None = Field(default=None, min_length=32)
+    applicant_portal_key: str | None = Field(default=None, min_length=32)
+    # The domains each portal is served on, comma-separated, e.g.
+    # "staff.motie.gov.gm". A staff request whose browser address is an
+    # applicant domain is refused; with staff hosts set, any other domain is too.
+    # Empty (development) = not checked.
+    staff_portal_hosts: str = ""
+    applicant_portal_hosts: str = ""
+
+    @field_validator("staff_portal_key", "applicant_portal_key", mode="before")
+    @classmethod
+    def _blank_is_unset(cls, value: str | None) -> str | None:
+        # Compose passes an empty value when .env leaves a key out.
+        return value.strip() or None if isinstance(value, str) else value
+
+    def portal_key(self, portal: str) -> str | None:
+        key = self.staff_portal_key if portal == "staff" else self.applicant_portal_key
+        if key and key.startswith("dev-") and self.app_env != "development":
+            return None  # the published dev default must never open a real server
+        return key
+
+    @staticmethod
+    def _hosts(text: str) -> set[str]:
+        return {h.strip().lower() for h in text.split(",") if h.strip()}
+
+    def portal_hosts(self, portal: str) -> set[str]:
+        return self._hosts(self.staff_portal_hosts if portal == "staff" else self.applicant_portal_hosts)
+
     @field_validator("facility_letter_reference_format")
     @classmethod
     def _only_known_placeholders(cls, value: str | None) -> str | None:

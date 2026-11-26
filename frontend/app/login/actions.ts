@@ -3,8 +3,7 @@ import { redirect } from "next/navigation";
 
 import { api, ApiError } from "@/lib/api";
 import { failed, text, type FormState } from "@/lib/forms";
-import { endSession, homeFor, startSession } from "@/lib/session";
-import type { Me } from "@/lib/types";
+import { endSession, HOME, startSession } from "@/lib/session";
 
 export async function login(_: FormState, data: FormData): Promise<FormState> {
   let token: string;
@@ -20,8 +19,7 @@ export async function login(_: FormState, data: FormData): Promise<FormState> {
     return failed(error);
   }
   await startSession(token);
-  const me = await api<Me>("/auth/me", { headers: { Authorization: `Bearer ${token}` } });
-  redirect(homeFor(me));
+  redirect(HOME);
 }
 
 export async function logout(): Promise<void> {

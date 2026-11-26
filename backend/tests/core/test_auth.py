@@ -6,7 +6,7 @@ from fastapi import HTTPException
 
 from app.core.config import settings
 from app.core.identity.deps import require_role
-from tests.support import TEST_PASSWORD
+from tests.support import TEST_PASSWORD, portal_headers
 
 pytestmark = pytest.mark.anyio
 
@@ -16,11 +16,13 @@ async def test_login_returns_a_token_that_works_on_me(client, make_user):
         "director", "officer", email="dir@test.gm", positions=["director_of_trade"]
     )
 
-    login = await client.post("/auth/login", json={"email": "DIR@test.gm", "password": TEST_PASSWORD})
+    login = await client.post(
+        "/auth/login", json={"email": "DIR@test.gm", "password": TEST_PASSWORD}, headers=portal_headers("staff")
+    )
     assert login.status_code == 200
     token = login.json()["access_token"]
 
-    me = await client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
+    me = await client.get("/auth/me", headers={"Authorization": f"Bearer {token}", **portal_headers("staff")})
     assert me.status_code == 200
     assert me.json() == {
         "id": user.id,
@@ -35,8 +37,9 @@ async def test_login_returns_a_token_that_works_on_me(client, make_user):
 async def test_wrong_password_and_unknown_email_look_the_same(client, make_user):
     await make_user(email="a@test.gm")
 
-    wrong_password = await client.post("/auth/login", json={"email": "a@test.gm", "password": "nope"})
-    unknown_email = await client.post("/auth/login", json={"email": "who@test.gm", "password": "nope"})
+    portal = portal_headers("applicant")
+    wrong_password = await client.post("/auth/login", json={"email": "a@test.gm", "password": "nope"}, headers=portal)
+    unknown_email = await client.post("/auth/login", json={"email": "who@test.gm", "password": "nope"}, headers=portal)
 
     assert wrong_password.status_code == unknown_email.status_code == 401
     assert wrong_password.json() == unknown_email.json()
@@ -51,7 +54,9 @@ async def test_deactivated_user_cannot_log_in_or_use_an_old_token(
     user.is_active = False
     await db_session.commit()
 
-    login = await client.post("/auth/login", json={"email": "gone@test.gm", "password": TEST_PASSWORD})
+    login = await client.post(
+        "/auth/login", json={"email": "gone@test.gm", "password": TEST_PASSWORD}, headers=portal_headers("applicant")
+    )
     assert login.status_code == 401
     assert (await client.get("/auth/me", headers=headers)).status_code == 401
 

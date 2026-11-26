@@ -57,6 +57,10 @@ After **every** step, update `docs/LEARNING.md` in the same commit. Follow the s
 
 Write for me, not for a reviewer: plain words, short paragraphs, real file paths. Keep the doc tidy: update existing sections rather than appending duplicates.
 
+## CI
+
+GitHub Actions (.github/workflows/ci.yml) runs the backend tests, the frontend typecheck and unit tests, and every walk-through on each push. A step is done only when CI is green on its commit: quote the run link in the report. Repository: https://github.com/Atijan123/MOTIE_WORKFLOW_SYSTEM
+
 ## Commands
 
 (Fill in as the project grows.)
@@ -65,8 +69,8 @@ The `bash scripts/...` commands need Git Bash. In PowerShell, `bash` is WSL's Ub
 
 - Start services: `docker compose up`
 - Run the API: `uvicorn app.main:app --reload`
-- The web app: `docker compose up -d web`, then http://localhost:3001 (3000 is often taken on the host). Typecheck and unit tests: `docker compose run --rm --no-deps web sh -c "npm run typecheck && npm test"`
-- Browser walk-throughs (Playwright, dev stack only): `bash scripts/seed-demo.sh --yes --discard-history` (S13 needs its fictional register), `docker compose up -d web`, then `docker compose run --rm e2e`. Failures leave screenshots and traces in frontend/e2e/test-results/.
+- The web apps: `docker compose up -d web staff`. The applicant portal is http://localhost:3001 (3000 is often taken on the host), the staff app http://localhost:3002. Same code, built with `PORTAL=applicant` or `PORTAL=staff`; staff pages are `page.staff.tsx`, applicant pages `page.applicant.tsx`. Typecheck and unit tests: `docker compose run --rm --no-deps web sh -c "npm run typecheck && npm test"`
+- Browser walk-throughs (Playwright, dev stack only): `bash scripts/seed-demo.sh --yes --discard-history` (S13 needs its fictional register), `docker compose up -d web staff`, then `docker compose run --rm e2e`. Failures leave screenshots and traces in frontend/e2e/test-results/.
 - Run migrations: `docker compose run --rm tools alembic upgrade head` (runs as `motie_owner`)
 - Run tests: `docker compose run --rm tools pytest -v`
 - Send waiting emails once: `docker compose run --rm tools python -m app.core.notifications.worker --once`. The `notifier` service (`docker compose up notifier`) does it continuously. Only the fake sender exists: it logs emails (`docker compose logs notifier`) and sends nothing.

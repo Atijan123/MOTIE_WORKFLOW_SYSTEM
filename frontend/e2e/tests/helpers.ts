@@ -3,9 +3,18 @@ import { expect, type Browser, type Page } from "@playwright/test";
 // The seeded dev users (backend/app/dev_seed.py), all with the same password.
 export const PASSWORD = process.env.DEV_SEED_PASSWORD || "dev password 123";
 
-/** A fresh browser session (its own cookies), logged in as `email`. */
+// The two apps (step 12b): applicants use the portal, staff the staff app.
+export const APPLICANT_URL = process.env.BASE_URL ?? "http://localhost:3001";
+export const STAFF_URL = process.env.STAFF_URL ?? "http://localhost:3002";
+
+/** The app `email` signs in to: the seeded applicants use the portal, everyone else is staff. */
+export function appFor(email: string): string {
+  return email === "applicant@motie.test" || email.endsWith("@demo.test") ? APPLICANT_URL : STAFF_URL;
+}
+
+/** A fresh browser session (its own cookies), on that person's app, logged in as `email`. */
 export async function loginAs(browser: Browser, email: string): Promise<Page> {
-  const context = await browser.newContext();
+  const context = await browser.newContext({ baseURL: appFor(email) });
   const page = await context.newPage();
   await page.goto("/login");
   await page.getByLabel("Email").fill(email);

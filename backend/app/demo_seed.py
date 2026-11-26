@@ -88,12 +88,24 @@ class Demo:
         self.password = password
         self.tokens: dict[str, str] = {}
 
+    @staticmethod
+    def portal(who: str) -> dict[str, str]:
+        """Come through the front end that person uses, as a browser would
+        (app/core/identity/channel.py): applicants the portal, staff the staff app."""
+        portal = "applicant" if who in {email for email, _ in APPLICANTS} or who == "applicant@motie.test" else "staff"
+        key = settings.portal_key(portal)
+        if not key:
+            sys.exit(f"Demo seed stopped: no {portal.upper()}_PORTAL_KEY is set.")
+        return {"X-Portal-Key": key}
+
     async def call(self, who: str, method: str, path: str, expect: int = 200, **kwargs) -> dict | None:
         if who not in self.tokens:
-            r = await self.client.post("/auth/login", json={"email": who, "password": self.password})
+            r = await self.client.post(
+                "/auth/login", json={"email": who, "password": self.password}, headers=self.portal(who)
+            )
             r.raise_for_status()
             self.tokens[who] = r.json()["access_token"]
-        headers = {"Authorization": f"Bearer {self.tokens[who]}", **kwargs.pop("headers", {})}
+        headers = {"Authorization": f"Bearer {self.tokens[who]}", **self.portal(who), **kwargs.pop("headers", {})}
         r = await self.client.request(method, path, headers=headers, **kwargs)
         if r.status_code != expect:
             sys.exit(f"Demo seed stopped: {who} {method} {path} gave {r.status_code}: {r.text}")

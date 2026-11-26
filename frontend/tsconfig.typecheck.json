@@ -1,0 +1,6 @@
+{
+  // `npm run typecheck`: every file of both apps (step 12b). Leaves out
+  // .next/types, which Next.js generates for whichever app it built last.
+  "extends": "./tsconfig.json",
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx"]
+}

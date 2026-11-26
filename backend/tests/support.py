@@ -6,6 +6,23 @@ from app.core.workflow.delegation import today
 
 TEST_PASSWORD = "test password 123"
 
+# Set by conftest.py's portal_keys fixture. Long enough for the settings' 32-character minimum.
+TEST_PORTAL_KEYS = {
+    "staff": "test-staff-portal-key-0123456789abcdef",
+    "applicant": "test-applicant-portal-key-0123456789abcdef",
+}
+
+
+def portal_headers(portal: str, **forwarded: str) -> dict[str, str]:
+    """What a front end's server sends with every API call (app/core/identity/channel.py).
+    `host=` and `ip=` add the browser's address and IP."""
+    headers = {"X-Portal-Key": TEST_PORTAL_KEYS[portal]}
+    if "host" in forwarded:
+        headers["X-Forwarded-Host"] = forwarded["host"]
+    if "ip" in forwarded:
+        headers["X-Client-IP"] = forwarded["ip"]
+    return headers
+
 # Each person in the ETLS chain: their role and the post they hold.
 STAFF = {
     "records_officer": ("records_officer", "records_officer"),

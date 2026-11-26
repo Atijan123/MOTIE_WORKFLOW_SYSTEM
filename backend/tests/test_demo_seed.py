@@ -6,6 +6,7 @@ import pytest
 
 from app import demo_seed, dev_seed
 from app.core.config import settings
+from tests.support import portal_headers
 
 pytestmark = pytest.mark.anyio
 
@@ -17,8 +18,8 @@ async def test_one_case_per_stage_made_through_the_api(db_session, client):
     await demo_seed.seed_users(db_session, PASSWORD)
     made = await demo_seed.seed_cases(client, PASSWORD)
 
-    login = await client.post("/auth/login", json={"email": "records@motie.test", "password": PASSWORD})
-    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    login = await client.post("/auth/login", json={"email": "records@motie.test", "password": PASSWORD}, headers=portal_headers("staff"))
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}", **portal_headers("staff")}
     cases = [(await client.get(f"/cases/{case_id}", headers=headers)).json() for _, case_id in made]
     assert [c["status"]["code"] for c in cases] == [
         "sent_to_gra",

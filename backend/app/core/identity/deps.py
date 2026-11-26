@@ -1,10 +1,11 @@
 """FastAPI dependencies for "who is calling?" and "are they allowed?"."""
 
 import jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.identity.channel import Channel, came_through, read_channel, wrong_portal_message
 from app.core.identity.models import User
 from app.core.identity.security import decode_access_token
 from app.db.session import get_session
@@ -22,8 +23,21 @@ def _unauthorized() -> HTTPException:
     )
 
 
+def get_channel(request: Request) -> Channel:
+    return read_channel(request)
+
+
+def check_channel(user: User, channel: Channel) -> None:
+    """Staff accounts work only through the staff app, applicants' only
+    through the applicant portal. So staff work is refused from the public
+    site's domain, even with a stolen staff token."""
+    if not came_through(channel, user.portal):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=wrong_portal_message(user.portal))
+
+
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    channel: Channel = Depends(get_channel),
     session: AsyncSession = Depends(get_session),
 ) -> User:
     if credentials is None:
@@ -38,6 +52,7 @@ async def get_current_user(
     user = await session.get(User, user_id)
     if user is None or not user.is_active:
         raise _unauthorized()
+    check_channel(user, channel)
     return user
 
 

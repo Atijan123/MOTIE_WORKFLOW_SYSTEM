@@ -15,7 +15,7 @@ from app.core.identity.models import PasswordLink, User
 from app.core.notifications.models import Notification
 from app.core.notifications.sender import FakeSender
 from app.core.notifications.worker import send_pending
-from tests.support import facility_letter_form
+from tests.support import facility_letter_form, portal_headers
 
 pytestmark = pytest.mark.anyio
 
@@ -46,7 +46,7 @@ async def _set(client, token, password=NEW_PASSWORD):
 
 
 async def _login(client, email="setme@example.gm", password=NEW_PASSWORD):
-    return await client.post("/auth/login", json={"email": email, "password": password})
+    return await client.post("/auth/login", json={"email": email, "password": password}, headers=portal_headers("applicant"))
 
 
 async def test_the_link_sets_the_password_and_then_they_can_log_in(act, people, client, db_session):

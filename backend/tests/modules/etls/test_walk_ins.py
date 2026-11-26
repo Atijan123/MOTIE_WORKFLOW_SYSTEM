@@ -7,7 +7,7 @@ from sqlalchemy import select
 from app.core.audit.models import AuditEvent
 from app.core.identity.models import PasswordLink, User
 from app.core.notifications.models import Notification
-from tests.support import create_draft, facility_letter_form, submit, upload_required
+from tests.support import create_draft, facility_letter_form, portal_headers, submit, upload_required
 
 pytestmark = pytest.mark.anyio
 
@@ -154,7 +154,10 @@ async def test_a_new_applicant_is_emailed_a_link_and_cannot_log_in_before(act, p
     assert "/set-password#token=" in email.body
     assert (await act(people["records_officer"], "get", f"/cases/{response.json()['case_id']}")).json()["applicant_emailed"]
 
-    login = await client.post("/auth/login", json={"email": "link@example.gm", "password": "anything at all 123"})
+    login = await client.post(
+        "/auth/login", json={"email": "link@example.gm", "password": "anything at all 123"},
+        headers=portal_headers("applicant"),
+    )
     assert login.status_code == 401
 
 

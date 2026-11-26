@@ -1,9 +1,10 @@
 // Who is logged in, for server components and actions.
 import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { cache } from "react";
 
 import { api, SESSION_COOKIE } from "./api";
+import { PORTAL } from "./portal";
 import type { Me } from "./types";
 
 // The API's tokens last 60 minutes (ACCESS_TOKEN_MINUTES); the cookie no longer.
@@ -24,12 +25,17 @@ export const getMe = cache(async (): Promise<Me | null> => {
   return api<Me>("/auth/me");
 });
 
-/** For pages: the user, or off to the login page. `kind` keeps applicants and staff on their own screens. */
+/**
+ * For pages: the user, or off to the login page. `kind` keeps applicants and
+ * staff on their own screens. Each app only has its own pages (next.config.mjs),
+ * and the API refuses a staff login through the applicant portal and the
+ * reverse; this is one more check, in case a page is ever misnamed.
+ */
 export async function requireUser(kind?: "applicant" | "staff"): Promise<Me> {
+  if (kind && kind !== PORTAL) notFound();
   const me = await getMe();
   if (!me) redirect("/login");
-  if (kind === "staff" && !isStaff(me)) redirect("/applications");
-  if (kind === "applicant" && isStaff(me)) redirect("/staff");
+  if (kind && (kind === "staff") !== isStaff(me)) notFound();
   return me;
 }
 
@@ -51,6 +57,5 @@ export async function endSession(): Promise<void> {
   (await cookies()).delete(SESSION_COOKIE);
 }
 
-export function homeFor(me: Me): string {
-  return isStaff(me) ? "/staff" : "/applications";
-}
+/** Each app's home. (Whoever is signed in to an app is of its kind: the API makes sure.) */
+export const HOME = PORTAL === "staff" ? "/staff" : "/applications";

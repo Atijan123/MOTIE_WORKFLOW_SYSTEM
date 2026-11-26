@@ -1,12 +1,13 @@
 // Calls to the FastAPI backend. Server-side only (server components, server
 // actions, route handlers): the browser never talks to the API directly and
 // never sees the login token, which lives in an httpOnly cookie.
-import { cookies } from "next/headers";
+import { cookies, headers as requestHeaders } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { signInAgainPath } from "./auth-redirect";
+import { forwardedHeaders, PORTAL, sessionCookieName } from "./portal";
 
-export const SESSION_COOKIE = "motie_session";
+export const SESSION_COOKIE = sessionCookieName(PORTAL);
 // Inside Compose the API is "api:8000"; the browser can't reach it, on purpose.
 const API_URL = process.env.API_URL ?? "http://localhost:8000";
 
@@ -24,7 +25,11 @@ type Options = { method?: string; json?: unknown; body?: BodyInit; headers?: Rec
 /** The raw response, for files. Redirects to the login page if the session has ended. */
 export async function apiFetch(path: string, options: Options = {}): Promise<Response> {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
-  const headers: Record<string, string> = { ...options.headers };
+  // Which front end this is, for the API's portal check (lib/portal.ts).
+  const headers: Record<string, string> = {
+    ...forwardedHeaders(await requestHeaders(), process.env.PORTAL_KEY),
+    ...options.headers,
+  };
   if (token) headers.Authorization = `Bearer ${token}`;
   let body = options.body;
   if (options.json !== undefined) {

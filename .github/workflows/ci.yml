@@ -110,13 +110,13 @@ jobs:
         # The same command as on your laptop: a fresh database, the dev users,
         # the fictional cases and the fictional register (S13 needs it).
         run: bash scripts/seed-demo.sh --yes --discard-history
-      - name: Start the web app
-        run: docker compose up -d web
+      - name: Start the applicant portal and the staff app
+        run: docker compose up -d web staff
       - name: Run the Playwright walk-throughs
         run: docker compose run --rm e2e
       - name: Show the app's logs
         if: failure()
-        run: docker compose logs --no-color --tail 300 api web
+        run: docker compose logs --no-color --tail 300 api web staff
       - name: Keep the Playwright report and screenshots
         if: failure()
         uses: actions/upload-artifact@v4

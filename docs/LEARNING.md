@@ -16,6 +16,21 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 12b — A separate staff app; staff work refused from the applicant portal (2026-11-26)
+
+**Built:**
+- **Two apps from one codebase.** The Next.js frontend is now built twice: `PORTAL=applicant` (the public applicant portal, http://localhost:3001) and `PORTAL=staff` (the staff app, http://localhost:3002, the new `staff` service in docker-compose.yml). Staff route files are renamed `page.staff.tsx` / `layout.staff.tsx`, applicant ones `page.applicant.tsx` / `layout.applicant.tsx`. `pageExtensions` in frontend/next.config.mjs makes each build pick up only its own, so the applicant server doesn't contain the staff screens or their server actions at all. Shared pages (`/login`, `/set-password`, `/`) stay `page.tsx`.
+- **Each app proves to the API which it is.** Every API call from a front end's server carries `X-Portal-Key` (its own secret key), `X-Forwarded-Host` (the address the browser opened) and `X-Client-IP` (the browser's IP, from the proxy's `X-Real-IP`): `forwardedHeaders()` in frontend/lib/portal.ts, used by `apiFetch()` in frontend/lib/api.ts. The API reads them in `read_channel()` (backend/app/core/identity/channel.py), and believes the two forwarded headers only when the key is right.
+- **The rule:** a staff account works only through the staff app, an applicant's only through the portal (`check_channel()` in backend/app/core/identity/deps.py, called by `get_current_user()` for every logged-in request). With `STAFF_PORTAL_HOSTS` / `APPLICANT_PORTAL_HOSTS` set, a staff request whose browser address is an applicant domain (or any non-staff domain) is refused too, even with the staff key: `came_through()`. At `/auth/login`, a staff password typed into the applicant portal gets exactly the "Incorrect email or password" answer a wrong password gets.
+- **Settings:** `STAFF_PORTAL_KEY`, `APPLICANT_PORTAL_KEY`, `STAFF_PORTAL_HOSTS`, `APPLICANT_PORTAL_HOSTS` (backend/app/core/config.py, .env.example). On your machine you don't set them: docker-compose.yml passes "dev-" keys, which the API ignores unless `APP_ENV=development`.
+- **Separate cookies:** `motie_staff_session` and `motie_session` (frontend/lib/portal.ts). Cookies ignore the port, so on localhost the two apps would otherwise share a login.
+- The demo seed now calls the API as the right front end for each person (`Demo.portal()` in backend/app/demo_seed.py), and the walk-throughs open each person's own app (`appFor()` in frontend/e2e/tests/helpers.ts).
+- **Shared images:** `api`, `notifier` and `tools` now use one image, `motie/backend:dev`, and `web` and `staff` one image, `motie/frontend:dev` (the `image:` lines in docker-compose.yml). Before, Compose built a separate copy per service; with two front ends that would have cost another 1.3 GB.
+- `npm run typecheck` now uses frontend/tsconfig.typecheck.json, which leaves out `.next/types`: Next generates those for whichever app it built last.
+
+**Files:** backend/app/core/identity/channel.py (new), deps.py, router.py, models.py (`is_staff`, `portal`); backend/app/core/config.py; backend/app/demo_seed.py; backend/tests/core/test_portals.py (new), conftest.py, support.py (`portal_headers()`), and the login calls in five test files; frontend/lib/portal.ts, portal.test.ts (new), api.ts, session.ts (`HOME`, `requireUser()`); frontend/next.config.mjs, tsconfig.typecheck.json, package.json; frontend/app/**/page.*.tsx (renamed), login/page.tsx; frontend/e2e/tests/helpers.ts, session.spec.ts; docker-compose.yml; .env.example; .github/workflows/ci.yml; CLAUDE.md.
+**Try it:** `docker compose up -d web staff`. Log in at http://localhost:3002 as `desk@motie.test`: the queue. Try the same login at http://localhost:3001: "Incorrect email or password". Open http://localhost:3001/staff: 404. Tests: `docker compose run --rm tools pytest tests/core/test_portals.py -v`; `docker compose run --rm e2e npx playwright test tests/session.spec.ts`.
+
 ### Step 12a — CI: every push is tested on GitHub (2026-11-11)
 
 **Built:** a GitHub Actions workflow, .github/workflows/ci.yml, that runs on every push and pull request. Three jobs run side by side on fresh GitHub machines:
@@ -1727,6 +1742,14 @@ Because the token is 256 random bits, a plain SHA-256 hash is enough. Passwords 
 **Here:** .github/workflows/ci.yml; the badge in README.md.
 **Learn more:** [GitHub Docs: Understanding GitHub Actions](https://docs.github.com/en/actions/about-github-actions/understanding-github-actions)
 
+### Two front ends, one API (and what the portal check stops)
+**What:** the public applicant portal faces the whole internet, so it's the part most likely to be attacked. If staff screens lived in the same app, a bug there would sit next to the Ministry's most powerful buttons. So staff get their own app, on its own address (and, from step 12c, only from the Ministry network). Both apps call the same API, and the API is the one that enforces the separation, because a front end can always be bypassed.
+The API can't see the browser: the browser talks to a Next.js server, which calls the API. So each Next.js server *tells* the API which app it is with a secret key, and passes on the browser's address and IP. Headers are easy to fake, so those forwarded headers count only when the key is right: only our own servers know a key.
+**Stops:** a staff password that was phished or guessed being used from the public site; a staff token stolen from a staff PC being replayed through the public portal; a bug in the public app reaching staff screens (they aren't in its build); someone pointing the staff app at the public domain by mistake (the host check).
+**Doesn't stop:** someone *on* the staff app with a stolen password (two-step login, step 12e, is for that); an attacker who takes over the staff app's own server (it holds the staff key); someone with direct network access to the API who has also stolen a key. Keep the API port off the network (it is: 127.0.0.1 only in dev, an internal network in staging) and rotate a key if a server is compromised.
+**Here:** backend/app/core/identity/channel.py (`read_channel()`, `came_through()`); `check_channel()` in backend/app/core/identity/deps.py; frontend/lib/portal.ts; `pageExtensions` in frontend/next.config.mjs.
+**Learn more:** [OWASP: Attack Surface Analysis Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Attack_Surface_Analysis_Cheat_Sheet.html)
+
 ## 3. Decisions
 
 ### Confirmed by the Ministry
@@ -1753,6 +1776,13 @@ These were open questions; the Ministry has answered them. The code follows them
 
 | Date | Decision | Alternatives considered | Why |
 | --- | --- | --- | --- |
+| 2026-11-26 | One Next.js codebase built twice (`PORTAL`), each build picking its own pages with `pageExtensions` | two separate Next.js projects; one app with a middleware blocking routes | Two projects would duplicate the shared components and lib/. A middleware block still ships the staff code and server actions in the public build; `pageExtensions` leaves them out, and the build output shows it. |
+| 2026-11-26 | The API decides by the *account*: staff accounts only through the staff app, applicants only through the portal | mark each API route "staff" or "applicant" | Some routes serve both (a case's page, documents). Tying it to the account covers every route, including ones added later. Staff-only routes are refused from the portal either way: by role, or by portal. |
+| 2026-11-26 | Each front end proves itself with a secret key; forwarded host and IP count only with it | trust `X-Forwarded-*` from anyone; mutual TLS between containers | Trusting headers from anyone lets anyone fake them. Mutual TLS is stronger but much more to set up and explain; a key per front end is simple and can be rotated in .env. |
+| 2026-11-26 | A staff password through the applicant portal gets "Incorrect email or password" | "Staff sign in through the staff app" | A different answer would tell someone on the public site that they had guessed a staff password right. The login pages say which app is whose instead. |
+| 2026-11-26 | Dev keys are published in docker-compose.yml, start "dev-", and the API ignores them unless `APP_ENV=development` | no defaults (you'd add two keys to .env) | Nothing to set up on your machine, and a server that forgets to set keys fails closed instead of running with a public key. |
+| 2026-11-26 | The client IP comes from `X-Real-IP` (set by Caddy), never from `X-Forwarded-For` | `X-Forwarded-For` | Browsers can send their own `X-Forwarded-For`; proxies append to it. Caddy sets `X-Real-IP` itself, so there's only one value and it's Caddy's. |
+| 2026-11-26 | Services built from the same Dockerfile share one named image | one image per service (Compose's default) | Your C: drive filled up during this step and Docker stopped working. Identical images took several GB. |
 | 2026-11-11 | Private GitHub repository, Actions for CI | GitLab CI; a CI server at the Ministry | You chose it. Free for private repos (2,000 minutes a month), and the workflow file is plain YAML the ICT unit can move elsewhere. |
 | 2026-11-11 | Backend tests run on the CI machine with a Postgres service container; walk-throughs run in Compose | Compose for everything | The service container is what you asked for and is quick. The walk-throughs need the whole stack, and Compose with the same seed script tests exactly what you run. |
 | 2026-11-11 | CI writes a `.env` with random passwords each run | GitHub secrets | The CI database is thrown away after the run; there's nothing to keep secret, and nothing to set up per repository. |
@@ -2172,13 +2202,23 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 - [ ] **Returning and cancelling (step 10b):** any signatory may return an unsigned letter to the desk; a signed letter is cancelled only by the Director or by the officer who signed it. Should that officer keep the power after the Director is back (now no; the Director cancels then)?
 - [ ] **The applicant's copy (step 10b):** downloadable from the case page once GRA's copy is sent. Does the importer also collect a paper copy, and if so from whom (Records?) and is that recorded? Should Records' file copy be printed and filed, and recorded as filed?
 
-- [ ] **Historical register (step 11):** imported on the dev database on 2026-11-09 (245 letters, 293 goods lines, 259 certificates, 59 data checks). Still to check by eye: 4 data checks couldn't be linked to a letter (listed on S13), and 1 goods line has no readable quantity. Are the other data checks linked to the right letters (folio first, then a reference that belongs to one letter)? Should "Summary" or "Other letters to GRA" be imported too?
+- [ ] **Historical register (step 11):** imported on the dev database on 2026-11-09 (245 letters, 293 goods lines, 259 certificates, 59 data checks). **Not there any more:** the demo seed runs in step 12b (`seed-demo.sh --yes --discard-history`, which the walk-throughs need) reset the dev database on 2026-11-11 and 2026-11-26. Re-run `scripts/import-history.sh` to bring it back; a later demo seed will remove it again. Still to check by eye: 4 data checks couldn't be linked to a letter (listed on S13), and 1 goods line has no readable quantity. Are the other data checks linked to the right letters (folio first, then a reference that belongs to one letter)? Should "Summary" or "Other letters to GRA" be imported too?
 - [ ] **Statistics access:** the Director's post and the `stats_viewer` role. Should the PS or the Minister see them too? Who gets `stats_viewer`?
 - [ ] **A category on live letters:** the register has one ("Category", e.g. Cement, Feed); the live form doesn't, so live letters show "Not recorded" in the quantities table. Add it to the form (from the "Lists" sheet), or derive it from the HS code?
 
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 12b
+1. A staff member's password is phished. The attacker types it into the applicant portal's login page. What happens, and which function decides?
+2. Why does the API believe `X-Forwarded-Host` only when `X-Portal-Key` is right?
+3. Open http://localhost:3001/staff and you get a 404, not a login page. Why, and why is that better than a redirect?
+
+#### Show answers
+1. They see "Incorrect email or password", the same as a wrong password. `login()` in backend/app/core/identity/router.py checks `came_through(channel, user.portal)`: the request came with the applicant portal's key, and the account is staff.
+2. Any HTTP client can send any header. Only our own Next.js servers know a portal key, so a valid key means the forwarded headers were set by our server, not typed by an attacker.
+3. The applicant build doesn't contain the staff pages at all: `pageExtensions` in frontend/next.config.mjs only picks up `page.applicant.tsx` and plain `page.tsx`. A page that isn't there can't have a bug, and the public server holds none of the staff screens' code.
 
 ### Step 12a
 1. The backend tests passed on your laptop. Name two reasons they could still fail in CI.

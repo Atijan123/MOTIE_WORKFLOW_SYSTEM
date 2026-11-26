@@ -5,6 +5,7 @@ import pytest
 from app import dev_seed
 from app.core.config import Settings, settings
 from app.core.identity.service import get_user_by_email
+from tests.support import portal_headers
 from app.core.workflow import signatories
 
 pytestmark = pytest.mark.anyio
@@ -28,7 +29,9 @@ async def test_seed_creates_one_user_per_post_and_twice_changes_nothing(db_sessi
 
 async def test_seeded_users_can_log_in(db_session, client):
     await dev_seed.seed(db_session, "a dev password 1")
-    response = await client.post("/auth/login", json={"email": "records@motie.test", "password": "a dev password 1"})
+    response = await client.post(
+        "/auth/login", json={"email": "records@motie.test", "password": "a dev password 1"}, headers=portal_headers("staff")
+    )
     assert response.status_code == 200
 
 

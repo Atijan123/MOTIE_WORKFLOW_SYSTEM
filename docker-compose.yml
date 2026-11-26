@@ -1,3 +1,12 @@
+# Each front end proves to the API which one it is with its own key (step 12b,
+# backend/app/core/identity/channel.py). These defaults start "dev-", which the
+# API accepts only with APP_ENV=development; set real ones in .env elsewhere.
+x-portal-keys: &portal-keys
+  STAFF_PORTAL_KEY: ${STAFF_PORTAL_KEY:-dev-staff-portal-key-not-a-secret-0000}
+  APPLICANT_PORTAL_KEY: ${APPLICANT_PORTAL_KEY:-dev-applicant-portal-key-not-a-secret-00}
+  STAFF_PORTAL_HOSTS: ${STAFF_PORTAL_HOSTS:-}
+  APPLICANT_PORTAL_HOSTS: ${APPLICANT_PORTAL_HOSTS:-}
+
 services:
   db:
     # Official Postgres 16 with the pgvector extension available (not enabled yet).
@@ -21,6 +30,8 @@ services:
       retries: 10
 
   api:
+    # api, notifier and tools share one image (named here), instead of three copies.
+    image: motie/backend:dev
     build:
       context: ./backend
       args:
@@ -42,6 +53,7 @@ services:
       # The start of links in emails ("set your password"); see .env.example.
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3001}
       PASSWORD_LINK_HOURS: ${PASSWORD_LINK_HOURS:-72}
+      <<: *portal-keys
     volumes:
       # Dev only: mount the source so edits reload without rebuilding the image.
       - ./backend:/app
@@ -54,12 +66,17 @@ services:
         condition: service_healthy
 
   web:
-    # The Next.js frontend (frontend/). The browser talks only to this; it
-    # calls the API over the Compose network, holding the login in a cookie.
+    # The applicant portal: the Next.js frontend (frontend/) built with
+    # PORTAL=applicant. The browser talks only to this; it calls the API over
+    # the Compose network, holding the login in a cookie.
+    # web and staff share one image: they differ only in PORTAL (below).
+    image: motie/frontend:dev
     build:
       context: ./frontend
       target: dev
     environment:
+      PORTAL: applicant
+      PORTAL_KEY: ${APPLICANT_PORTAL_KEY:-dev-applicant-portal-key-not-a-secret-00}
       API_URL: http://api:8000
       WATCHPACK_POLLING: "true"  # file changes from a Windows bind mount
       NEXT_TELEMETRY_DISABLED: "1"
@@ -74,10 +91,36 @@ services:
     depends_on:
       - api
 
+  staff:
+    # The staff app: the same code built with PORTAL=staff, so it has the
+    # staff screens and the applicant portal doesn't. http://localhost:3002
+    # web and staff share one image: they differ only in PORTAL (below).
+    image: motie/frontend:dev
+    build:
+      context: ./frontend
+      target: dev
+    environment:
+      PORTAL: staff
+      PORTAL_KEY: ${STAFF_PORTAL_KEY:-dev-staff-portal-key-not-a-secret-0000}
+      API_URL: http://api:8000
+      WATCHPACK_POLLING: "true"
+      NEXT_TELEMETRY_DISABLED: "1"
+    volumes:
+      - ./frontend:/app
+      - web_node_modules:/app/node_modules
+      # Its own build cache: the two apps' builds differ.
+      - staff_next:/app/.next
+    ports:
+      - "127.0.0.1:3002:3000"
+    depends_on:
+      - api
+
   notifier:
     # Sends the emails waiting in core.notifications, every NOTIFICATION_POLL_SECONDS
     # (backend/app/core/notifications/worker.py). With EMAIL_BACKEND=fake, the only
     # backend yet, it logs each email instead of sending it: `docker compose logs notifier`.
+    # api, notifier and tools share one image (named here), instead of three copies.
+    image: motie/backend:dev
     build:
       context: ./backend
       args:
@@ -101,6 +144,8 @@ services:
     # The "tools" profile keeps it out of `docker compose up`. It runs one command
     # and exits, so the owner password never sits in a long-running server.
     profiles: ["tools"]
+    # api, notifier and tools share one image (named here), instead of three copies.
+    image: motie/backend:dev
     build:
       context: ./backend
       args:
@@ -112,6 +157,8 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://motie_app:${APP_DB_PASSWORD}@db:5432/${POSTGRES_DB}
       MIGRATION_DATABASE_URL: postgresql+asyncpg://motie_owner:${MIGRATION_DB_PASSWORD:?Set MIGRATION_DB_PASSWORD in .env}@db:5432/${POSTGRES_DB}
+      # The demo seed (app/demo_seed.py) calls the API as both front ends.
+      <<: *portal-keys
     volumes:
       - ./backend:/app
     depends_on:
@@ -126,7 +173,8 @@ services:
     build:
       context: ./frontend/e2e
     environment:
-      BASE_URL: http://web:3000
+      BASE_URL: http://web:3000  # the applicant portal
+      STAFF_URL: http://staff:3000  # the staff app
       DEV_SEED_PASSWORD: ${DEV_SEED_PASSWORD:-}
     volumes:
       - ./frontend/e2e:/e2e
@@ -134,10 +182,12 @@ services:
       - e2e_node_modules:/e2e/node_modules
     depends_on:
       - web
+      - staff
 
 volumes:
   pgdata:
   documents:
   web_node_modules:
   web_next:
+  staff_next:
   e2e_node_modules:

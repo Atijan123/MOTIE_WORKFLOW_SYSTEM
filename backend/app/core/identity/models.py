@@ -116,6 +116,16 @@ class User(Base):
         return {role.code for role in self.roles}
 
     @property
+    def is_staff(self) -> bool:
+        """Any role besides "applicant" makes this a staff account, as the
+        frontend's isStaff() says. Staff accounts work only through the staff app."""
+        return bool(self.role_codes - {"applicant"})
+
+    @property
+    def portal(self) -> str:
+        return "staff" if self.is_staff else "applicant"
+
+    @property
     def position_codes(self) -> set[str]:
         return {position.code for position in self.positions}
 

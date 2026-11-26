@@ -3,7 +3,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.identity import password_links
-from app.core.identity.deps import get_current_user
+from app.core.identity.channel import Channel, came_through
+from app.core.identity.deps import get_channel, get_current_user
 from app.core.identity.models import User
 from app.core.identity.schemas import LoginRequest, SetPasswordRequest, TokenResponse, UserOut
 from app.core.identity.security import create_access_token
@@ -14,8 +15,17 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(body: LoginRequest, session: AsyncSession = Depends(get_session)):
+async def login(
+    body: LoginRequest,
+    channel: Channel = Depends(get_channel),
+    session: AsyncSession = Depends(get_session),
+):
     user = await authenticate(session, body.email, body.password)
+    # A staff account through the applicant portal (or the reverse) gets the
+    # same answer as a wrong password: a phished or guessed staff password is
+    # no use from the public site. The login pages say which app is whose.
+    if user is not None and not came_through(channel, user.portal):
+        user = None
     if user is None:
         # One message for every failure (unknown email, wrong password,
         # deactivated account), so it reveals nothing.

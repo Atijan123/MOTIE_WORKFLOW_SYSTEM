@@ -38,7 +38,7 @@ from app.core.identity.security import create_access_token
 from app.core.identity.service import assign_position, create_user
 from app.db.session import get_session
 from app.main import app
-from tests.support import STAFF, TEST_PASSWORD
+from tests.support import STAFF, TEST_PASSWORD, TEST_PORTAL_KEYS, portal_headers
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 
@@ -110,6 +110,16 @@ def registry_reference(monkeypatch):
     """Letters can be signed whatever APP_ENV your .env says: without a
     reference set, a production server blocks signing (test_registry_reference.py)."""
     monkeypatch.setattr(settings, "facility_letter_reference_format", DEV_REGISTRY_REFERENCE)
+
+
+@pytest.fixture(autouse=True)
+def portal_keys(monkeypatch):
+    """Known portal keys, so tests can call the API as either front end
+    (tests.support.portal_headers()), whatever your .env says."""
+    monkeypatch.setattr(settings, "staff_portal_key", TEST_PORTAL_KEYS["staff"])
+    monkeypatch.setattr(settings, "applicant_portal_key", TEST_PORTAL_KEYS["applicant"])
+    monkeypatch.setattr(settings, "staff_portal_hosts", "")
+    monkeypatch.setattr(settings, "applicant_portal_hosts", "")
 
 
 @pytest.fixture
@@ -214,10 +224,11 @@ def make_user(db_session):
 
 @pytest.fixture
 def auth_headers():
-    """Headers that log a request in as `user`: `client.get(..., headers=auth_headers(user))`."""
+    """Headers that log a request in as `user`: `client.get(..., headers=auth_headers(user))`.
+    They come through the user's own front end: the staff app for staff."""
 
     def _headers(user) -> dict[str, str]:
-        return {"Authorization": f"Bearer {create_access_token(user.id)}"}
+        return {"Authorization": f"Bearer {create_access_token(user.id)}", **portal_headers(user.portal)}
 
     return _headers
 
