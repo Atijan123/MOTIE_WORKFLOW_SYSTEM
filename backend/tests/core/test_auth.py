@@ -45,7 +45,7 @@ async def test_deactivated_user_cannot_log_in_or_use_an_old_token(
     client, db_session, make_user, auth_headers
 ):
     user = await make_user(email="gone@test.gm")
-    headers = auth_headers(user)
+    headers = await auth_headers(user)
 
     user.is_active = False
     await db_session.commit()

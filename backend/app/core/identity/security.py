@@ -24,29 +24,31 @@ def verify_password(plain: str, hashed: str) -> bool:
     return _hasher.verify(plain, hashed)
 
 
-def create_access_token(user_id: int) -> str:
-    now = datetime.now(timezone.utc)
+def create_access_token(user_id: int, session_id: str, expires_at: datetime) -> str:
+    """The login token: who (`sub`), which session on the server (`sid`,
+    step 12f; identity/sessions.py), and when it ends (that session's end)."""
     payload = {
         "sub": str(user_id),  # who the token is for
+        "sid": session_id,  # their row in core.sessions
         "typ": "access",  # what it is for (see create_challenge_token)
-        "iat": now,  # issued at
-        "exp": now + timedelta(minutes=settings.access_token_minutes),  # expires at
+        "iat": datetime.now(timezone.utc),  # issued at
+        "exp": expires_at,  # expires at
     }
     return jwt.encode(payload, settings.jwt_secret, algorithm=_ALGORITHM)
 
 
-def decode_access_token(token: str) -> int:
-    """Return the user id in a valid token; raise jwt.InvalidTokenError otherwise.
+def decode_access_token(token: str) -> tuple[int, str]:
+    """(user id, session id) from a valid token; raise jwt.InvalidTokenError otherwise.
 
     Checks the signature and the expiry. `algorithms=[...]` is pinned so a forged
     token can't tell us to skip verification (the classic "alg: none" attack).
-    Only "access" tokens count: a challenge token (password right, code not yet
-    given) must never work as a login.
+    Only "access" tokens with a session count: a challenge token (password
+    right, code not yet given) must never work as a login.
     """
     payload = jwt.decode(token, settings.jwt_secret, algorithms=[_ALGORITHM])
-    if payload.get("typ") != "access":
+    if payload.get("typ") != "access" or not isinstance(payload.get("sid"), str):
         raise jwt.InvalidTokenError("not an access token")
-    return int(payload["sub"])
+    return int(payload["sub"]), payload["sid"]
 
 
 def create_challenge_token(user_id: int, portal: str) -> str:

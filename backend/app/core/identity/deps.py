@@ -13,7 +13,8 @@ from app.core.identity.channel import (
     staff_ip_allowed,
     wrong_portal_message,
 )
-from app.core.identity.models import User
+from app.core.identity import sessions
+from app.core.identity.models import LoginSession, User
 from app.core.identity.security import decode_access_token
 from app.db.session import get_session
 
@@ -46,15 +47,18 @@ def check_channel(user: User, channel: Channel) -> None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=OUTSIDE_NETWORK_MESSAGE)
 
 
-async def get_current_user(
+async def get_current_session(
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
     channel: Channel = Depends(get_channel),
     session: AsyncSession = Depends(get_session),
-) -> User:
+) -> LoginSession:
+    """The caller's session on the server (step 12f), checked: not signed out,
+    not idle too long, not past its end. FastAPI runs this once per request,
+    however many dependencies ask for it."""
     if credentials is None:
         raise _unauthorized()
     try:
-        user_id = decode_access_token(credentials.credentials)
+        user_id, session_id = decode_access_token(credentials.credentials)
     except jwt.InvalidTokenError:
         raise _unauthorized()
 
@@ -64,7 +68,18 @@ async def get_current_user(
     if user is None or not user.is_active:
         raise _unauthorized()
     check_channel(user, channel)
-    return user
+    try:
+        return await sessions.check(session, await session.get(LoginSession, session_id), user)
+    except sessions.SessionEnded:
+        raise _unauthorized()
+
+
+async def get_current_user(
+    login: LoginSession = Depends(get_current_session),
+    session: AsyncSession = Depends(get_session),
+) -> User:
+    # Already loaded by get_current_session, in this same database session.
+    return await session.get(User, login.user_id)
 
 
 def require_role(*role_codes: str):

@@ -20,7 +20,7 @@ const LABELS: Record<string, string> = {
  * and one minute box serve every button; the message goes only with a move
  * that tells the applicant something.
  */
-export function Actions({ caseId, actions }: { caseId: number; actions: Action[] }) {
+export function Actions({ caseId, actions, askPassword = false }: { caseId: number; actions: Action[]; askPassword?: boolean }) {
   const here = actions.filter((a) => !ELSEWHERE.has(a.to_status));
   if (!here.length) return null;
   const message = here.some((a) => a.requires_applicant_message);
@@ -43,6 +43,14 @@ export function Actions({ caseId, actions }: { caseId: number; actions: Action[]
           <textarea name="comment" rows={3} maxLength={2000} placeholder="Staff only" />
         </label>
       </div>
+      {askPassword ? (
+        // Step 12f: signing or approving needs the password typed within the last 10 minutes.
+        <label className="field">
+          Your password, to {here.filter((a) => a.needs_recent_password).map((a) => (LABELS[a.name] ?? a.name).toLowerCase()).join(" or ")}
+          <input type="password" name="password" autoComplete="current-password" />
+          <span className="small muted">For signing and approving, we check it’s really you.</span>
+        </label>
+      ) : null}
       <div className="row">
         {here.map((a, i) => (
           <SubmitButton

@@ -7,8 +7,6 @@ import { api, SESSION_COOKIE } from "./api";
 import { PORTAL } from "./portal";
 import type { Me } from "./types";
 
-// The API's tokens last 60 minutes (ACCESS_TOKEN_MINUTES); the cookie no longer.
-const SESSION_SECONDS = 60 * 60;
 
 export function isStaff(me: Me): boolean {
   return me.roles.some((r) => r !== "applicant");
@@ -39,7 +37,9 @@ export async function requireUser(kind?: "applicant" | "staff"): Promise<Me> {
   return me;
 }
 
-export async function startSession(token: string): Promise<void> {
+/** Keep the token in the cookie for as long as its session lasts (`seconds`, from the API:
+ * 8 hours for staff, 60 minutes for applicants). The API also signs staff out after 30 idle minutes. */
+export async function startSession(token: string, seconds: number): Promise<void> {
   (await cookies()).set(SESSION_COOKIE, token, {
     // httpOnly: page scripts can't read it, so a script injected into a page
     // couldn't steal the login. SameSite=Lax: other sites can't send it with
@@ -49,11 +49,15 @@ export async function startSession(token: string): Promise<void> {
     // Only over https on a real server; plain http works on localhost for development.
     secure: process.env.NODE_ENV === "production" && process.env.COOKIE_SECURE !== "false",
     path: "/",
-    maxAge: SESSION_SECONDS,
+    maxAge: seconds,
   });
 }
 
+/** Sign out: end the session on the server (so a copied token stops working too), then forget the cookie. */
 export async function endSession(): Promise<void> {
+  if ((await cookies()).get(SESSION_COOKIE)) {
+    await api("/auth/logout", { method: "POST" }).catch(() => undefined); // already ended: fine
+  }
   (await cookies()).delete(SESSION_COOKIE);
 }
 

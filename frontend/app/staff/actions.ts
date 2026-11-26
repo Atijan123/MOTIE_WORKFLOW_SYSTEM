@@ -14,6 +14,12 @@ export async function moveCase(caseId: number, _: FormState, data: FormData): Pr
   const toStatus = text(data, "to_status");
   let moved: Case;
   try {
+    // Typed again for signing or approving (step 12f): check it first. A wrong
+    // one stops here, with the API's message; the move isn't tried.
+    const password = data.get("password");
+    if (typeof password === "string" && password) {
+      await api("/auth/reauth", { method: "POST", json: { password } });
+    }
     moved = await api<Case>(`/cases/${caseId}/status`, {
       method: "POST",
       json: {

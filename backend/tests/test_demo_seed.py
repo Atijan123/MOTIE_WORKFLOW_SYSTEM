@@ -19,7 +19,7 @@ async def test_one_case_per_stage_made_through_the_api(db_session, client, auth_
     made = await demo_seed.seed_cases(client, PASSWORD)
 
     # (Not a second login: the demo seed has just used this 30 seconds' code for Records.)
-    headers = auth_headers(await get_user_by_email(db_session, "records@motie.test"))
+    headers = await auth_headers(await get_user_by_email(db_session, "records@motie.test"))
     cases = [(await client.get(f"/cases/{case_id}", headers=headers)).json() for _, case_id in made]
     assert [c["status"]["code"] for c in cases] == [
         "sent_to_gra",

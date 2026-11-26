@@ -4,7 +4,6 @@ import pytest
 from pydantic import ValidationError
 
 from app.core.config import Settings, settings
-from app.core.identity.security import create_access_token
 from tests.support import TEST_PASSWORD, portal_headers
 
 pytestmark = pytest.mark.anyio
@@ -18,9 +17,13 @@ def allowlist_on(monkeypatch):
     monkeypatch.setattr(settings, "staff_ip_allowlist", OFFICE)
 
 
-def as_staff(user, ip=None):
-    extra = {"ip": ip} if ip else {}
-    return {"Authorization": f"Bearer {create_access_token(user.id)}", **portal_headers("staff", **extra)}
+@pytest.fixture
+def as_staff(auth_headers):
+    async def _as_staff(user, ip=None):
+        extra = {"ip": ip} if ip else {}
+        return {**(await auth_headers(user)), **portal_headers("staff", **extra)}
+
+    return _as_staff
 
 
 @pytest.mark.parametrize(
@@ -36,9 +39,9 @@ def as_staff(user, ip=None):
         (None, False),  # unknown IP: refused while the check is on
     ],
 )
-async def test_staff_requests_only_from_the_allowed_networks(client, make_user, allowlist_on, ip, allowed):
+async def test_staff_requests_only_from_the_allowed_networks(client, make_user, allowlist_on, as_staff, ip, allowed):
     officer = await make_user("officer")
-    response = await client.get("/cases/queue", headers=as_staff(officer, ip))
+    response = await client.get("/cases/queue", headers=await as_staff(officer, ip))
     assert response.status_code == (200 if allowed else 403)
     if not allowed:
         assert response.json()["detail"] == "The staff app works only on the Ministry network or VPN."
@@ -62,15 +65,15 @@ async def test_the_staff_login_is_refused_from_outside_before_the_password_is_ch
 
 async def test_applicants_are_not_limited_to_the_ministry_network(client, make_user, auth_headers, allowlist_on):
     applicant = await make_user("applicant")
-    headers = {**auth_headers(applicant), **portal_headers("applicant", ip="8.8.8.8")}
+    headers = {**(await auth_headers(applicant)), **portal_headers("applicant", ip="8.8.8.8")}
     assert (await client.get("/auth/me", headers=headers)).status_code == 200
 
 
-async def test_on_with_an_empty_list_lets_no_staff_in(client, make_user, monkeypatch):
+async def test_on_with_an_empty_list_lets_no_staff_in(client, make_user, monkeypatch, as_staff):
     monkeypatch.setattr(settings, "staff_ip_allowlist_enabled", True)
     monkeypatch.setattr(settings, "staff_ip_allowlist", "")
     officer = await make_user("officer")
-    assert (await client.get("/auth/me", headers=as_staff(officer, "10.20.0.5"))).status_code == 403
+    assert (await client.get("/auth/me", headers=await as_staff(officer, "10.20.0.5"))).status_code == 403
 
 
 def test_on_by_default_except_in_development():

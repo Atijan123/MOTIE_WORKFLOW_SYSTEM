@@ -88,6 +88,16 @@ class Settings(BaseSettings):
             return None
         return key
 
+    # --- Sessions (step 12f) ---------------------------------------------------------
+    # Staff are signed out after this long without doing anything... [CONFIRM] 30 minutes
+    staff_idle_minutes: int = Field(default=30, gt=0)
+    # ...and this long after signing in, whatever they do. [CONFIRM] 8 hours (a working day)
+    staff_session_hours: int = Field(default=8, gt=0, le=24)
+    # Signing a letter or approving an application asks for the password again
+    # if it was last typed longer ago than this. [CONFIRM] 10 minutes
+    reauth_minutes: int = Field(default=10, gt=0)
+    # Applicants: ACCESS_TOKEN_MINUTES after signing in, as before; no idle limit.
+
     # --- Login protection (step 12d) ----------------------------------------------
     # An account is locked after this many failed tries within the window, and
     # unlocks when the window has passed. [CONFIRM] 5 tries / 15 minutes.

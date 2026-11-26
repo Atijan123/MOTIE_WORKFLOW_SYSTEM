@@ -59,6 +59,12 @@ services:
       # STAFF_IP_ALLOWLIST_ENABLED=true.
       STAFF_IP_ALLOWLIST: ${STAFF_IP_ALLOWLIST:-}
       STAFF_IP_ALLOWLIST_ENABLED: ${STAFF_IP_ALLOWLIST_ENABLED:-}
+      # Session times (step 12f) and the lockout (12d); the defaults are the code's.
+      STAFF_IDLE_MINUTES: ${STAFF_IDLE_MINUTES:-30}
+      STAFF_SESSION_HOURS: ${STAFF_SESSION_HOURS:-8}
+      REAUTH_MINUTES: ${REAUTH_MINUTES:-10}
+      LOCKOUT_FAILURES: ${LOCKOUT_FAILURES:-5}
+      LOCKOUT_MINUTES: ${LOCKOUT_MINUTES:-15}
       <<: *portal-keys
     volumes:
       # Dev only: mount the source so edits reload without rebuilding the image.

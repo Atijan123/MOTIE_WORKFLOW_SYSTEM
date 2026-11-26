@@ -179,7 +179,7 @@ async def test_available_actions_depend_on_who_is_asking(act, people):
             "name": "Register and forward to the Minister",
             "on_behalf_of": None,
             "requires_comment": False,
-            "requires_applicant_message": False,
+            "requires_applicant_message": False, "needs_recent_password": False,
             "blocked_by": [],
             "warnings": [],
         }

@@ -2,8 +2,9 @@ from fastapi import APIRouter, Depends, Request, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.identity.deps import get_current_user
-from app.core.identity.models import User
+from app.core.identity import sessions
+from app.core.identity.deps import get_current_session, get_current_user
+from app.core.identity.models import LoginSession, User
 from app.core.workflow import checklist, flags, history, queues, service
 from app.core.workflow.models import Case
 from app.core.workflow.schemas import (
@@ -42,6 +43,8 @@ _ERROR_STATUS = {
     service.InvalidValue: status.HTTP_422_UNPROCESSABLE_ENTITY,  # not on its list
     service.UploadTooLarge: status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
     service.UnsupportedFileType: status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+    # 403, not 401: the session is fine, this one move needs the password again.
+    service.PasswordCheckNeeded: status.HTTP_403_FORBIDDEN,
 }
 
 
@@ -59,6 +62,7 @@ def _action_out(
         on_behalf_of=m.on_behalf_of,
         requires_comment=m.transition.requires_comment,
         requires_applicant_message=m.transition.requires_applicant_message,
+        needs_recent_password=m.transition.needs_recent_password,
         blocked_by=blocked_by,
         warnings=warnings,
     )
@@ -164,6 +168,7 @@ async def get_case(
 async def change_status(
     case_id: int,
     body: ChangeStatusRequest,
+    login: LoginSession = Depends(get_current_session),
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
@@ -174,6 +179,7 @@ async def change_status(
         actor=user,
         comment=body.comment,
         applicant_message=body.applicant_message,
+        password_recent=sessions.password_is_fresh(login),
     )
     return await case_out(session, case, user)
 

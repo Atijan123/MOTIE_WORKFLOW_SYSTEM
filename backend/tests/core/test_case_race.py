@@ -83,8 +83,10 @@ async def test_simultaneous_approve_and_reject_cannot_both_succeed(committing_en
         async with AsyncSession(committing_engine, expire_on_commit=False) as session:
             officer = await session.get(User, officer_id)
             try:
+                # As if each officer had just typed their password: approving
+                # needs a recent one (step 12f), and this test is about the race.
                 await service.change_status(
-                    session, case_id=case.id, to_status_code=to_status, actor=officer
+                    session, case_id=case.id, to_status_code=to_status, actor=officer, password_recent=True
                 )
                 return "moved"
             except service.TransitionNotAllowed:

@@ -20,4 +20,5 @@ test("a wrong code at the second step is shown, not sent back to the start", () 
   assert.equal(signInAgainPath(401, "/auth/login/recovery-code", false), null);
   assert.equal(signInAgainPath(401, "/auth/two-step/confirm", false), null);
   assert.equal(signInAgainPath(401, "/auth/two-step/recovery-codes", true), null);
+  assert.equal(signInAgainPath(401, "/auth/reauth", true), null);
 });

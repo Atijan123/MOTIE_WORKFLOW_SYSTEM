@@ -11,6 +11,7 @@ const CHECKS_A_SECRET = [
   "/auth/two-step/set-up",
   "/auth/two-step/confirm",
   "/auth/two-step/recovery-codes",
+  "/auth/reauth", // the password typed again before signing (step 12f)
 ];
 
 /**

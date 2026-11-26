@@ -24,6 +24,7 @@ export type Action = {
   on_behalf_of: string | null;
   requires_comment: boolean;
   requires_applicant_message: boolean;
+  needs_recent_password: boolean; // signing, approving: the password again after 10 minutes (step 12f)
   blocked_by: string[] | null;
   warnings: string[] | null;
 };
@@ -280,3 +281,6 @@ export type SetUpStart = { secret: string; otpauth_uri: string; qr_svg: string }
 export type SetUpDone = LoginAnswer & { recovery_codes: string[] };
 
 export type TwoStepStatus = { set_up: boolean; recovery_codes_left: number };
+
+/** GET /auth/session (step 12f). */
+export type SessionInfo = { ends_at: string; idle_minutes: number | null; password_fresh_until: string };

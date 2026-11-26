@@ -25,7 +25,7 @@ export async function login(_: FormState, data: FormData): Promise<FormState> {
     return failed(error);
   }
   if (answer.next === "done" && answer.access_token) {
-    await startSession(answer.access_token);
+    await startSession(answer.access_token, answer.expires_in ?? 3600);
     redirect(HOME);
   }
   (await cookies()).set(CHALLENGE_COOKIE, answer.challenge ?? "", {
@@ -45,9 +45,9 @@ export async function challenge(): Promise<string> {
   return value;
 }
 
-async function finish(token: string): Promise<void> {
+async function finish(answer: LoginAnswer): Promise<void> {
   (await cookies()).delete({ name: CHALLENGE_COOKIE, path: "/login" });
-  await startSession(token);
+  await startSession(answer.access_token ?? "", answer.expires_in ?? 3600);
 }
 
 /** The second step: a code from the authenticator app, or a recovery code. */
@@ -59,7 +59,7 @@ export async function submitCode(_: FormState, data: FormData): Promise<FormStat
   } catch (error) {
     return failed(error);
   }
-  await finish(answer.access_token ?? "");
+  await finish(answer);
   redirect(HOME);
 }
 
@@ -90,7 +90,7 @@ export async function confirmSetUp(_: SetUpState, data: FormData): Promise<SetUp
   } catch (error) {
     return failed(error);
   }
-  await finish(answer.access_token ?? "");
+  await finish(answer);
   return { recoveryCodes: answer.recovery_codes };
 }
 

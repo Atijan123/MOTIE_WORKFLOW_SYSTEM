@@ -3,7 +3,8 @@ import { notFound } from "next/navigation";
 import { api, apiOrNull } from "@/lib/api";
 import { longDate } from "@/lib/dates";
 import { goods, hsCode } from "@/lib/labels";
-import type { Case, FacilityLetter, HistoryEvent, Requirement } from "@/lib/types";
+import { passwordNeeded } from "@/lib/reauth";
+import type { Case, FacilityLetter, HistoryEvent, Requirement, SessionInfo } from "@/lib/types";
 
 import { Actions } from "./Actions";
 import { DeskChecks } from "./DeskChecks";
@@ -15,10 +16,11 @@ import { Signing } from "./Signing";
 export async function CasePanel({ id }: { id: number }) {
   const kase = await apiOrNull<Case>(`/cases/${id}`);
   if (!kase) notFound();
-  const [letter, documents, history] = await Promise.all([
+  const [letter, documents, history, login] = await Promise.all([
     apiOrNull<FacilityLetter>(`/etls/facility-letters/${id}`),
     api<Requirement[]>(`/cases/${id}/documents`),
     api<HistoryEvent[]>(`/cases/${id}/history`),
+    api<SessionInfo>("/auth/session"),
   ]);
   const step = kase.status.code;
   // Records' tick: whoever may accept the originals (the API checks it again).
@@ -53,7 +55,7 @@ export async function CasePanel({ id }: { id: number }) {
         <Documents caseId={id} requirements={documents} canSeeOriginals={canSeeOriginals} />
         {letter && canVerify ? <DeskChecks caseId={id} letter={letter} documents={documents} /> : null}
         {canSign ? <Signing caseId={id} /> : null}
-        <Actions caseId={id} actions={kase.available_actions} />
+        <Actions caseId={id} actions={kase.available_actions} askPassword={passwordNeeded(kase.available_actions, login)} />
       </section>
       <History events={history} />
     </div>

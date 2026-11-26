@@ -16,6 +16,21 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 12f — Sessions on the server: idle and daily limits for staff; the password again before signing (2026-11-26)
+
+**Built:**
+- **`core.sessions`** (migration 0045): one row per sign-in. The login token now carries its row's id (`sid`), and `get_current_session()` in backend/app/core/identity/deps.py checks the row on every request (`check()` in backend/app/core/identity/sessions.py).
+- **Staff are signed out after 30 minutes without a request** (`STAFF_IDLE_MINUTES`) **and 8 hours after signing in**, however busy (`STAFF_SESSION_HOURS`). Both are `[CONFIRM]`. An idle session is ended for good (`ended_reason = "idle"`, audited as `auth.signed_out_idle`). Applicants keep their 60 minutes and have no idle limit. "Last seen" is written at most once a minute, not on every click.
+- **Signing out ends the session on the server** (`POST /auth/logout`): a copied token stops working too, not only the browser's cookie.
+- **The password again before signing or approving:** a move marked `needs_recent_password` (new column on `core.workflow_transitions`, set for → *signed* on facility letters and → *approved* on ETLS applications) is refused with 403 "…needs your password…" if the password was last typed over 10 minutes ago (`REAUTH_MINUTES`, `[CONFIRM]`). `POST /auth/reauth` takes the password again; wrong ones count towards the lockout. `GET /auth/session` says until when it counts as recent. It's a rule on the move, in the data, like `requires_comment`, so other modules' important moves can use it.
+- **Screens:** when a case's buttons include signing or approving and the password won't still be recent in two minutes, the form shows "Your password, to sign letter" (`passwordNeeded()` in frontend/lib/reauth.ts). `moveCase()` checks the password first, then makes the move. The login cookie now lasts exactly as long as the session (8 hours for staff), and Sign out calls the API.
+- **Tests sign in properly:** the `auth_headers` fixture now creates a real session row (`await auth_headers(user)`), so every existing test goes through the session check.
+- **Fix to step 12e:** my 12e edit of .env.example put the `MFA_SECRET_KEY` block in twice, once in the middle of a comment, leaving the line `MFA_SECRET_KEY=true/false overrides the default.` That is long enough to pass as a real key, and anyone can read it. If you copied .env.example since 12e, check your .env: `MFA_SECRET_KEY` must be empty (development) or your own random key. The cause was a find-and-replace on text that appeared twice; I now check each one matches exactly once.
+- The app may change a session's "last seen", "password checked" and "ended" times, never when it ends (`expires_at`): a bug or an attacker inside the API can't stretch a session.
+
+**Files:** backend/alembic/versions/0045_sessions.py; backend/app/core/identity/sessions.py (new), deps.py, router.py, security.py, schemas.py, models.py (`LoginSession`); backend/app/core/workflow/service.py (`change_status(password_recent=…)`), router.py, models.py, schemas.py, errors.py; backend/app/core/config.py; backend/tests/core/test_sessions.py (new), conftest.py and the tests that made tokens by hand; frontend/lib/reauth.ts (+ test), session.ts, auth-redirect.ts, types.ts; frontend/components/staff/Actions.tsx, CasePanel.tsx; frontend/app/staff/actions.ts, login/actions.ts.
+**Try it:** sign in at http://localhost:3002 as `director@motie.test`, wait 10 minutes (or set `REAUTH_MINUTES=1` in `.env` and restart the API), open a verified letter: the Sign form asks for your password. Sign out, then try the old token: `curl -H "Authorization: Bearer <token>" ...` gives 401. Tests: `docker compose run --rm tools pytest tests/core/test_sessions.py -v`.
+
 ### Step 12e — Two-step sign-in for all staff: an authenticator app, plus recovery codes (2026-11-26)
 
 **Built:**
@@ -28,6 +43,7 @@ Newest first. Each entry: what was built, the files involved, how to run and tes
 - **Lost phone and codes:** `docker compose run --rm tools python -m app.core.identity.cli reset-two-step --email them@...` removes their authenticator (as the schema owner); their next sign-in sets up a new one. Check who's asking, in person.
 - **Dev and demo:** every seeded staff account has an authenticator already set up with the published key `MOTIEDEVTOTPSECRETDEVONLY234567A` (`DEV_TOTP_SECRET` in backend/app/dev_seed.py), except `firstlogin@motie.test`, which shows the set-up screen. Add that key to an authenticator app once, or print the current code with `docker compose run --rm tools python -m app.dev_totp`. The demo seed and the walk-throughs work out the codes themselves (`totpCode()` in frontend/e2e/tests/helpers.ts).
 - **Fixed on the way:** `core.login_attempts.attempted_at` is now set from the clock in `record()`. The database's `now()` is the time the *transaction* began, so several attempts in one transaction had the same time and the lockout misjudged which came after the last success.
+- **Fix (same day):** in CI, the set-up walk-through never saw the recovery codes. Saving the session cookie in a server action makes Next.js re-render the page, and the first version of /login/set-up asked the API for a new secret *as it rendered*, using the challenge cookie that had just been deleted: so it redirected away. Now the page does nothing itself; a "Show my QR code" button starts the set-up (`startSetUp()` in frontend/app/login/actions.ts). Lesson: a page shouldn't change anything just by being shown. (This note went into the step 12f commit; the fix itself is commit e34c11a.)
 
 **Files:** backend/app/core/identity/totp.py, two_step.py (new); router.py, security.py, schemas.py, models.py, login_guard.py, cli.py; backend/alembic/versions/0044_two_step_login.py; backend/app/core/config.py; backend/app/dev_seed.py, dev_totp.py (new), demo_seed.py; backend/requirements.txt; backend/tests/core/test_two_step.py (new), support.py (`sign_in_staff()`), conftest.py, test_auth.py, test_dev_seed.py, test_demo_seed.py; frontend/app/login/actions.ts, code/page.staff.tsx, set-up/ (new); frontend/app/staff/security/ (new), layout.staff.tsx; frontend/lib/auth-redirect.ts (+ test), types.ts; frontend/app/globals.css; frontend/e2e/tests/helpers.ts, two-step.spec.ts (new); docker-compose.yml; .env.example; CLAUDE.md.
 **Try it:** after `bash scripts/reset-dev.sh --yes`, open http://localhost:3002 and sign in as `firstlogin@motie.test`: scan the QR code with your phone's authenticator app, type its code, and see the recovery codes. Then sign in as `desk@motie.test` with the code from `docker compose run --rm tools python -m app.dev_totp`. Tests: `docker compose run --rm tools pytest tests/core/test_two_step.py -v`; `docker compose run --rm e2e npx playwright test tests/two-step.spec.ts`.
@@ -1814,6 +1830,13 @@ The API can't see the browser: the browser talks to a Next.js server, which call
 **Here:** backend/app/core/identity/totp.py (`code_at()`, `matching_step()`); backend/app/core/identity/two_step.py; the challenge in backend/app/core/identity/security.py; the screens in frontend/app/login/code/ and set-up/.
 **Learn more:** [RFC 6238 (TOTP)](https://datatracker.ietf.org/doc/html/rfc6238) and [OWASP Multifactor Authentication Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Multifactor_Authentication_Cheat_Sheet.html)
 
+### Server-side sessions, idle timeouts and asking for the password again
+**What:** a signed token (JWT, step 2c) can't be taken back: it works until it expires, even after "Sign out", even if someone copied it. Keeping a row per session on the server fixes that: the token only says *which* session, and the server decides on every request whether that session is still good. That makes three controls possible. **Idle timeout**: a staff PC left unlocked at lunch signs itself out. **Absolute timeout**: even a busy session ends after a working day, so a stolen one doesn't last for ever. **Re-authentication** (sometimes called "sudo mode"): the most important actions ask for the password again if it wasn't typed recently, so someone at an unlocked desk can't sign a letter in the owner's name.
+**Stops:** someone using a PC left signed in (after 30 minutes; and, for signing, after 10); a stolen token after its owner signs out; a session that stays alive for days; a stolen session (without the password) being used to sign or approve.
+**Doesn't stop:** someone at the desk within the 30 idle minutes doing anything except signing or approving; someone who also knows the password; malware on the PC that waits for the owner to type their password. Teach staff to lock their screen (Windows key + L) when they get up.
+**Here:** `check()`, `start()`, `end()`, `password_is_fresh()` in backend/app/core/identity/sessions.py; `get_current_session()` in backend/app/core/identity/deps.py; `needs_recent_password` in `change_status()` (backend/app/core/workflow/service.py); `POST /auth/reauth` in backend/app/core/identity/router.py.
+**Learn more:** [OWASP Session Management Cheat Sheet: Session expiration](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html#session-expiration)
+
 ## 3. Decisions
 
 ### Confirmed by the Ministry
@@ -1840,6 +1863,13 @@ These were open questions; the Ministry has answered them. The code follows them
 
 | Date | Decision | Alternatives considered | Why |
 | --- | --- | --- | --- |
+| 2026-11-26 | Sessions as rows, named by the token (`sid`); the JWT stays | opaque random tokens only; JWTs with a deny-list | Keeps the signature check (a forged token is refused before any database work) and adds what a JWT can't do: sign out, idle limits. A deny-list would have to remember every signed-out token. |
+| 2026-11-26 | "Last seen" written at most once a minute | on every request | A write per click is wasted work; a minute is nothing against a 30-minute limit. |
+| 2026-11-26 | Which moves need a recent password is a column on the move (`needs_recent_password`) | a list of status codes in the code | "Workflows are data" (CLAUDE.md). A new module can mark its own important moves without touching the engine. |
+| 2026-11-26 | The re-check is a separate call (`/auth/reauth`) made by the form just before the move | send the password with the move | The workflow API stays about workflows; the password never travels in a case's request body or its logs. |
+| 2026-11-26 | Ask a little early (2 minutes before the password stops being recent) | ask only when it has expired | A page may stay open a while before the click; otherwise the Sign button could fail with "needs your password" on a page that showed no field. If it still happens, the error says why and the reloaded form shows the field. |
+| 2026-11-26 | The app can't change when a session ends | let it (simpler code) | A bug or an attacker inside the API then can't keep a session alive past its 8 hours. Tests create already-old sessions instead. |
+| 2026-11-26 | Applicants: no idle limit, 60 minutes as before | the staff rules for everyone | You asked for staff. An applicant filling in a long form shouldn't lose it after 30 minutes. |
 | 2026-11-26 | TOTP written by hand (about 40 lines) | `pyotp` | It's short, the RFC's test values check it, and you can read every line. One library fewer to keep updated. |
 | 2026-11-26 | The second step uses a short-lived signed "challenge" token, not a server-side half-session | a row in a sessions table per half-finished login | Nothing to clean up, and it works before step 12f adds server-side sessions. It allows only the second step, for 5 minutes, through the same app, and the lockout still applies. |
 | 2026-11-26 | Authenticator secrets encrypted with `MFA_SECRET_KEY` (Fernet) | stored as they are; derived from `JWT_SECRET` | A database backup alone then can't make codes. A separate key, because `JWT_SECRET` should be easy to rotate after an incident, and rotating it must not undo everyone's set-up. |
@@ -2297,9 +2327,21 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 - [ ] **Two-step sign-in (step 12e):** do all staff have a smartphone for an authenticator app? Which app should the ICT unit recommend (Microsoft Authenticator, Google Authenticator, Aegis)? Who may reset someone's two-step sign-in (`reset-two-step`), and how do they check it's really them? Should applicants be offered two-step sign-in too?
 - [ ] **Keeping `MFA_SECRET_KEY` (ICT):** where is it kept, apart from the server's `.env`? If it's lost, every staff member must set up their authenticator again (`reset-two-step` for each). It must not be stored in the same place as the database backups.
 
+- [ ] **Session times (step 12f):** are 30 minutes idle and 8 hours in all right for staff? Is 10 minutes right before signing or approving asks for the password again? `[CONFIRM]` all three (`STAFF_IDLE_MINUTES`, `STAFF_SESSION_HOURS`, `REAUTH_MINUTES`). Which other actions should ask for the password again (cancelling a signed letter, changing the signatories list, recording someone's absence)?
+
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 12f
+1. A staff member signs out, but someone had copied their token from the browser first. Before step 12f the token still worked. Why doesn't it now?
+2. The Director signed in 15 minutes ago and presses "Sign letter". What happens, and which column on which table decides that this move needs the password?
+3. Why may the app change `last_seen_at` but not `expires_at`?
+
+#### Show answers
+1. The token only names a session (`sid`). Signing out sets `ended_at` on that row, and `check()` in backend/app/core/identity/sessions.py refuses an ended session on every request. The token's signature is still valid, but its session is over.
+2. Their password was typed over 10 minutes ago, so the form shows a password field; `moveCase()` sends it to `/auth/reauth` first, then makes the move. Without it the API answers 403 "needs your password". The rule is `needs_recent_password` on `core.workflow_transitions`, set by migration 0045 for moves to *signed* (and *approved*).
+3. "Last seen" must move forward with each request, or nobody could stay signed in. The end of the session must not: if the API could change it, a bug or an attacker inside the API could keep a session alive past its 8 hours.
 
 ### Step 12e
 1. Someone phishes a staff member's password and signs in with it. What do they get from `/auth/login`, and why can't they use it on `/auth/me`?

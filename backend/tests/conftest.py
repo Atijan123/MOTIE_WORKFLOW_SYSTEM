@@ -34,7 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from app.core.config import DEV_REGISTRY_REFERENCE, settings
-from app.core.identity.security import create_access_token
+from app.core.identity import sessions
 from app.core.identity.service import assign_position, create_user
 from app.db.session import get_session
 from app.main import app
@@ -228,12 +228,15 @@ def make_user(db_session):
 
 
 @pytest.fixture
-def auth_headers():
-    """Headers that log a request in as `user`: `client.get(..., headers=auth_headers(user))`.
-    They come through the user's own front end: the staff app for staff."""
+def auth_headers(db_session):
+    """Headers that log a request in as `user`: `headers=await auth_headers(user)`.
+    A fresh session on the server, as if they had just signed in (password
+    just typed), through the user's own front end: the staff app for staff.
+    `session=`: create the session row there instead (a test that commits)."""
 
-    def _headers(user) -> dict[str, str]:
-        return {"Authorization": f"Bearer {create_access_token(user.id)}", **portal_headers(user.portal)}
+    async def _headers(user, session=None) -> dict[str, str]:
+        token, _ = await sessions.start(session or db_session, user, user.portal)
+        return {"Authorization": f"Bearer {token}", **portal_headers(user.portal)}
 
     return _headers
 
@@ -265,7 +268,7 @@ def act(client, auth_headers):
     """Shortcut: `await act(user, "post", "/cases/1/status", json=...)`."""
 
     async def _act(user, method, url, headers_extra=None, **kwargs):
-        headers = {**auth_headers(user), **(headers_extra or {})}
+        headers = {**(await auth_headers(user)), **(headers_extra or {})}
         return await getattr(client, method)(url, headers=headers, **kwargs)
 
     return _act

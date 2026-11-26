@@ -10,6 +10,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit.service import record_event
+from app.core.config import settings
 from app.core.documents.models import IssuedDocument
 from app.core.identity.models import User
 from app.core.workflow.delegation import active_delegations_to, is_delegated_away, today
@@ -30,6 +31,7 @@ from app.core.workflow.errors import (  # noqa: F401  (re-exported: callers use 
     NotFound,
     NotPermitted,
     NotReady,
+    PasswordCheckNeeded,
     TransitionNotAllowed,
     UnsupportedFileType,
     UploadTooLarge,
@@ -372,10 +374,13 @@ async def change_status(
     actor: User,
     comment: str | None = None,
     applicant_message: str | None = None,
+    password_recent: bool = False,
 ) -> Case:
     """Move a case. `comment` is the internal minute (staff only);
     `applicant_message` is what the applicant is told, on moves that send one
-    (a return, a rejection)."""
+    (a return, a rejection). `password_recent`: the actor typed their password
+    within REAUTH_MINUTES, which moves marked `needs_recent_password` need.
+    False unless the caller knows: then those moves are refused."""
     case = await get_case(session, case_id, actor, for_update=True)
     from_status = case.current_status
 
@@ -404,6 +409,13 @@ async def change_status(
         raise NotPermitted("None of your positions can make this move.")
     chosen = permitted[0]
     move, delegation, succession, signatory = chosen
+    # Checked after permission (someone who may not act gets 403 for that),
+    # before anything else: a stolen, unlocked session can't sign a letter.
+    if move.needs_recent_password and not password_recent:
+        raise PasswordCheckNeeded(
+            f"'{move.name}' needs your password: type it again to confirm it's you "
+            f"(it was last typed more than {settings.reauth_minutes} minutes ago)."
+        )
     # Checked after permission, so someone who may not act at all gets 403, not
     # a peek at why the case is held. A few moves (rejecting) may be made
     # while on hold; they resolve the flags below.

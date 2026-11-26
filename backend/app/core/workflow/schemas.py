@@ -38,6 +38,9 @@ class ActionOut(BaseModel):
     requires_comment: bool
     # The move needs a message to the applicant (a return or a rejection).
     requires_applicant_message: bool = False
+    # The move asks for the password again if it wasn't typed recently
+    # (signing, approving: step 12f). GET /auth/session says until when it counts.
+    needs_recent_password: bool = False
     # Why the button is disabled right now, e.g. ["Invoice is missing"]; empty
     # when it can be pressed. Null where it isn't worked out (queues, for speed).
     blocked_by: list[str] | None = None

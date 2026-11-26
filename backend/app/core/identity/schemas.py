@@ -1,6 +1,7 @@
 """Shapes of request and response bodies. Kept separate from the table classes
 so we never accidentally send a column like password_hash to the client."""
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -73,3 +74,13 @@ class UserOut(BaseModel):
     roles: list[str]
     positions: list[str]  # position codes, e.g. ["director_of_trade"]
     position_titles: list[str]  # the same posts' titles, in the same order, for the screen's header
+
+
+class PasswordRequest(BaseModel):
+    password: str = Field(max_length=1000)
+
+
+class SessionOut(BaseModel):
+    ends_at: datetime  # signed out then, whatever (staff: 8 hours after signing in)
+    idle_minutes: int | None  # signed out after this long without a request (staff only)
+    password_fresh_until: datetime  # signing or approving asks for the password again after this

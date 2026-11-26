@@ -42,8 +42,14 @@ async def committing_act(committing_engine, auth_headers):
     app.dependency_overrides[get_session] = own_session
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
 
+        tokens = {}
+
         async def _act(user, method, url, headers_extra=None, **kwargs):
-            headers = {**auth_headers(user), **(headers_extra or {})}
+            if user.id not in tokens:
+                # Committed, so the other connections can see the session.
+                async with AsyncSession(committing_engine, expire_on_commit=False) as own:
+                    tokens[user.id] = await auth_headers(user, session=own)
+            headers = {**tokens[user.id], **(headers_extra or {})}
             return await getattr(client, method)(url, headers=headers, **kwargs)
 
         yield _act

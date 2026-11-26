@@ -9,6 +9,10 @@ class WorkflowError(Exception):
     """Base class; the API turns each subclass into an HTTP status (see router.py)."""
 
 
+class PasswordCheckNeeded(WorkflowError):
+    """The move needs the password typed recently (needs_recent_password, step 12f)."""
+
+
 class NotFound(WorkflowError):
     pass
 

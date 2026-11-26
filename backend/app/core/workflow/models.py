@@ -119,6 +119,9 @@ class WorkflowTransition(Base):
     name: Mapped[str] = mapped_column(Text)
     # The move needs a written reason (the comment), e.g. cancelling a signed letter (0022).
     requires_comment: Mapped[bool] = mapped_column(Boolean, server_default=false())
+    # The move asks for the password again if it was last checked more than
+    # REAUTH_MINUTES ago: signing a letter, approving an application (0045).
+    needs_recent_password: Mapped[bool] = mapped_column(Boolean, server_default=false())
     # How the applicant's timeline describes this move (0023): its own wording,
     # or the new status's label when empty; hidden entirely when not visible.
     applicant_event: Mapped[str | None] = mapped_column(Text)

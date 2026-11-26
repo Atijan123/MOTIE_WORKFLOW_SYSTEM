@@ -14,24 +14,26 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.identity import login_guard, password_links, two_step
+from app.core.identity import login_guard, password_links, sessions, two_step
 from app.core.identity.channel import OUTSIDE_NETWORK_MESSAGE, Channel, came_through, staff_ip_allowed
-from app.core.identity.deps import get_channel, get_current_user
-from app.core.identity.models import User
+from app.core.identity.deps import get_channel, get_current_session, get_current_user
+from app.core.identity.models import LoginSession, User
 from app.core.identity.schemas import (
     ChallengeCodeRequest,
     ChallengeRequest,
     CodeRequest,
     LoginRequest,
     LoginResponse,
+    PasswordRequest,
     RecoveryCodesOut,
     SetPasswordRequest,
     SetUpDone,
+    SessionOut,
     SetUpStart,
     TwoStepStatus,
     UserOut,
 )
-from app.core.identity.security import create_access_token, create_challenge_token, decode_challenge_token
+from app.core.identity.security import create_challenge_token, decode_challenge_token
 from app.core.identity.service import WeakPassword, authenticate
 from app.db.session import get_session
 
@@ -58,8 +60,9 @@ async def _refuse_if_locked(session: AsyncSession, email: str, channel: Channel)
         )
 
 
-def _signed_in(user: User) -> dict:
-    return {"next": "done", "access_token": create_access_token(user.id), "expires_in": settings.access_token_minutes * 60}
+async def _signed_in(session: AsyncSession, user: User, channel: Channel) -> dict:
+    token, seconds = await sessions.start(session, user, channel.portal)
+    return {"next": "done", "access_token": token, "expires_in": seconds}
 
 
 @router.post("/login", response_model=LoginResponse)
@@ -94,7 +97,7 @@ async def login(
 
     if not user.is_staff:
         await login_guard.record(session, email=body.email, channel=channel, outcome="success", user=user)
-        return _signed_in(user)
+        return await _signed_in(session, user, channel)
 
     # Staff: the password alone is not enough (step 12e).
     try:
@@ -135,7 +138,7 @@ async def login_with_code(
     if not await two_step.verify_code(session, user, body.code):
         raise await _code_failed(session, user, channel)
     await login_guard.record(session, email=user.email, channel=channel, outcome="success", user=user)
-    return _signed_in(user)
+    return await _signed_in(session, user, channel)
 
 
 @router.post("/login/recovery-code", response_model=LoginResponse)
@@ -146,7 +149,7 @@ async def login_with_recovery_code(
     if not await two_step.use_recovery_code(session, user, body.code):
         raise await _code_failed(session, user, channel)
     await login_guard.record(session, email=user.email, channel=channel, outcome="success", user=user)
-    return _signed_in(user)
+    return await _signed_in(session, user, channel)
 
 
 @router.post("/two-step/set-up", response_model=SetUpStart)
@@ -174,7 +177,7 @@ async def confirm_set_up(
     if codes is None:
         raise await _code_failed(session, user, channel)
     await login_guard.record(session, email=user.email, channel=channel, outcome="success", user=user)
-    return {**_signed_in(user), "recovery_codes": codes}
+    return {**(await _signed_in(session, user, channel)), "recovery_codes": codes}
 
 
 @router.get("/two-step", response_model=TwoStepStatus)
@@ -200,6 +203,53 @@ async def replace_recovery_codes(
     if not await two_step.verify_code(session, user, body.code):
         raise await _code_failed(session, user, channel)
     return RecoveryCodesOut(recovery_codes=await two_step.new_recovery_codes(session, user))
+
+
+def _session_out(login: LoginSession, user: User) -> SessionOut:
+    idle = sessions.idle_limit(user)
+    return SessionOut(
+        ends_at=login.expires_at,
+        idle_minutes=int(idle.total_seconds() // 60) if idle else None,
+        password_fresh_until=sessions.password_fresh_until(login),
+    )
+
+
+@router.get("/session", response_model=SessionOut)
+async def current_session(
+    login: LoginSession = Depends(get_current_session), user: User = Depends(get_current_user)
+):
+    """When this session ends, and until when the password counts as recent (step 12f)."""
+    return _session_out(login, user)
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout(
+    login: LoginSession = Depends(get_current_session),
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Ends the session on the server: the token stops working at once, even
+    if someone copied it."""
+    await sessions.end(session, login, user)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/reauth", response_model=SessionOut)
+async def recheck_password(
+    body: PasswordRequest,
+    channel: Channel = Depends(get_channel),
+    login: LoginSession = Depends(get_current_session),
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Type the password again before signing or approving (step 12f). Wrong
+    passwords count towards the lockout, as at sign-in."""
+    await _refuse_if_locked(session, user.email, channel)
+    if await authenticate(session, user.email, body.password) is None:
+        await login_guard.record(session, email=user.email, channel=channel, outcome="bad_password", user=user)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="That password isn't right.")
+    await sessions.password_checked(session, login, user)
+    return _session_out(login, user)
 
 
 @router.get("/me", response_model=UserOut)
