@@ -5,7 +5,7 @@
 #
 #   restore-inside.sh /restore/<date_time>            a daily backup folder
 #   restore-inside.sh /restore/motie-<date>.tar.age   a weekly encrypted archive
-#                                                     (needs the private key at /keys/restore.key)
+#                                                     (needs the private key at /restore-key/offsite.key)
 #   restore-inside.sh --check <either>                only decrypt and check the
 #                                                     checksums; change nothing
 set -euo pipefail
@@ -21,9 +21,9 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
 if [[ "$source" == *.tar.age ]]; then
-    [ -f /keys/restore.key ] || fail "an encrypted archive needs the off-site private key (scripts/restore.sh --key)."
+    [ -f /restore-key/offsite.key ] || fail "an encrypted archive needs the off-site private key (scripts/restore.sh --key)."
     log "Decrypting $(basename "$source")"
-    age --decrypt --identity /keys/restore.key "$source" | tar --extract --directory "$work"
+    age --decrypt --identity /restore-key/offsite.key "$source" | tar --extract --directory "$work"
     folder="$(find "$work" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
 else
     folder="$source"

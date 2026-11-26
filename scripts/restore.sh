@@ -45,7 +45,8 @@ source_dir="$(cd "$(dirname "$source")" && pwd)"; source_name="$(basename "$sour
 mounts=(-v "$(host_path "$source_dir"):/restore:ro")
 if [ -n "$key" ]; then
     key_dir="$(cd "$(dirname "$key")" && pwd)"
-    mounts+=(-v "$(host_path "$key_dir/$(basename "$key")"):/keys/restore.key:ro")
+    # Its own mount point: /keys is the (read-only) public key folder.
+    mounts+=(-v "$(host_path "$key_dir/$(basename "$key")"):/restore-key/offsite.key:ro")
 fi
 
 echo "This REPLACES the database '$db' and every uploaded document with: $source_name"

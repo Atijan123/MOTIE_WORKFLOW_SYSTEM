@@ -53,9 +53,10 @@ test("Records enters a walk-in application and submits it", async ({ browser }) 
   await desk.getByRole("link", { name: shortRef, exact: true }).click();
   await desk.getByLabel("HS code").fill("6810.11");
   await desk.getByRole("button", { name: "Confirm code" }).click();
-  // Wait for the answer: the checks to tick appear only after it.
-  await expect(desk.getByText("Confirmed: 6810.11.")).toBeVisible();
+  // Wait for the answer: the checks to tick appear only after it. (Its wording
+  // differs when the applicant gave no code, so wait for the checks themselves.)
   const tick = desk.getByRole("button", { name: "Mark as checked" });
+  await expect(tick.first()).toBeVisible();
   while ((await tick.count()) > 0) {
     const before = await tick.count();
     await tick.first().click();
