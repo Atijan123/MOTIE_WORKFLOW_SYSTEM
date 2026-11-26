@@ -14,6 +14,7 @@ test("the first sign-in sets up an authenticator; a recovery code signs in once"
   await page.getByRole("button", { name: "Log in" }).click();
 
   await expect(page).toHaveURL(/\/login\/set-up/);
+  await page.getByRole("button", { name: "Show my QR code" }).click();
   await expect(page.getByRole("img", { name: "QR code for your authenticator app" })).toBeVisible();
   // What a person would type into the app instead of scanning.
   const key = (await page.locator(".setup-key").innerText()).replace(/\s/g, "");

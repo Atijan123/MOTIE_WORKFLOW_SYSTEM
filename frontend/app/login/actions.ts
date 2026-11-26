@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { api, ApiError } from "@/lib/api";
 import { failed, text, type FormState } from "@/lib/forms";
 import { endSession, HOME, startSession } from "@/lib/session";
-import type { LoginAnswer, SetUpDone } from "@/lib/types";
+import type { LoginAnswer, SetUpDone, SetUpStart } from "@/lib/types";
 
 // Between the password and the code (step 12e), the API's challenge waits in
 // this cookie: httpOnly (page scripts can't read it), for 5 minutes only.
@@ -61,6 +61,20 @@ export async function submitCode(_: FormState, data: FormData): Promise<FormStat
   }
   await finish(answer.access_token ?? "");
   redirect(HOME);
+}
+
+export type StartState = FormState & { secret?: string; qrSvg?: string; alreadySetUp?: boolean };
+
+/** A new authenticator secret, as a QR code and as text (the first staff sign-in). */
+export async function startSetUp(_: StartState): Promise<StartState> {
+  try {
+    const start = await api<SetUpStart>("/auth/two-step/set-up", { method: "POST", json: { challenge: await challenge() } });
+    return { secret: start.secret, qrSvg: start.qr_svg };
+  } catch (error) {
+    // Already set up (e.g. in another tab): ask for the code instead.
+    if (error instanceof ApiError && error.status === 409) return { alreadySetUp: true };
+    return failed(error);
+  }
 }
 
 export type SetUpState = FormState & { recoveryCodes?: string[] };
