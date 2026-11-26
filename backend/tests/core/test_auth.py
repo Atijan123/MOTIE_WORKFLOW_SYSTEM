@@ -6,21 +6,17 @@ from fastapi import HTTPException
 
 from app.core.config import settings
 from app.core.identity.deps import require_role
-from tests.support import TEST_PASSWORD, portal_headers
+from tests.support import TEST_PASSWORD, portal_headers, sign_in_staff
 
 pytestmark = pytest.mark.anyio
 
 
 async def test_login_returns_a_token_that_works_on_me(client, make_user):
+    """Staff sign in in two steps (tests/core/test_two_step.py); here, once signed in."""
     user = await make_user(
         "director", "officer", email="dir@test.gm", positions=["director_of_trade"]
     )
-
-    login = await client.post(
-        "/auth/login", json={"email": "DIR@test.gm", "password": TEST_PASSWORD}, headers=portal_headers("staff")
-    )
-    assert login.status_code == 200
-    token = login.json()["access_token"]
+    token = await sign_in_staff(client, user)
 
     me = await client.get("/auth/me", headers={"Authorization": f"Bearer {token}", **portal_headers("staff")})
     assert me.status_code == 200

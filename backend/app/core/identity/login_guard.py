@@ -29,6 +29,11 @@ from app.core.identity.models import LoginAttempt, User
 # if it didn't count, five tries without a lock would reveal it was right.
 FAILURES = ("bad_password", "wrong_portal", "bad_code")
 SUCCESS = "success"
+# Staff only: the password was right, the second step comes next. Neither a
+# failure nor a success: it doesn't reset the failure count, or someone with
+# the password could keep resetting it while guessing codes.
+PASSWORD_OK = "password_ok"
+_ACTIONS = {SUCCESS: "auth.login_succeeded", PASSWORD_OK: "auth.password_accepted"}
 
 
 class LoginRefused(Exception):
@@ -102,12 +107,22 @@ async def record(
     straight after, so nothing else would commit them)."""
     email = _clean_email(email)
     session.add(
-        LoginAttempt(email=email, client_ip=channel.client_ip, portal=channel.portal, outcome=outcome, user_id=user.id if user else None)
+        LoginAttempt(
+            # The clock now, not the database's now(): that is when the
+            # transaction began, the same for every row written in it, and the
+            # lockout compares these times to the last success.
+            attempted_at=_now(),
+            email=email,
+            client_ip=channel.client_ip,
+            portal=channel.portal,
+            outcome=outcome,
+            user_id=user.id if user else None,
+        )
     )
     record_event(
         session,
-        actor=user if outcome == SUCCESS else None,
-        action="auth.login_succeeded" if outcome == SUCCESS else "auth.login_failed",
+        actor=user if outcome in (SUCCESS, PASSWORD_OK) else None,
+        action=_ACTIONS.get(outcome, "auth.login_failed"),
         # An unknown email has no user row: the audit row is then about the email typed.
         entity_type="user" if user else "login",
         entity_id=user.id if user else email,

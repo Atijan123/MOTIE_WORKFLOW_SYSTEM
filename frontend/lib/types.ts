@@ -266,3 +266,17 @@ export type HistoricalPage = {
   certificates: string[];
   checks: DataCheck[];
 };
+
+/** /auth/login's answer (step 12e): applicants are done; staff get a challenge for the second step. */
+export type LoginAnswer = {
+  next: "done" | "code" | "set_up";
+  access_token: string | null;
+  expires_in: number | null;
+  challenge: string | null;
+};
+
+export type SetUpStart = { secret: string; otpauth_uri: string; qr_svg: string };
+
+export type SetUpDone = LoginAnswer & { recovery_codes: string[] };
+
+export type TwoStepStatus = { set_up: boolean; recovery_codes_left: number };

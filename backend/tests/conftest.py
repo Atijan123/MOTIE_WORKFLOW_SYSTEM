@@ -120,6 +120,8 @@ def portal_keys(monkeypatch):
     monkeypatch.setattr(settings, "applicant_portal_key", TEST_PORTAL_KEYS["applicant"])
     monkeypatch.setattr(settings, "staff_portal_hosts", "")
     monkeypatch.setattr(settings, "applicant_portal_hosts", "")
+    # Encrypts authenticator secrets (step 12e).
+    monkeypatch.setattr(settings, "mfa_secret_key", "test-mfa-secret-key-0123456789abcdefgh")
     # Off, as in development; tests/core/test_ip_allowlist.py turns it on.
     monkeypatch.setattr(settings, "staff_ip_allowlist_enabled", False)
     monkeypatch.setattr(settings, "staff_ip_allowlist", "")

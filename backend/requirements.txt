@@ -8,3 +8,7 @@ pwdlib[argon2]==0.2.1
 PyJWT==2.10.1
 fpdf2==2.8.9
 openpyxl==3.1.5
+# Step 12e (you approved them): QR codes for setting up an authenticator app, as SVG
+# (pure Python, no image libraries); encryption of the authenticator secrets.
+qrcode==8.0
+cryptography==44.0.0

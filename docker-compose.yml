@@ -6,6 +6,8 @@ x-portal-keys: &portal-keys
   APPLICANT_PORTAL_KEY: ${APPLICANT_PORTAL_KEY:-dev-applicant-portal-key-not-a-secret-00}
   STAFF_PORTAL_HOSTS: ${STAFF_PORTAL_HOSTS:-}
   APPLICANT_PORTAL_HOSTS: ${APPLICANT_PORTAL_HOSTS:-}
+  # Encrypts staff authenticator secrets (step 12e). The same "dev-" rule.
+  MFA_SECRET_KEY: ${MFA_SECRET_KEY:-dev-mfa-secret-key-not-a-secret-000000}
 
 services:
   db:

@@ -1,20 +1,68 @@
+"""Signing in and out.
+
+Applicants: POST /auth/login with email and password -> a token.
+Staff (step 12e): POST /auth/login -> a challenge, then one of
+    POST /auth/login/code            the code from their authenticator app
+    POST /auth/login/recovery-code   a one-time recovery code
+    POST /auth/two-step/set-up, then /auth/two-step/confirm   (the first time)
+-> a token. Every step checks the network (12c) and the lockout (12d) again,
+and every try is recorded.
+"""
+
+import jwt
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.identity import login_guard, password_links
+from app.core.identity import login_guard, password_links, two_step
 from app.core.identity.channel import OUTSIDE_NETWORK_MESSAGE, Channel, came_through, staff_ip_allowed
 from app.core.identity.deps import get_channel, get_current_user
 from app.core.identity.models import User
-from app.core.identity.schemas import LoginRequest, SetPasswordRequest, TokenResponse, UserOut
-from app.core.identity.security import create_access_token
+from app.core.identity.schemas import (
+    ChallengeCodeRequest,
+    ChallengeRequest,
+    CodeRequest,
+    LoginRequest,
+    LoginResponse,
+    RecoveryCodesOut,
+    SetPasswordRequest,
+    SetUpDone,
+    SetUpStart,
+    TwoStepStatus,
+    UserOut,
+)
+from app.core.identity.security import create_access_token, create_challenge_token, decode_challenge_token
 from app.core.identity.service import WeakPassword, authenticate
 from app.db.session import get_session
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+BAD_CODE = "That code didn't work. Check that your phone's clock is right, and use the newest code."
+CHALLENGE_ENDED = "Your sign-in took too long or has ended. Please start again."
 
-@router.post("/login", response_model=TokenResponse)
+
+def _refuse_outside(channel: Channel) -> None:
+    if channel.portal == "staff" and not staff_ip_allowed(channel):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=OUTSIDE_NETWORK_MESSAGE)
+
+
+async def _refuse_if_locked(session: AsyncSession, email: str, channel: Channel) -> None:
+    try:
+        await login_guard.check(session, email, channel)
+    except login_guard.LoginRefused as refused:
+        await login_guard.record(session, email=email, channel=channel, outcome="refused")
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=refused.message,
+            headers={"Retry-After": str(refused.minutes * 60)},
+        )
+
+
+def _signed_in(user: User) -> dict:
+    return {"next": "done", "access_token": create_access_token(user.id), "expires_in": settings.access_token_minutes * 60}
+
+
+@router.post("/login", response_model=LoginResponse)
 async def login(
     body: LoginRequest,
     channel: Channel = Depends(get_channel),
@@ -24,18 +72,10 @@ async def login(
     # at the password at all, so it can't be used to guess passwords (step 12c).
     if channel.portal == "staff" and not staff_ip_allowed(channel):
         await login_guard.record(session, email=body.email, channel=channel, outcome="outside_network")
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=OUTSIDE_NETWORK_MESSAGE)
+        _refuse_outside(channel)
     # Locked account or too many tries from this IP: refuse before the
     # password is checked, so a locked account can't be guessed at (step 12d).
-    try:
-        await login_guard.check(session, body.email, channel)
-    except login_guard.LoginRefused as refused:
-        await login_guard.record(session, email=body.email, channel=channel, outcome="refused")
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=refused.message,
-            headers={"Retry-After": str(refused.minutes * 60)},
-        )
+    await _refuse_if_locked(session, body.email, channel)
     user = await authenticate(session, body.email, body.password)
     # A staff account through the applicant portal (or the reverse) gets the
     # same answer as a wrong password: a phished or guessed staff password is
@@ -50,14 +90,116 @@ async def login(
     if user is None:
         # One message for every failure (unknown email, wrong password,
         # deactivated account), so it reveals nothing.
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect email or password"
-        )
-    await login_guard.record(session, email=body.email, channel=channel, outcome="success", user=user)
-    return TokenResponse(
-        access_token=create_access_token(user.id),
-        expires_in=settings.access_token_minutes * 60,
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect email or password")
+
+    if not user.is_staff:
+        await login_guard.record(session, email=body.email, channel=channel, outcome="success", user=user)
+        return _signed_in(user)
+
+    # Staff: the password alone is not enough (step 12e).
+    try:
+        enrolled = await two_step.is_enrolled(session, user)
+        two_step.ensure_available()
+    except two_step.TwoStepUnavailable as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
+    await login_guard.record(session, email=body.email, channel=channel, outcome=login_guard.PASSWORD_OK, user=user)
+    return {"next": "code" if enrolled else "set_up", "challenge": create_challenge_token(user.id, channel.portal)}
+
+
+async def _challenged_user(session: AsyncSession, challenge: str, channel: Channel) -> User:
+    """The staff member a challenge token is for, if it's still good, through
+    the same app, from the right network, and their account isn't locked."""
+    _refuse_outside(channel)
+    try:
+        user_id = decode_challenge_token(challenge, channel.portal)
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=CHALLENGE_ENDED)
+    user = await session.get(User, user_id)
+    if user is None or not user.is_active or not came_through(channel, user.portal):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=CHALLENGE_ENDED)
+    # Wrong codes count towards the same lock as wrong passwords.
+    await _refuse_if_locked(session, user.email, channel)
+    return user
+
+
+async def _code_failed(session: AsyncSession, user: User, channel: Channel) -> HTTPException:
+    await login_guard.record(session, email=user.email, channel=channel, outcome="bad_code", user=user)
+    return HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=BAD_CODE)
+
+
+@router.post("/login/code", response_model=LoginResponse)
+async def login_with_code(
+    body: ChallengeCodeRequest, channel: Channel = Depends(get_channel), session: AsyncSession = Depends(get_session)
+):
+    user = await _challenged_user(session, body.challenge, channel)
+    if not await two_step.verify_code(session, user, body.code):
+        raise await _code_failed(session, user, channel)
+    await login_guard.record(session, email=user.email, channel=channel, outcome="success", user=user)
+    return _signed_in(user)
+
+
+@router.post("/login/recovery-code", response_model=LoginResponse)
+async def login_with_recovery_code(
+    body: ChallengeCodeRequest, channel: Channel = Depends(get_channel), session: AsyncSession = Depends(get_session)
+):
+    user = await _challenged_user(session, body.challenge, channel)
+    if not await two_step.use_recovery_code(session, user, body.code):
+        raise await _code_failed(session, user, channel)
+    await login_guard.record(session, email=user.email, channel=channel, outcome="success", user=user)
+    return _signed_in(user)
+
+
+@router.post("/two-step/set-up", response_model=SetUpStart)
+async def start_set_up(
+    body: ChallengeRequest, channel: Channel = Depends(get_channel), session: AsyncSession = Depends(get_session)
+):
+    """The first sign-in: a new authenticator secret, as a QR code and as text."""
+    user = await _challenged_user(session, body.challenge, channel)
+    try:
+        secret, uri = await two_step.start_enrolment(session, user)
+    except two_step.AlreadyEnrolled as exc:
+        # Someone with the password must not be able to replace the authenticator.
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+    return SetUpStart(secret=secret, otpauth_uri=uri, qr_svg=two_step.qr_svg(uri))
+
+
+@router.post("/two-step/confirm", response_model=SetUpDone)
+async def confirm_set_up(
+    body: ChallengeCodeRequest, channel: Channel = Depends(get_channel), session: AsyncSession = Depends(get_session)
+):
+    """The first code from the new authenticator: proves it was set up right.
+    Signs in, and returns the recovery codes, which are shown this once."""
+    user = await _challenged_user(session, body.challenge, channel)
+    codes = await two_step.confirm_enrolment(session, user, body.code)
+    if codes is None:
+        raise await _code_failed(session, user, channel)
+    await login_guard.record(session, email=user.email, channel=channel, outcome="success", user=user)
+    return {**_signed_in(user), "recovery_codes": codes}
+
+
+@router.get("/two-step", response_model=TwoStepStatus)
+async def two_step_status(user: User = Depends(get_current_user), session: AsyncSession = Depends(get_session)):
+    return TwoStepStatus(
+        set_up=await two_step.is_enrolled(session, user),
+        recovery_codes_left=await two_step.recovery_codes_left(session, user),
     )
+
+
+@router.post("/two-step/recovery-codes", response_model=RecoveryCodesOut)
+async def replace_recovery_codes(
+    body: CodeRequest,
+    channel: Channel = Depends(get_channel),
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """A new set of recovery codes; the old unused ones stop working. Needs a
+    current authenticator code, so a stolen session alone can't make codes."""
+    if not user.is_staff:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not allowed")
+    await _refuse_if_locked(session, user.email, channel)
+    if not await two_step.verify_code(session, user, body.code):
+        raise await _code_failed(session, user, channel)
+    return RecoveryCodesOut(recovery_codes=await two_step.new_recovery_codes(session, user))
 
 
 @router.get("/me", response_model=UserOut)

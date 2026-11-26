@@ -277,3 +277,21 @@ def made_up_register(folder, **changes) -> "Path":
     ]
     sheets = {"letters": letters, "goods": goods, "checks": checks, **changes}
     return write_register(folder / "made-up-register.xlsx", sheets["letters"], sheets["goods"], sheets["checks"])
+
+
+async def sign_in_staff(client, user, password=TEST_PASSWORD) -> str:
+    """Sign a staff member in the first time, through the API, as the staff app
+    does (step 12e): password, set up an authenticator, confirm with its code.
+    Returns the access token."""
+    from app.core.identity import totp
+
+    staff = portal_headers("staff")
+    login = await client.post("/auth/login", json={"email": user.email, "password": password}, headers=staff)
+    assert login.status_code == 200 and login.json()["next"] == "set_up", login.text
+    challenge = login.json()["challenge"]
+    set_up = await client.post("/auth/two-step/set-up", json={"challenge": challenge}, headers=staff)
+    assert set_up.status_code == 200, set_up.text
+    code = totp.code_at(set_up.json()["secret"], totp.current_step())
+    done = await client.post("/auth/two-step/confirm", json={"challenge": challenge, "code": code}, headers=staff)
+    assert done.status_code == 200, done.text
+    return done.json()["access_token"]

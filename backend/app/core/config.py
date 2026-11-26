@@ -72,6 +72,22 @@ class Settings(BaseSettings):
     staff_portal_hosts: str = ""
     applicant_portal_hosts: str = ""
 
+    # --- Two-step login for staff (step 12e) ----------------------------------------
+    # Encrypts each staff member's authenticator secret in the database, so a
+    # copy of the database alone can't make their codes. Keep it out of the
+    # database backups' folder, and don't change it: changing it means every
+    # staff member must set up their authenticator again. Unset (or a "dev-"
+    # key outside development) = staff can't sign in at all.
+    mfa_secret_key: str | None = Field(default=None, min_length=32)
+    # How long someone has between their password and their code.
+    mfa_challenge_minutes: int = Field(default=5, gt=0, le=15)
+
+    def mfa_key(self) -> str | None:
+        key = self.mfa_secret_key
+        if key and key.startswith("dev-") and self.app_env != "development":
+            return None
+        return key
+
     # --- Login protection (step 12d) ----------------------------------------------
     # An account is locked after this many failed tries within the window, and
     # unlocks when the window has passed. [CONFIRM] 5 tries / 15 minutes.
@@ -118,7 +134,7 @@ class Settings(BaseSettings):
                     raise ValueError(f"STAFF_IP_ALLOWLIST: {part.strip()!r} is not an IP address or range")
         return value
 
-    @field_validator("staff_portal_key", "applicant_portal_key", mode="before")
+    @field_validator("staff_portal_key", "applicant_portal_key", "mfa_secret_key", mode="before")
     @classmethod
     def _blank_is_unset(cls, value: str | None) -> str | None:
         # Compose passes an empty value when .env leaves a key out.

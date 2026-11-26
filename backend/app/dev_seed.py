@@ -7,6 +7,10 @@ run unless APP_ENV=development, because it creates accounts with a known
 password. Running it twice changes nothing.
 
 Every account gets the password in DEV_SEED_PASSWORD, or "dev password 123".
+Every staff account also gets an authenticator already set up with
+DEV_TOTP_SECRET (step 12e), published here on purpose: add it to an
+authenticator app once ("Enter a setup key") and you can sign in as any of
+them. Development only, like the password.
 """
 
 import asyncio
@@ -16,10 +20,13 @@ import sys
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.identity import two_step
 from app.core.identity.service import assign_position, create_user, get_user_by_email
 from app.core.workflow import signatories
 
 DEFAULT_PASSWORD = "dev password 123"
+# The authenticator secret of every seeded staff account. Public: dev only.
+DEV_TOTP_SECRET = "MOTIEDEVTOTPSECRETDEVONLY234567A"
 SIGNERS = ["signer1@motie.test", "signer2@motie.test"]  # put on the list by signatories@motie.test
 
 # (email, name, roles, posts). ".test" is a domain reserved for testing, so
@@ -42,7 +49,11 @@ USERS = [
     # Sees the ETLS statistics (S13), as the Director does.
     ("stats@motie.test", "Dev Statistics Viewer", ["officer", "stats_viewer"], []),
     ("admin@motie.test", "Dev Admin", ["admin"], []),
+    # Staff with no authenticator yet: signing in shows the set-up screen (step 12e).
+    ("firstlogin@motie.test", "Dev New Officer", ["officer"], []),
 ]
+# Left without an authenticator, to try the first sign-in.
+NO_AUTHENTICATOR = {"firstlogin@motie.test"}
 
 
 async def seed(session: AsyncSession, password: str) -> list[str]:
@@ -55,6 +66,8 @@ async def seed(session: AsyncSession, password: str) -> list[str]:
             created.append(email)
         for post in posts:
             await assign_position(session, user=user, position_code=post, actor=None)
+        if user.is_staff and email not in NO_AUTHENTICATOR:
+            await two_step.set_up_with_known_secret(session, user, DEV_TOTP_SECRET)
     # Through the same code as S12, so the audit log shows who added them.
     # Only when the person is new, so running the seed twice changes nothing.
     admin = await get_user_by_email(session, "signatories@motie.test")
@@ -78,6 +91,8 @@ async def _main(password: str) -> None:
     for email, _, roles, posts in USERS:
         print(f"  {email:<24} {', '.join(posts) or ', '.join(roles)}")
     print("Password for all of them: the DEV_SEED_PASSWORD you set, or the default in app/dev_seed.py.")
+    print(f"Staff sign in with a code from an authenticator app set up with the key {DEV_TOTP_SECRET}")
+    print("  (or print the current code: docker compose run --rm tools python -m app.dev_totp)")
 
 
 def main() -> None:

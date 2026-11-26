@@ -174,3 +174,36 @@ class LoginAttempt(Base):
     portal: Mapped[str | None] = mapped_column(Text)
     outcome: Mapped[str] = mapped_column(Text)
     user_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("core.users.id"))
+
+
+class TotpCredential(Base):
+    """A staff member's authenticator app (0044). Read and changed through identity/two_step.py."""
+
+    __tablename__ = "totp_credentials"
+    __table_args__ = {"schema": "core"}
+    __mapper_args__ = {"eager_defaults": True}
+
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("core.users.id"), primary_key=True)
+    secret_encrypted: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_used_step: Mapped[int | None] = mapped_column(BigInteger)
+
+
+class RecoveryCode(Base):
+    """One one-time recovery code (0044); only its hash is stored."""
+
+    __tablename__ = "recovery_codes"
+    __table_args__ = (
+        CheckConstraint("used_at IS NULL OR revoked_at IS NULL", name="recovery_codes_used_or_revoked"),
+        Index("recovery_codes_user_idx", "user_id"),
+        {"schema": "core"},
+    )
+    __mapper_args__ = {"eager_defaults": True}
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("core.users.id"))
+    code_sha256: Mapped[str] = mapped_column(Text, unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

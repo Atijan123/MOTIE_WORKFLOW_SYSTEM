@@ -4,6 +4,7 @@ import pytest
 
 from app import dev_seed
 from app.core.config import Settings, settings
+from app.core.identity import totp
 from app.core.identity.service import get_user_by_email
 from tests.support import portal_headers
 from app.core.workflow import signatories
@@ -29,10 +30,19 @@ async def test_seed_creates_one_user_per_post_and_twice_changes_nothing(db_sessi
 
 async def test_seeded_users_can_log_in(db_session, client):
     await dev_seed.seed(db_session, "a dev password 1")
-    response = await client.post(
-        "/auth/login", json={"email": "records@motie.test", "password": "a dev password 1"}, headers=portal_headers("staff")
+    staff = portal_headers("staff")
+    response = await client.post("/auth/login", json={"email": "records@motie.test", "password": "a dev password 1"}, headers=staff)
+    # Staff: the published dev authenticator secret is already set up (step 12e).
+    assert response.json()["next"] == "code"
+    code = totp.code_at(dev_seed.DEV_TOTP_SECRET, totp.current_step())
+    signed_in = await client.post("/auth/login/code", json={"challenge": response.json()["challenge"], "code": code}, headers=staff)
+    assert signed_in.status_code == 200, signed_in.text
+    assert signed_in.json()["access_token"]
+
+    applicant = await client.post(
+        "/auth/login", json={"email": "applicant@motie.test", "password": "a dev password 1"}, headers=portal_headers("applicant")
     )
-    assert response.status_code == 200
+    assert applicant.json()["next"] == "done"
 
 
 def test_the_seed_refuses_to_run_outside_development(monkeypatch):

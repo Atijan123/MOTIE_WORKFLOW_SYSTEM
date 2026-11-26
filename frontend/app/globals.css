@@ -203,3 +203,12 @@ table.table { width: 100%; border-collapse: collapse; font-size: 15px; }
   .summary div { grid-template-columns: 1fr; gap: 2px; }
   .letter-frame { height: 420px; }
 }
+
+/* Two-step sign-in (step 12e) */
+.qr { align-self: center; width: 220px; max-width: 100%; background: #fff; padding: 8px; border-radius: 8px; border: 1px solid var(--border); }
+.qr svg { display: block; width: 100%; height: auto; }
+.setup-key { font-family: ui-monospace, monospace; letter-spacing: 0.05em; word-break: break-all; }
+.steps { padding-left: 20px; display: flex; flex-direction: column; gap: 4px; }
+.code-list { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.code-list code { font-family: ui-monospace, monospace; font-size: 15px; letter-spacing: 0.05em; }
+.recovery-codes { display: flex; flex-direction: column; gap: 12px; }

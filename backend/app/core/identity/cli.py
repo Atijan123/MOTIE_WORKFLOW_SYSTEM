@@ -7,6 +7,15 @@
     docker compose exec api python -m app.core.identity.cli remove-position \
         --email you@motie.gov.gm --position director_of_trade
 
+A staff member who lost both their phone and their recovery codes (step 12e):
+
+    docker compose run --rm tools python -m app.core.identity.cli reset-two-step         --email them@motie.gov.gm
+
+removes their authenticator and recovery codes, so their next sign-in sets up
+a new one. It runs as the schema owner (the tools container): the API's own
+database user can't remove an authenticator. Check who is asking first, in
+person: this is exactly what an attacker with a stolen password would want.
+
 The password is typed at a prompt, never passed as an argument, so it doesn't
 end up in shell history or the process list. Repeat --role for several roles.
 Position changes are written to the audit log with no actor (done from the CLI).
@@ -60,6 +69,35 @@ async def _change_position(email: str, position: str, *, add: bool) -> None:
         await engine.dispose()
 
 
+async def _reset_two_step(email: str) -> None:
+    from sqlalchemy import delete
+    from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+
+    from app.core.audit.service import record_event
+    from app.core.config import settings
+    from app.core.identity.models import RecoveryCode, TotpCredential
+
+    if not settings.migration_database_url:
+        sys.exit("reset-two-step runs as the schema owner: use the tools container (MIGRATION_DATABASE_URL).")
+    owner = create_async_engine(settings.migration_database_url)
+    try:
+        async with AsyncSession(owner) as session:
+            user = await get_user_by_email(session, email)
+            if user is None:
+                raise UnknownUser(f"No user with email {email}.")
+            await session.execute(delete(RecoveryCode).where(RecoveryCode.user_id == user.id))
+            removed = await session.execute(delete(TotpCredential).where(TotpCredential.user_id == user.id))
+            record_event(session, actor=None, action="auth.two_step_reset", entity_type="user", entity_id=user.id)
+            await session.commit()
+        print(
+            f"Removed {user.email}'s authenticator and recovery codes." if removed.rowcount
+            else f"{user.email} had no authenticator set up."
+        )
+        print("Their next sign-in will ask them to set up a new one.")
+    finally:
+        await owner.dispose()
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="python -m app.core.identity.cli")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -74,6 +112,8 @@ def main(argv: list[str] | None = None) -> None:
         command = commands.add_parser(name, help=help_text)
         command.add_argument("--email", required=True)
         command.add_argument("--position", required=True, help="position code, e.g. director_of_trade")
+    reset = commands.add_parser("reset-two-step", help="remove a staff member's authenticator (lost phone and codes)")
+    reset.add_argument("--email", required=True)
     args = parser.parse_args(argv)
 
     try:
@@ -82,6 +122,8 @@ def main(argv: list[str] | None = None) -> None:
             if getpass.getpass("Repeat password: ") != password:
                 sys.exit("Passwords don't match.")
             asyncio.run(_create_user(args.email, args.name, password, args.role))
+        elif args.command == "reset-two-step":
+            asyncio.run(_reset_two_step(args.email))
         else:
             asyncio.run(
                 _change_position(args.email, args.position, add=args.command == "assign-position")

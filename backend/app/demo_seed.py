@@ -34,8 +34,9 @@ import httpx
 from fpdf import FPDF
 
 from app.core.config import settings
+from app.core.identity import totp
 from app.core.identity.service import create_user, get_user_by_email
-from app.dev_seed import DEFAULT_PASSWORD
+from app.dev_seed import DEFAULT_PASSWORD, DEV_TOTP_SECRET
 
 API_URL = os.environ.get("DEMO_API_URL", "http://api:8000")
 
@@ -104,7 +105,17 @@ class Demo:
                 "/auth/login", json={"email": who, "password": self.password}, headers=self.portal(who)
             )
             r.raise_for_status()
-            self.tokens[who] = r.json()["access_token"]
+            answer = r.json()
+            if answer["next"] == "code":
+                # Staff: the second step, with the code an authenticator set up
+                # with the published dev secret would show (app/dev_seed.py).
+                code = totp.code_at(DEV_TOTP_SECRET, totp.current_step())
+                r = await self.client.post(
+                    "/auth/login/code", json={"challenge": answer["challenge"], "code": code}, headers=self.portal(who)
+                )
+                r.raise_for_status()
+                answer = r.json()
+            self.tokens[who] = answer["access_token"]
         headers = {"Authorization": f"Bearer {self.tokens[who]}", **self.portal(who), **kwargs.pop("headers", {})}
         r = await self.client.request(method, path, headers=headers, **kwargs)
         if r.status_code != expect:

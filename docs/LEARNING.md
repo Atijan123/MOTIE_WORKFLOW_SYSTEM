@@ -16,6 +16,22 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 12e — Two-step sign-in for all staff: an authenticator app, plus recovery codes (2026-11-26)
+
+**Built:**
+- **Staff sign in in two steps.** `POST /auth/login` with a right staff password no longer gives a token. It gives a **challenge**: a 5-minute token that allows only the second step, through the same app (`create_challenge_token()` in backend/app/core/identity/security.py). Access tokens now carry `"typ": "access"`, and `decode_access_token()` refuses anything else, so a challenge can never be used as a login. Applicants are unchanged.
+- **The second step** (backend/app/core/identity/router.py): `POST /auth/login/code` (the 6-digit code from the authenticator app) or `POST /auth/login/recovery-code`. The first time, `POST /auth/two-step/set-up` gives a new secret (as a QR code and as text) and `POST /auth/two-step/confirm` takes its first code, signs in and returns **ten recovery codes**, shown once. Every step checks the network (12c) and the lockout (12d) again; a wrong code counts towards the lock like a wrong password. Someone with only the password can't replace an authenticator that is already set up (409).
+- **TOTP written by hand** (backend/app/core/identity/totp.py, about 40 lines, checked against RFC 6238's own test values): SHA-1, 6 digits, 30 seconds, one step of clock drift either side. A code can't be used twice (`last_used_step`), even by two logins racing.
+- **Stored safely** (migration 0044): `core.totp_credentials` holds each secret **encrypted** with `MFA_SECRET_KEY` (Fernet, from the `cryptography` library); `core.recovery_codes` holds only SHA-256 hashes. The app can't delete either. New setting `MFA_SECRET_KEY` (.env.example); without it, staff can't sign in at all (503, with the reason).
+- **Two new libraries, as you approved:** `qrcode` (QR codes as SVG, pure Python) and `cryptography`. Rebuild once: `docker compose build api`.
+- **Screens** (staff app only): `/login/code` (code, or "Use a recovery code"), `/login/set-up` (QR code, the key to type by hand, then the first code, then the recovery codes to write down), and **Security** in the staff menu (codes left; make a new set, which needs a current code so a stolen session alone can't). The challenge waits between steps in an httpOnly cookie, `motie_staff_challenge`, for 5 minutes.
+- **Lost phone and codes:** `docker compose run --rm tools python -m app.core.identity.cli reset-two-step --email them@...` removes their authenticator (as the schema owner); their next sign-in sets up a new one. Check who's asking, in person.
+- **Dev and demo:** every seeded staff account has an authenticator already set up with the published key `MOTIEDEVTOTPSECRETDEVONLY234567A` (`DEV_TOTP_SECRET` in backend/app/dev_seed.py), except `firstlogin@motie.test`, which shows the set-up screen. Add that key to an authenticator app once, or print the current code with `docker compose run --rm tools python -m app.dev_totp`. The demo seed and the walk-throughs work out the codes themselves (`totpCode()` in frontend/e2e/tests/helpers.ts).
+- **Fixed on the way:** `core.login_attempts.attempted_at` is now set from the clock in `record()`. The database's `now()` is the time the *transaction* began, so several attempts in one transaction had the same time and the lockout misjudged which came after the last success.
+
+**Files:** backend/app/core/identity/totp.py, two_step.py (new); router.py, security.py, schemas.py, models.py, login_guard.py, cli.py; backend/alembic/versions/0044_two_step_login.py; backend/app/core/config.py; backend/app/dev_seed.py, dev_totp.py (new), demo_seed.py; backend/requirements.txt; backend/tests/core/test_two_step.py (new), support.py (`sign_in_staff()`), conftest.py, test_auth.py, test_dev_seed.py, test_demo_seed.py; frontend/app/login/actions.ts, code/page.staff.tsx, set-up/ (new); frontend/app/staff/security/ (new), layout.staff.tsx; frontend/lib/auth-redirect.ts (+ test), types.ts; frontend/app/globals.css; frontend/e2e/tests/helpers.ts, two-step.spec.ts (new); docker-compose.yml; .env.example; CLAUDE.md.
+**Try it:** after `bash scripts/reset-dev.sh --yes`, open http://localhost:3002 and sign in as `firstlogin@motie.test`: scan the QR code with your phone's authenticator app, type its code, and see the recovery codes. Then sign in as `desk@motie.test` with the code from `docker compose run --rm tools python -m app.dev_totp`. Tests: `docker compose run --rm tools pytest tests/core/test_two_step.py -v`; `docker compose run --rm e2e npx playwright test tests/two-step.spec.ts`.
+
 ### Step 12d — Login protection: lockout, per-IP rate limit, every login audited (2026-11-26)
 
 **Built:**
@@ -1791,6 +1807,13 @@ The API can't see the browser: the browser talks to a Next.js server, which call
 **Here:** `check()` and `record()` in backend/app/core/identity/login_guard.py; `login()` in backend/app/core/identity/router.py; `core.login_attempts` (0043).
 **Learn more:** [OWASP Authentication Cheat Sheet: Protect against automated attacks](https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html#protect-against-automated-attacks)
 
+### Two-step sign-in (TOTP) and recovery codes
+**What:** a password is something you *know*, and it can be phished, guessed or reused from another site's leak. Two-step sign-in adds something you *have*: a phone with an authenticator app. When it's set up, the server and the phone share a random secret (that's what the QR code carries). Every 30 seconds both work out a 6-digit code from the secret and the clock (an HMAC, then the last six digits), so a matching code proves "has that phone, now". Recovery codes are ten one-time passwords for the day the phone is lost; only their hashes are stored. The secret itself must be readable by the server, so it is *encrypted* rather than hashed, with a key kept outside the database.
+**Stops:** a phished, guessed or leaked staff password on its own; a password typed in front of a shoulder-surfer; most automated attacks, since each code lives 30 seconds and works once.
+**Doesn't stop:** a live phishing site that relays the code to the real site within those 30 seconds (passkeys, step 12g, stop that, because they're tied to the real address); malware on the staff PC that takes over the session after sign-in; someone who has the phone *and* the password; an administrator persuaded to reset someone's two-step sign-in (check in person). A copy of the database alone isn't enough to make codes, but the database plus `MFA_SECRET_KEY` is: keep the key out of the database backups' folder.
+**Here:** backend/app/core/identity/totp.py (`code_at()`, `matching_step()`); backend/app/core/identity/two_step.py; the challenge in backend/app/core/identity/security.py; the screens in frontend/app/login/code/ and set-up/.
+**Learn more:** [RFC 6238 (TOTP)](https://datatracker.ietf.org/doc/html/rfc6238) and [OWASP Multifactor Authentication Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Multifactor_Authentication_Cheat_Sheet.html)
+
 ## 3. Decisions
 
 ### Confirmed by the Ministry
@@ -1817,6 +1840,14 @@ These were open questions; the Ministry has answered them. The code follows them
 
 | Date | Decision | Alternatives considered | Why |
 | --- | --- | --- | --- |
+| 2026-11-26 | TOTP written by hand (about 40 lines) | `pyotp` | It's short, the RFC's test values check it, and you can read every line. One library fewer to keep updated. |
+| 2026-11-26 | The second step uses a short-lived signed "challenge" token, not a server-side half-session | a row in a sessions table per half-finished login | Nothing to clean up, and it works before step 12f adds server-side sessions. It allows only the second step, for 5 minutes, through the same app, and the lockout still applies. |
+| 2026-11-26 | Authenticator secrets encrypted with `MFA_SECRET_KEY` (Fernet) | stored as they are; derived from `JWT_SECRET` | A database backup alone then can't make codes. A separate key, because `JWT_SECRET` should be easy to rotate after an incident, and rotating it must not undo everyone's set-up. |
+| 2026-11-26 | Recovery codes: 10 codes of 10 characters (no 0/O/1/I/L), SHA-256 hashed | Argon2 hashing; fewer, longer codes | They're random (about 50 bits each), so a fast hash is enough; Argon2 is for passwords people choose. Ten is the usual number. |
+| 2026-11-26 | A wrong code counts towards the same lockout as a wrong password | a separate code limit | One rule to explain. Someone with the password gets 5 guesses at a 1-in-a-million code, then 15 minutes' wait. |
+| 2026-11-26 | Dev and demo staff accounts have an authenticator already set up with a published key; one account (`firstlogin`) doesn't | every dev account sets up on first sign-in | You, the demo seed and the walk-throughs can all sign in without a phone, and the set-up screen can still be tried and tested. |
+| 2026-11-26 | Resetting a lost authenticator is a command-line job for an admin, as the schema owner | an admin screen | It's rare, and it's exactly what an attacker would ask for. Keeping it off the web means it's done in person, deliberately. A screen can come later if the ICT unit wants one. |
+| 2026-11-26 | Applicants keep password-only sign-in | two-step for applicants too | You asked for staff. Applicants can't approve or sign anything; two-step for them could come later (optional). |
 | 2026-11-26 | Attempts in their own table, counted with indexed queries; the audit log gets a row too | count rows in the audit log | The audit log's details are JSON; counting there would be slow and awkward. The audit log stays the record people read. |
 | 2026-11-26 | Unlock by time (15 minutes), no admin unlock yet | lock until an admin unlocks | No one has to be on call, and a deliberate lock-out costs the victim 15 minutes at most. An admin "unlock now" can follow if the Ministry wants it (open question). |
 | 2026-11-26 | Refused tries are recorded but don't count | count every try | Otherwise anyone could keep an account locked for ever. |
@@ -2263,9 +2294,22 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 - [ ] **Lockout and rate limit (step 12d):** are 5 failed tries in 15 minutes, unlocking after 15 minutes, right for staff and applicants alike? `[CONFIRM]` Should an admin be able to unlock an account at once, or should the person be emailed when their account is locked? Is 20 tries per 5 minutes from one IP right? An office where everyone shares one internet address counts as one IP; that is fine for the staff app (it's on the office network) but matters for the public portal if many applicants sit behind one address (a cyber café).
 - [ ] **How long to keep login attempts** (`core.login_attempts`)? They're needed only for 15 minutes for the lock, but are useful for investigations. Suggest 1 year, then delete (by the owner, as a scheduled job). Check against Gambian records rules.
 
+- [ ] **Two-step sign-in (step 12e):** do all staff have a smartphone for an authenticator app? Which app should the ICT unit recommend (Microsoft Authenticator, Google Authenticator, Aegis)? Who may reset someone's two-step sign-in (`reset-two-step`), and how do they check it's really them? Should applicants be offered two-step sign-in too?
+- [ ] **Keeping `MFA_SECRET_KEY` (ICT):** where is it kept, apart from the server's `.env`? If it's lost, every staff member must set up their authenticator again (`reset-two-step` for each). It must not be stored in the same place as the database backups.
+
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 12e
+1. Someone phishes a staff member's password and signs in with it. What do they get from `/auth/login`, and why can't they use it on `/auth/me`?
+2. A code is 6 digits, so one guess in a million. Why does the server also remember `last_used_step`?
+3. Why are authenticator secrets encrypted, while recovery codes and passwords are hashed?
+
+#### Show answers
+1. A challenge token with `"typ": "mfa_challenge"`, valid for 5 minutes and only for the second step. `decode_access_token()` accepts only `"typ": "access"`, so `/auth/me` answers 401. Without the phone's code they get no further, and five wrong codes lock the account.
+2. So a code that has been used can't be used again, for example one seen over someone's shoulder or caught on its way. Without it, a code would work for its whole 30 seconds (90, with the drift allowance), as many times as anyone liked.
+3. To check a code, the server must work it out from the secret, so it needs the secret back: encryption is two-way. To check a password or a recovery code, it only needs to compare hashes, and a one-way hash means even someone with the database can't recover them.
 
 ### Step 12d
 1. An attacker types a victim's email with wrong passwords, over and over. Why does the victim's account unlock 15 minutes after the fifth failure, not 15 minutes after the attacker stops?
