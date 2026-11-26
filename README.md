@@ -26,6 +26,8 @@ The commands for tests, seeding and imports are in [CLAUDE.md](CLAUDE.md#command
 ## Documentation
 
 - [docs/LEARNING.md](docs/LEARNING.md): build log, concepts, decisions and open questions
+- [docs/OFFICE-SETUP.md](docs/OFFICE-SETUP.md): setting up the Ministry's office server, step by step
+- [docs/SELF-HOSTED-RUNNER.md](docs/SELF-HOSTED-RUNNER.md): running CI on your own PC
 - [docs/SCREENS.md](docs/SCREENS.md): the screens and their rules
 
 Every push runs [CI](.github/workflows/ci.yml): backend tests, frontend

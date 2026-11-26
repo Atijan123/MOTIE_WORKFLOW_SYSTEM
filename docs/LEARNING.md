@@ -16,6 +16,26 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 13h — docs/OFFICE-SETUP.md: the office server, step by step (2026-11-26)
+
+**Built:** docs/OFFICE-SETUP.md, written for someone setting up a Linux server for the first time, with every command marked. It covers:
+- **Installing Ubuntu Server 24.04**, a fixed address (a DHCP reservation on the router) and a name (`etls.office` in the router's DNS), **no port forwarding**, and a **ufw firewall** allowing only the office range to SSH, https and http. Docker can open ports past ufw, which is why the app also binds only to the office address and checks `OFFICE_NETWORK` itself.
+- **Automatic security updates** (unattended-upgrades, restarting at 03:30 after the 02:00 backup) and **Docker** from Docker's own repository.
+- **The settings** (`.env` from office/env.example, `chmod 600`, one `openssl rand -hex 32` per secret, a copy in the safe), **the backup drive** (ext4, `nofail` in fstab, the `.motie-backup-drive` marker), and **the off-site key**: made on the server, the private half copied to two key sticks and shredded from the server.
+- **The first start**, the nightly backup in cron, and keeping **Caddy's certificate authority** with `.env`, so a rebuilt server is trusted at once.
+- **Trusting the certificate** on Windows (and Firefox), Android and iPhone; and "a certificate warning means stop and call ICT".
+- **Real staff accounts** (the CLI; no demo accounts exist in office mode), **two-step sign-in** at the first sign-in, and **staff without a smartphone**: an office authenticator kept by the signatory admin for the set-up, recovery codes printed, sealed and **held by the signatory admin**, one handed out per working day and logged, a new set when three are left (`[CONFIRM]`).
+- **The history import** (`COMPOSE_FILE` in the server's `.env` makes `scripts/import-history.sh` use the office stack).
+- **The UPS with NUT** (usbhid-ups, upsmon shutting down on low battery, "restore on AC power loss" in the BIOS) and **why Postgres survives a hard power cut** (its write-ahead journal, `fsync`, `synchronous_commit` and `full_page_writes` on, a 60-second clean stop).
+- **Daily checks** (the backup warning, `docker compose ps`, disk space, UPS status), **weekly drive swap** (the off-site copy, and a drive ransomware can't reach), **a monthly restore drill**.
+- **Updates**, online and offline from a USB stick, and **rebuilding on a new PC** from a backup (daily or the encrypted off-site archive), the `.env` copy and Caddy's authority.
+- **Phones on the office Wi-Fi:** the office range (guests on a different one), trusting the certificate, two-step sign-in on a phone, installing the app, scanning, and signing out.
+
+Also: `COMPOSE_FILE=docker-compose.office.yml` in office/env.example; links from README.md and CLAUDE.md.
+
+**Files:** docs/OFFICE-SETUP.md (new); office/env.example; README.md; CLAUDE.md.
+**Try it:** read it through once before the day; then follow it on the office server, or first on a spare PC as a rehearsal (the restore drill in section 13 is the same rehearsal).
+
 ### Step 13g — Scanning paper documents with a phone's camera (2026-11-26)
 
 **Built:**
@@ -2030,6 +2050,10 @@ These were open questions; the Ministry has answered them. The code follows them
 
 | Date | Decision | Alternatives considered | Why |
 | --- | --- | --- | --- |
+| 2026-11-26 | Ubuntu Server 24.04 LTS | Windows Server; another Linux | Free, supported until 2029 (2034 with Ubuntu Pro), Docker's own packages, and the most help online. |
+| 2026-11-26 | A UPS with NUT shutting the server down | rely on Postgres surviving power cuts | Postgres does survive them, but the file system, a cheap disk's cache and the PC coming back on are less certain; a clean shutdown avoids all three. |
+| 2026-11-26 | Swap two backup drives weekly, one always off-site | one drive always plugged in | A drive left plugged in can be encrypted by ransomware or lost in the same fire as the server. |
+| 2026-11-26 | Staff without a smartphone: recovery codes held sealed by the signatory admin, one per day | password only for them | You asked for this. Two-step sign-in stays on for everyone; the envelope is the "something you have". Hardware keys or passkeys would be better later. |
 | 2026-11-26 | Each photo is sent and processed as it's taken; pages wait on the server | send all photos at the end; join them in the browser | Small requests (one photo each) fit the existing upload path with no new upload library; the previews show exactly what the PDF will hold; nothing waits on the phone. Joining in the browser can't read HEIC on most phones. |
 | 2026-11-26 | The scanned PDF is stored through the ordinary upload | a separate "scan" storage | The same checks, limit and audit row as every upload, and the desk and the PS see it like any other document. |
 | 2026-11-26 | 2000 px long side, JPEG quality 70 | keep the full photo | About 200 dpi on A4: clearly readable, and around 300–500 KB a page instead of 3–5 MB, so a 20-page document stays under the 10 MB limit. `[CONFIRM]` with Records once they try it. |
@@ -2547,9 +2571,23 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 
 - [ ] **Phone scanning (step 13g):** which phones will Records use (their own, or a Ministry phone or tablet)? Is 2000 pixels sharp enough for the desk to read stamps and small print? Should a scan also record that the original was seen in person (it doesn't now)?
 
+- [ ] **Staff without a smartphone (step 13h):** is the procedure in docs/OFFICE-SETUP.md, section 10, acceptable: an office authenticator device and sealed recovery codes held by the signatory admin, one handed out per working day? Who is the signatory admin's deputy when they're away? `[CONFIRM]`
+- [ ] **Changing a password:** staff can't change their own password yet (an administrator sets it with the person present). Is a "change my password" screen needed before go-live? (Not built.)
+- [ ] **The office's hardware (ICT):** which PC will be the server, which UPS (its USB model matters for NUT), and who keeps the two key sticks?
+
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 13h
+1. Why must the second backup drive also get the `.motie-backup-drive` file?
+2. After a rebuild, why do staff PCs not need to trust a new certificate?
+3. Docker opens ports past the ufw firewall. Name the two other things that keep the system off other networks.
+
+#### Show answers
+1. The drives are swapped every week. Without the marker on the second drive, the backup would refuse to run the week it's plugged in (that's its protection against an empty mount point).
+2. Caddy's certificate authority (`caddy-ca`, kept on the key sticks with `.env`) is copied back into the new server before Caddy starts serving, so its certificates are signed by the same root that every device already trusts.
+3. Caddy listens only on the office address (`OFFICE_BIND_IP`), and the API accepts staff only from `OFFICE_NETWORK` (the allowlist). The router has no port forwarding to the server, too.
 
 ### Step 13g
 1. A Records officer photographs a page with the phone held sideways. Why does it end up upright in the PDF?
