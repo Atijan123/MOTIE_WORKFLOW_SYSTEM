@@ -51,6 +51,8 @@ test("Records enters a walk-in application and submits it", async ({ browser }) 
   const desk = await loginAs(browser, "desk@motie.test");
   await desk.goto("/staff");
   await desk.getByRole("link", { name: shortRef, exact: true }).click();
+  // Wait for this case's panel: until it loads, the queue's first case is shown.
+  await expect(desk.getByRole("region", { name: "Case" })).toContainText(shortRef);
   await desk.getByLabel("HS code").fill("6810.11");
   await desk.getByRole("button", { name: "Confirm code" }).click();
   // Wait for the answer: the checks to tick appear only after it. (Its wording
@@ -70,6 +72,8 @@ test("Records enters a walk-in application and submits it", async ({ browser }) 
   const director = await loginAs(browser, "director@motie.test");
   await director.goto("/staff");
   await director.getByRole("link", { name: shortRef, exact: true }).click();
+  // Wait for this case's panel: until it loads, the queue's first case is shown.
+  await expect(director.getByRole("region", { name: "Case" })).toContainText(shortRef);
   await director.getByRole("button", { name: "Sign letter" }).click();
   await expect(director.getByText("is now:")).toBeVisible();
 
