@@ -91,7 +91,13 @@ for _ in $(seq 1 30); do
 done
 check "the API's health check, through Caddy, with a trusted certificate" 200 "$code"
 
-login="$(curl_office --cacert "$WORK/root.crt" "https://$HOST/login")"
+# The staff app may still be starting (the health check above is the API's).
+login=""
+for _ in $(seq 1 30); do
+    login="$(curl_office --cacert "$WORK/root.crt" "https://$HOST/login" || true)"
+    case "$login" in *"Staff log in"*) break ;; esac
+    sleep 2
+done
 case "$login" in *"Staff log in"*) echo "  ok: the staff login page" ;; *) echo "  FAILED: the staff login page" >&2; exit 1 ;; esac
 
 code="$(curl_office --output /dev/null --write-out '%{http_code}' "http://$HOST/login")"

@@ -33,6 +33,7 @@ Newest first. Each entry: what was built, the files involved, how to run and tes
 
 Also: `COMPOSE_FILE=docker-compose.office.yml` in office/env.example; links from README.md and CLAUDE.md.
 - **Fonts kept in the repository:** a CI run failed building the staff app because `next/font/google` downloads the fonts from Google *while building*, and Google's answer was unusable that time. On the office server, an online update with a poor connection would fail the same way. The two fonts (IBM Plex Sans and Source Serif 4, both under the SIL Open Font Licence) are now files in frontend/app/fonts/, loaded with `next/font/local` (frontend/app/layout.tsx), so building needs no internet.
+- **CI fix:** the office check asked for the staff login page as soon as the API was healthy; once, the staff app was still starting, and the check failed. It now waits for the staff app too (scripts/ci-office-smoke.sh). office-update.sh's own health check already waited for both.
 
 **Files:** docs/OFFICE-SETUP.md (new); office/env.example; README.md; CLAUDE.md.
 **Try it:** read it through once before the day; then follow it on the office server, or first on a spare PC as a rehearsal (the restore drill in section 13 is the same rehearsal).
