@@ -9,7 +9,7 @@ import { SubmitButton } from "@/components/ActionForm";
 import { hsCode } from "@/lib/labels";
 import type { FacilityLetter } from "@/lib/types";
 
-import type { DraftState } from "./actions";
+import type { DraftState } from "@/lib/facility-form";
 
 
 export type FormOptions = { countries: string[]; units: string[] };
@@ -19,9 +19,10 @@ type Props = {
   options: FormOptions; // the Ministry's lists (GET /etls/form-options), kept by an admin
   action: (state: DraftState, data: FormData) => Promise<DraftState>;
   children?: React.ReactNode; // the expiry note, under the certificates
+  top?: React.ReactNode; // fields above the importer, saved with the form (Records' walk-in: who it's for)
 };
 
-export function ApplicationForm({ letter, options, action, children }: Props) {
+export function ApplicationForm({ letter, options, action, children, top }: Props) {
   const [state, formAction] = useActionState(action, {});
   const v = state.values;
   // After a failed save, show what was typed; otherwise what's stored.
@@ -41,6 +42,7 @@ export function ApplicationForm({ letter, options, action, children }: Props) {
           <strong>Not saved.</strong> {state.error}
         </div>
       ) : null}
+      {top}
 
       <section className="card">
         <h2>1. Importer</h2>

@@ -3,12 +3,13 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
 import { ActionForm, SubmitButton } from "@/components/ActionForm";
+import { DocumentRow } from "@/components/DocumentUpload";
 import { api, apiOrNull } from "@/lib/api";
 import { longDate } from "@/lib/dates";
 import type { Case, FacilityLetter, Requirement } from "@/lib/types";
 
 import { saveDraft, submitApplication, uploadDocument } from "../../actions";
-import { ApplicationForm, type FormOptions } from "../../ApplicationForm";
+import { ApplicationForm, type FormOptions } from "@/components/ApplicationForm";
 
 export const metadata: Metadata = { title: "Your facility letter application" };
 
@@ -74,7 +75,7 @@ export default async function EditApplication({
           {documents
             .filter((d) => d.applies !== false)
             .map((d) => (
-              <DocumentRow key={d.type} caseId={id} requirement={d} />
+              <DocumentRow key={d.type} requirement={d} upload={uploadDocument.bind(null, id, d.type)} />
             ))}
         </ul>
       </section>
@@ -107,42 +108,5 @@ export default async function EditApplication({
         </ActionForm>
       </section>
     </main>
-  );
-}
-
-const Uploaded = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2F7A55" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" role="img" aria-label="Uploaded">
-    <path d="M5 12l5 5L20 7" />
-  </svg>
-);
-const NotYet = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#9AA5AE" strokeWidth="2" role="img" aria-label="Not uploaded">
-    <circle cx="12" cy="12" r="9" />
-  </svg>
-);
-
-function DocumentRow({ caseId, requirement: r }: { caseId: number; requirement: Requirement }) {
-  const latest = r.documents[0];
-  const undecided = r.applies === null;
-  return (
-    <li className={undecided ? "not-yet" : undefined}>
-      <div className="stack">
-        <div className="row" style={{ gap: 12 }}>
-          {latest ? <Uploaded /> : <NotYet />}
-          <span className="strong">{r.name}</span>
-        </div>
-        {r.original_required ? <span className="small warn-text" style={{ paddingLeft: 32 }}>Bring the original to Records. Copies are not accepted.</span> : null}
-        {undecided ? (
-          <span className="small muted" style={{ paddingLeft: 32 }}>
-            Needed only in some cases. We’ll tell you once the Ministry has confirmed the HS code.
-          </span>
-        ) : null}
-        {latest ? <span className="small muted" style={{ paddingLeft: 32 }}>{latest.filename}</span> : null}
-      </div>
-      <ActionForm action={uploadDocument.bind(null, caseId, r.type)} className="row" aria-label={`Upload ${r.name}`}>
-        <input type="file" name="file" accept="application/pdf,image/png,image/jpeg" required aria-label={`File for ${r.name}`} style={{ maxWidth: 230 }} />
-        <SubmitButton className="btn btn-small">{latest ? "Replace" : "Upload"}</SubmitButton>
-      </ActionForm>
-    </li>
   );
 }

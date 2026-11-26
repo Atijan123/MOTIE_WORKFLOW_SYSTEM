@@ -16,6 +16,16 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 13b (part 1) — Records enters walk-in applications in the staff app (2026-11-26)
+
+**Built:**
+- **New walk-in** in the staff menu (Records only), /staff/walk-in/new: the applicant's name (and email, if they have one, to find their earlier applications), then the same facility letter form applicants use. Saving opens /staff/walk-in/{id}: the form, the documents to upload, and **Submit application**, which sends it into Records' queue like any application. A half-done walk-in shows a "Continue it" link on its case page. The API has supported walk-ins since step 8g; only the screen was missing, and in office mode it's the only way in.
+- **One form for both apps:** the form moved to frontend/components/ApplicationForm.tsx (with a `top` slot, for the applicant's name), its helpers to frontend/lib/facility-form.ts, the upload to frontend/lib/upload.ts, and a document's upload row to frontend/components/DocumentUpload.tsx. The applicant's A2 screens use them unchanged.
+- **Fix:** the step 13a commit (3082b96) included the move of ApplicationForm.tsx by mistake, without the matching import changes (an earlier `git mv` had already staged it), so its frontend typecheck fails. This commit completes the move. Lesson: check `git status` for staged files before a partial commit.
+
+**Files:** frontend/app/staff/walk-in/ (new: actions.ts, new/page.staff.tsx, [id]/page.staff.tsx); frontend/components/ApplicationForm.tsx (moved), DocumentUpload.tsx (new), staff/CasePanel.tsx; frontend/lib/facility-form.ts, upload.ts (new); frontend/app/applications/actions.ts, new/page.applicant.tsx, [id]/edit/page.applicant.tsx; frontend/app/staff/layout.staff.tsx; frontend/e2e/tests/walk-in.spec.ts (new).
+**Try it:** sign in at http://localhost:3002 as `records@motie.test`, choose **New walk-in**, fill it in, upload the five documents, Submit. Test: `docker compose run --rm e2e npx playwright test tests/walk-in.spec.ts`.
+
 ### Step 13a — Office mode: `APP_ENV=office` (2026-11-26)
 
 The system will first run on one server in the Ministry's office, on its local network, with real data. Office mode is that set-up.
@@ -1922,6 +1932,8 @@ These were open questions; the Ministry has answered them. The code follows them
 
 | Date | Decision | Alternatives considered | Why |
 | --- | --- | --- | --- |
+| 2026-11-26 | The walk-in screen reuses the applicant's form, moved to components/ | a separate staff form | One form to keep right; a change to the facility letter form shows in both apps. |
+| 2026-11-26 | Records' walk-in pages have their own server actions (frontend/app/staff/walk-in/actions.ts) | reuse the applicant's actions | The applicant's actions send people to /applications pages, which the staff app doesn't have. The shared parts (the form body, the upload) live in lib/. |
 | 2026-11-26 | Office mode is a value of `APP_ENV`, not a set of separate switches | `APPLICANT_PORTAL_ENABLED=false`, `APPLICANT_EMAILS=false`, … | One setting can't be half-set. Everything that should differ in the office follows from it, and the tests check each one. |
 | 2026-11-26 | The API refuses the applicant portal in office mode, even though the office stack won't run it | rely on not deploying the portal | If someone starts the portal container by mistake, the API still says no. |
 | 2026-11-26 | Self-service case creation refused in the services, not only by the missing portal | screens only | Defence in depth: any future endpoint that creates a case goes through the same functions. |
@@ -2409,6 +2421,14 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 13b (part 1)
+1. Where does the facility letter form live now, and which two screens use it?
+2. Records saves a walk-in half-done and goes home. How do they find it again?
+
+#### Show answers
+1. frontend/components/ApplicationForm.tsx; the applicant's A2 screens (app/applications/new and [id]/edit) and Records' walk-in screens (app/staff/walk-in/new and [id]).
+2. It's in Records' queue (they entered it, and Records may make its applicant moves); its case page shows "Continue it: form, documents and Submit", linking to /staff/walk-in/{id}.
 
 ### Step 13a
 1. Someone starts the applicant portal container on the office server by mistake. Can an applicant sign in through it? Which function decides?

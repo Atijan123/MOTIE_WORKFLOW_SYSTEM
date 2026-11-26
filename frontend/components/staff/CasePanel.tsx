@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { api, apiOrNull } from "@/lib/api";
@@ -29,6 +30,8 @@ export async function CasePanel({ id }: { id: number }) {
   // make that step's move: the post holder, or someone acting for them.
   const canVerify = kase.available_actions.some((a) => a.to_status === "verified");
   const canSign = kase.available_actions.some((a) => a.to_status === "signed");
+  // A walk-in draft Records entered (step 13b): finished on its own page.
+  const canFinishWalkIn = Boolean(kase.entered_by) && kase.available_actions.some((a) => a.to_status === "submitted");
 
   return (
     <div className="col-main">
@@ -52,6 +55,14 @@ export async function CasePanel({ id }: { id: number }) {
           <div className="notice notice-info small">This applicant has no email: tell them of each step yourself.</div>
         ) : null}
         {letter ? <Summary letter={letter} /> : null}
+        {canFinishWalkIn ? (
+          <div className="notice notice-info">
+            <span>
+              This walk-in application isn’t submitted yet.{" "}
+              <Link href={`/staff/walk-in/${id}`}>Continue it: form, documents and Submit</Link>
+            </span>
+          </div>
+        ) : null}
         <Documents caseId={id} requirements={documents} canSeeOriginals={canSeeOriginals} />
         {letter && canVerify ? <DeskChecks caseId={id} letter={letter} documents={documents} /> : null}
         {canSign ? <Signing caseId={id} /> : null}

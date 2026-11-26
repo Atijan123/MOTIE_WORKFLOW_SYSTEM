@@ -4,7 +4,7 @@ import Link from "next/link";
 import { api } from "@/lib/api";
 
 import { saveDraft } from "../actions";
-import { ApplicationForm, type FormOptions } from "../ApplicationForm";
+import { ApplicationForm, type FormOptions } from "@/components/ApplicationForm";
 
 export const metadata: Metadata = { title: "Apply for a facility letter" };
 
