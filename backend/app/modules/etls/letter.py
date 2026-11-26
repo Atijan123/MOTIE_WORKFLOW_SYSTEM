@@ -30,7 +30,7 @@ registry file reference (settings.facility_letter_reference_format).
 import hashlib
 import re
 from dataclasses import asdict, dataclass
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from string import Template
 
@@ -499,3 +499,76 @@ async def applicant_copy(session: AsyncSession, case_id: int, user: User) -> tup
         raise workflow.NotReady("Your copy of the letter is available once the Ministry has sent the letter to GRA.")
     return document, issued.read(document)
 
+
+
+# --- The applicant's copy, handed over in person (step 13b) ---------------------------
+
+
+@dataclass
+class CopyToHandOver:
+    case_id: int
+    reference: str | None
+    applicant_name: str
+    importer_name: str | None
+    product: str | None
+    dispatched_on: date
+
+
+async def applicant_copies_to_hand_over(session: AsyncSession, user: User) -> list[CopyToHandOver]:
+    """Walk-in letters sent to GRA whose applicant's copy Records hasn't handed
+    over yet (the Outgoing tab). Only for whoever may act as the applicant (Records)."""
+    rows = (
+        await session.execute(
+            select(Case, FacilityLetterCopy, FacilityLetterDispatch, FacilityLetter)
+            .join(FacilityLetterCopy, FacilityLetterCopy.case_id == Case.id)
+            .join(FacilityLetterDispatch, FacilityLetterDispatch.issued_document_id == FacilityLetterCopy.issued_document_id)
+            .join(FacilityLetter, FacilityLetter.case_id == Case.id)
+            .where(
+                FacilityLetterCopy.recipient == "applicant",
+                FacilityLetterCopy.handed_over_at.is_(None),
+                Case.entered_by.is_not(None),
+            )
+            .order_by(FacilityLetterDispatch.dispatched_on, Case.id)
+        )
+    ).all()
+    found = []
+    for case, copy, dispatch, form in rows:
+        await session.refresh(case, ["workflow"])
+        if not workflow.acts_as_applicant(case, user):
+            continue
+        current = await applicant_copy_ready(session, case)
+        if current is None or current.id != copy.issued_document_id:
+            continue  # a cancelled letter's copy: a corrected one is awaited
+        applicant = await session.get(User, case.created_by)
+        found.append(
+            CopyToHandOver(
+                case_id=case.id, reference=case.reference, applicant_name=applicant.full_name,
+                importer_name=form.importer_name, product=form.product, dispatched_on=dispatch.dispatched_on,
+            )
+        )
+    return found
+
+
+async def hand_over_applicant_copy(session: AsyncSession, case_id: int, user: User) -> None:
+    """Records has printed the applicant's copy and given it to them: recorded
+    on the copy, and in the audit log."""
+    case = await workflow.get_case(session, case_id, user)
+    if case.workflow.code != FACILITY_LETTER or case.entered_by is None or not workflow.acts_as_applicant(case, user):
+        raise workflow.NotFound("Facility letter not found.")
+    document = await applicant_copy_ready(session, case)
+    if document is None:
+        raise workflow.NotReady("The applicant's copy can be handed over once the letter is sent to GRA.")
+    copy = await session.scalar(
+        select(FacilityLetterCopy)
+        .where(FacilityLetterCopy.issued_document_id == document.id, FacilityLetterCopy.recipient == "applicant")
+        .with_for_update()
+    )
+    if copy.handed_over_at is not None:
+        raise workflow.TransitionNotAllowed("This copy is already recorded as handed over.")
+    copy.handed_over_at = datetime.now(timezone.utc)
+    copy.handed_over_by = user.id
+    record_event(
+        session, actor=user, action="etls.applicant_copy_handed_over", entity_type="case", entity_id=case.id,
+        details={"issued_document_id": document.id},
+    )
+    await session.commit()

@@ -1,4 +1,8 @@
+from dataclasses import asdict
+from datetime import date
+
 from fastapi import APIRouter, Depends, Response, status
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.identity.deps import get_current_user, require_role
@@ -251,6 +255,30 @@ async def download_applicant_copy(
     sent (409 before that). For the applicant, or Records for a walk-in."""
     document, content = await facility_letter.applicant_copy(session, case_id, user)
     return _pdf(document, content)
+
+
+class CopyToHandOverOut(BaseModel):
+    case_id: int
+    reference: str | None
+    applicant_name: str
+    importer_name: str | None
+    product: str | None
+    dispatched_on: date
+
+
+@router.get("/applicant-copies", response_model=list[CopyToHandOverOut])
+async def applicant_copies(user: User = Depends(get_current_user), session: AsyncSession = Depends(get_session)):
+    """Walk-in letters sent to GRA whose applicant's copy is still to be
+    printed and handed over (step 13b: the Outgoing tab)."""
+    return [asdict(c) for c in await facility_letter.applicant_copies_to_hand_over(session, user)]
+
+
+@router.post("/facility-letters/{case_id}/applicant-copy/handed-over", status_code=status.HTTP_204_NO_CONTENT)
+async def applicant_copy_handed_over(
+    case_id: int, user: User = Depends(get_current_user), session: AsyncSession = Depends(get_session)
+):
+    await facility_letter.hand_over_applicant_copy(session, case_id, user)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/facility-letters/{case_id}/sent-to-gra", response_model=CaseOut)

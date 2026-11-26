@@ -16,6 +16,16 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 13b (part 2) — "Print applicant copy" on the Outgoing tab (2026-11-26)
+
+**Built:**
+- **Applicant copies to hand over**, a new section on Records' Outgoing tab (frontend/app/staff/outgoing/page.staff.tsx): every walk-in letter that has been sent to GRA and whose applicant's copy hasn't been handed over yet. Each row has **Print applicant copy** (opens the stored, checksummed letter in a new tab to print; the same PDF as the other copies, step 10b) and **Mark handed over**.
+- **Recorded:** migration 0046 adds `handed_over_at` and `handed_over_by` to the applicant's row in `etls.facility_letter_copies`; the app may set only those two columns. Handing over writes the audit row `etls.applicant_copy_handed_over`. `GET /etls/applicant-copies` lists what's waiting; `POST /etls/facility-letters/{id}/applicant-copy/handed-over` records it (backend/app/modules/etls/letter.py, `applicant_copies_to_hand_over()` and `hand_over_applicant_copy()`).
+- **The same rules as before:** the copy is ready only once GRA's copy is sent (step 10b), only for walk-ins, and only for whoever may act as the applicant (Records). A copy is handed over once; a cancelled letter's copy drops off the list until the corrected one is sent.
+
+**Files:** backend/alembic/versions/0046_applicant_copy_handed_over.py; backend/app/modules/etls/letter.py, router.py, models.py; backend/tests/modules/etls/test_applicant_copy_hand_over.py (new); frontend/app/staff/outgoing/page.staff.tsx, actions.ts (`handOverCopy()`); frontend/e2e/tests/walk-in.spec.ts (now the whole route).
+**Try it:** after the walk-in walk-through's steps (or `bash scripts/seed-demo.sh`, then a walk-in taken to "Sent to GRA"), open Outgoing as `records@motie.test`. Tests: `docker compose run --rm tools pytest tests/modules/etls/test_applicant_copy_hand_over.py -v`; `docker compose run --rm e2e npx playwright test tests/walk-in.spec.ts`.
+
 ### Step 13b (part 1) — Records enters walk-in applications in the staff app (2026-11-26)
 
 **Built:**
@@ -1932,6 +1942,8 @@ These were open questions; the Ministry has answered them. The code follows them
 
 | Date | Decision | Alternatives considered | Why |
 | --- | --- | --- | --- |
+| 2026-11-26 | The list shows copies until they're marked handed over | a "Print" button only, nothing recorded | A printed copy left on a desk is easily forgotten; the list is Records' to-do, and the record answers "did the importer get their letter, and from whom?". |
+| 2026-11-26 | The copy is printed after GRA's copy is sent, as the 10b rule says | print it with the GRA copy, before "Mark sent to GRA" | One rule for the applicant's copy, whether downloaded or printed. `[CONFIRM]` if the office would rather print all copies at once. |
 | 2026-11-26 | The walk-in screen reuses the applicant's form, moved to components/ | a separate staff form | One form to keep right; a change to the facility letter form shows in both apps. |
 | 2026-11-26 | Records' walk-in pages have their own server actions (frontend/app/staff/walk-in/actions.ts) | reuse the applicant's actions | The applicant's actions send people to /applications pages, which the staff app doesn't have. The shared parts (the form body, the upload) live in lib/. |
 | 2026-11-26 | Office mode is a value of `APP_ENV`, not a set of separate switches | `APPLICANT_PORTAL_ENABLED=false`, `APPLICANT_EMAILS=false`, … | One setting can't be half-set. Everything that should differ in the office follows from it, and the tests check each one. |
@@ -2418,9 +2430,19 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 - [ ] **The office network (step 13a):** which address range is the office's network (`OFFICE_NETWORK`, e.g. `192.168.10.0/24`)? Is the Wi-Fi the same range as the wired PCs? You'll give the real one. `[CONFIRM]`
 - [ ] **Office mode and applicants:** in the office, applicants never sign in or get emails; Records tells them of each step (by phone? in person?). Is that what the Ministry expects? Is a printed copy of each step needed for the file?
 
+- [ ] **Handing over the applicant's copy (step 13b):** does the importer collect it at Records, or is it posted? Should they sign for it (the record now says who handed it over and when, not who received it)? May all copies be printed together, before GRA's is sent? `[CONFIRM]`
+
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 13b (part 2)
+1. A walk-in letter is cancelled after being sent to GRA, and a corrected one is signed. Does the old copy stay on the "to hand over" list?
+2. Why may the app update only `handed_over_at` and `handed_over_by` on a copy row?
+
+#### Show answers
+1. No. `applicant_copies_to_hand_over()` keeps a copy only if its letter is the one in force and sent to GRA (`applicant_copy_ready()`). The corrected letter's copy appears once it is sent.
+2. The rest of the row (which letter, which recipient) is the record of what was issued, written once at signing. Column grants (0046) mean even a bug in the API can't rewrite it.
 
 ### Step 13b (part 1)
 1. Where does the facility letter form live now, and which two screens use it?

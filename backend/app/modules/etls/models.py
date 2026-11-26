@@ -82,6 +82,7 @@ class FacilityLetterCopy(Base):
     __tablename__ = "facility_letter_copies"
     __table_args__ = (
         CheckConstraint("recipient IN ('records_file', 'gra', 'applicant')", name="facility_letter_copies_recipient"),
+        CheckConstraint("(handed_over_at IS NULL) = (handed_over_by IS NULL)", name="facility_letter_copies_handed_over_together"),
         UniqueConstraint("issued_document_id", "recipient", name="facility_letter_copies_one_each"),
         Index("facility_letter_copies_case_idx", "case_id"),
         {"schema": "etls"},
@@ -93,6 +94,9 @@ class FacilityLetterCopy(Base):
     issued_document_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("core.issued_documents.id"))
     recipient: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # The applicant's copy, printed and handed over by Records (0046, step 13b).
+    handed_over_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    handed_over_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("core.users.id"))
 
 
 class FacilityLetter(Base):

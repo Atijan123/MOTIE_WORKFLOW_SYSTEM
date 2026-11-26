@@ -90,3 +90,14 @@ export async function markSentToGra(caseId: number, _: FormState, data: FormData
   const done = `${sent.reference ?? "The letter"} marked as sent to GRA on ${longDate(dispatchedOn)}.`;
   redirect(`/staff/outgoing?done=${encodeURIComponent(done)}`);
 }
+
+/** Records gave the applicant their printed copy (step 13b). */
+export async function handOverCopy(caseId: number, reference: string, _: FormState): Promise<FormState> {
+  try {
+    await api(`/etls/facility-letters/${caseId}/applicant-copy/handed-over`, { method: "POST" });
+  } catch (error) {
+    return failed(error);
+  }
+  revalidatePath("/staff/outgoing");
+  redirect(`/staff/outgoing?done=${encodeURIComponent(`${reference}: applicant’s copy recorded as handed over.`)}`);
+}

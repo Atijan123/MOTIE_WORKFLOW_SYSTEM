@@ -1,6 +1,7 @@
 // Step 13b: Records enters an application for an importer who came in
 // person: the form, the documents, then Submit. In office mode this is the
-// only way an application gets in. The case then waits in Records' queue.
+// only way an application gets in. It then follows the usual route; once it's
+// sent to GRA, Records prints the applicant's copy and hands it over.
 import { expect, test } from "@playwright/test";
 
 import { isoDay, loginAs, pdf } from "./helpers";
@@ -38,5 +39,45 @@ test("Records enters a walk-in application and submits it", async ({ browser }) 
 
   // Into Records' own queue, like any application.
   await expect(records).toHaveURL(/\/staff\?case=\d+/);
-  await expect(records.getByRole("region", { name: "Case" })).toContainText("Sowe Hardware");
+  const panel = records.getByRole("region", { name: "Case" });
+  await expect(panel).toContainText("Sowe Hardware");
+  const shortRef = (await panel.textContent())!.match(/FL\/\d{4}\/\d{4}/)![0];
+
+  // --- The usual route: Records accepts, the desk verifies, the Director signs.
+  await records.getByRole("form", { name: "Original of Certificate of origin" }).getByRole("button").click();
+  await records.getByRole("button", { name: "Accept: originals received" }).click();
+  await expect(records.getByText("is now:")).toBeVisible();
+
+  const desk = await loginAs(browser, "desk@motie.test");
+  await desk.goto("/staff");
+  await desk.getByRole("link", { name: shortRef, exact: true }).click();
+  await desk.getByLabel("HS code").fill("6810.11");
+  await desk.getByRole("button", { name: "Confirm code" }).click();
+  const tick = desk.getByRole("button", { name: "Mark as checked" });
+  while ((await tick.count()) > 0) {
+    const before = await tick.count();
+    await tick.first().click();
+    await expect(tick).toHaveCount(before - 1);
+  }
+  await desk.getByRole("button", { name: "Verify and send for signature" }).click();
+  await expect(desk.getByText("is now:")).toBeVisible();
+
+  const director = await loginAs(browser, "director@motie.test");
+  await director.goto("/staff");
+  await director.getByRole("link", { name: shortRef, exact: true }).click();
+  await director.getByRole("button", { name: "Sign letter" }).click();
+  await expect(director.getByText("is now:")).toBeVisible();
+
+  // --- Outgoing: send to GRA, then print the applicant's copy and hand it over.
+  await records.goto("/staff/outgoing");
+  await records.getByRole("row", { name: new RegExp(shortRef) }).getByRole("button", { name: "Mark sent to GRA" }).click();
+  const copies = records.getByRole("region", { name: "Applicant copies to hand over" });
+  const row = copies.getByRole("row", { name: new RegExp(shortRef) });
+  await expect(row).toContainText("Ebrima Sowe");
+  const print = row.getByRole("link", { name: "Print applicant copy" });
+  const copy = await records.request.get((await print.getAttribute("href"))!);
+  expect(copy.headers()["content-type"]).toBe("application/pdf");
+  await row.getByRole("button", { name: "Mark handed over" }).click();
+  await expect(records.getByRole("status")).toContainText("applicant’s copy recorded as handed over");
+  await expect(copies.getByRole("row", { name: new RegExp(shortRef) })).toHaveCount(0);
 });
