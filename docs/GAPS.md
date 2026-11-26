@@ -278,3 +278,12 @@ CO workflow and labels, reference `MOTIE/ETLS/CO/…`, the certifying officer's 
 Questions from chunk 1, answered 2026-10-24:
 - **Six months counted to which date?** Verify is blocked if any certificate is more than six months past its issue date (so: to the verification date). At submission the applicant is warned, not blocked, if one expires within 30 days. Whether GRA needs it still valid at clearance is not confirmed `[CONFIRM]` (C10).
 - **The timeline after a cancelled letter?** Keep hiding only the cancel move. A corrected letter replacing one already sent to GRA shows "Corrected letter issued" when it is sent (C11).
+
+---
+
+## 8. Staff security (step 12): what is postponed
+
+| Item | Status | Notes |
+| --- | --- | --- |
+| Passkeys (WebAuthn) as an optional second step for staff | **Postponed** to after Step 13 (your decision, 2026-11-26) | Step 12e's authenticator codes and recovery codes cover two-step sign-in for now. When built: py_webauthn on the backend (already approved), the browser's own `navigator.credentials` on the frontend, a `core.passkeys` table, and "Add a passkey" on the Security page. Passkeys also stop live phishing sites, which TOTP codes don't. |
+| Internet staging server (Caddy with public HTTPS, demo data, staging guard) | **Dropped** (2026-11-26) | Office-only deployment instead: tested locally, then on the office server (Step 13). |

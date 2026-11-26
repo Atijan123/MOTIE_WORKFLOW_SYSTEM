@@ -21,6 +21,11 @@ const nextConfig = {
   async headers() {
     return [
       {
+        // The service worker must be checked for updates on every visit, never cached.
+        source: "/sw.js",
+        headers: [{ key: "Cache-Control", value: "no-cache, no-store, must-revalidate" }],
+      },
+      {
         source: "/:path*",
         headers: [
           // No other site may frame these pages (clickjacking).

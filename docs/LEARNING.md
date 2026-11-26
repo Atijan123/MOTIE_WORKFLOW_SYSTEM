@@ -16,6 +16,18 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 12h — The staff app installs from the browser (PWA) (2026-11-26)
+
+**Built:**
+- **A web app manifest**, frontend/app/manifest.ts, served at `/manifest.webmanifest` and linked from every page: the staff build calls itself "MOTIE ETLS Staff", starts at `/staff`, opens in its own window (`display: standalone`), with the app's navy and cream. The applicant build gets its own ("MOTIE ETLS Services"), which costs nothing and helps applicants on phones.
+- **Icons**: a white "M" on navy with a green band, drawn by frontend/scripts/make-icons.py (plain Python, no image library; run it again to change them) into frontend/public/icons/ at 180 (iPhones), 192 and 512 pixels. The 512 icon is also marked "maskable": the letter stays inside the middle of the square, so Android's round masks don't cut it.
+- **A service worker**, frontend/public/sw.js, registered by `RegisterServiceWorker` (frontend/components/RegisterServiceWorker.tsx) in the root layout. It **stores no Ministry data**: pages and API answers always come from the server. When the network is down, a page load shows frontend/public/offline.html ("No connection: check you're on the office network"). It is served with `Cache-Control: no-cache`, so a new version is picked up at once.
+- The production image (frontend/Dockerfile, `prod` stage) now copies `public/`. It didn't before, so icons and the service worker would have been missing on the office server.
+- **Passkeys (12g) are postponed** until after Step 13, and the internet staging server (12i) is dropped: both noted in docs/GAPS.md, section 8.
+
+**Files:** frontend/app/manifest.ts, components/RegisterServiceWorker.tsx, public/sw.js, public/offline.html, public/icons/ (new); frontend/scripts/make-icons.py (new); frontend/app/layout.tsx; frontend/next.config.mjs; frontend/Dockerfile; frontend/e2e/tests/install.spec.ts (new); docs/GAPS.md.
+**Try it:** open http://localhost:3002 in Chrome or Edge. In the address bar there's an "Install" icon (or the menu → "Cast, save and share" → "Install page as app"). Installed, it opens in its own window with the M icon. On a phone it needs the office server's https (Step 13). Tests: `docker compose run --rm e2e npx playwright test tests/install.spec.ts`.
+
 ### Step 12f — Sessions on the server: idle and daily limits for staff; the password again before signing (2026-11-26)
 
 **Built:**
@@ -1837,6 +1849,13 @@ The API can't see the browser: the browser talks to a Next.js server, which call
 **Here:** `check()`, `start()`, `end()`, `password_is_fresh()` in backend/app/core/identity/sessions.py; `get_current_session()` in backend/app/core/identity/deps.py; `needs_recent_password` in `change_status()` (backend/app/core/workflow/service.py); `POST /auth/reauth` in backend/app/core/identity/router.py.
 **Learn more:** [OWASP Session Management Cheat Sheet: Session expiration](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html#session-expiration)
 
+### Progressive web apps (installing a website)
+**What:** a progressive web app is an ordinary website that a browser can "install": it gets an icon in the Start menu or on the phone's home screen and opens in its own window, without the address bar. Nothing goes through an app store, and there is no separate app to build or update: the next visit always gets the latest version. The browser needs three things: a **manifest** (a small JSON file: name, start page, icons), **https** (or localhost), and usually a **service worker**, a script the browser runs in the background between the page and the network. A service worker *can* keep copies of pages and data for offline use; here it deliberately doesn't, because case data shouldn't be left on staff devices.
+**Stops:** nothing on its own: this is convenience, not a security control. One thing to watch: a service worker that cached pages could leave case data on a shared PC or a lost phone; this one caches only the offline page.
+**Doesn't stop:** anything; and installing doesn't bypass any of the other controls (network, two-step sign-in, session limits), because the installed app is the same website.
+**Here:** frontend/app/manifest.ts; frontend/public/sw.js; frontend/components/RegisterServiceWorker.tsx.
+**Learn more:** [web.dev: Learn PWA](https://web.dev/learn/pwa/)
+
 ## 3. Decisions
 
 ### Confirmed by the Ministry
@@ -1863,6 +1882,9 @@ These were open questions; the Ministry has answered them. The code follows them
 
 | Date | Decision | Alternatives considered | Why |
 | --- | --- | --- | --- |
+| 2026-11-26 | The service worker caches only the offline page | cache pages for offline work | Case data on staff PCs and phones would outlive sign-out and survive a lost device. The office server is on the local network, so offline work isn't needed. |
+| 2026-11-26 | Icons drawn by a small script, committed as PNGs | a designer's logo; an image library | No new library, and you can change the colours or letter and run it again. A proper Ministry emblem can replace them later (open question). |
+| 2026-11-26 | Both apps get a manifest; the staff app is the one you asked for | staff only | `app/manifest.ts` is shared by both builds; giving the applicant portal its own name and start page costs nothing. |
 | 2026-11-26 | Sessions as rows, named by the token (`sid`); the JWT stays | opaque random tokens only; JWTs with a deny-list | Keeps the signature check (a forged token is refused before any database work) and adds what a JWT can't do: sign out, idle limits. A deny-list would have to remember every signed-out token. |
 | 2026-11-26 | "Last seen" written at most once a minute | on every request | A write per click is wasted work; a minute is nothing against a 30-minute limit. |
 | 2026-11-26 | Which moves need a recent password is a column on the move (`needs_recent_password`) | a list of status codes in the code | "Workflows are data" (CLAUDE.md). A new module can mark its own important moves without touching the engine. |
@@ -2329,9 +2351,19 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 
 - [ ] **Session times (step 12f):** are 30 minutes idle and 8 hours in all right for staff? Is 10 minutes right before signing or approving asks for the password again? `[CONFIRM]` all three (`STAFF_IDLE_MINUTES`, `STAFF_SESSION_HOURS`, `REAUTH_MINUTES`). Which other actions should ask for the password again (cancelling a signed letter, changing the signatories list, recording someone's absence)?
 
+- [ ] **App icon:** may the staff app use the Ministry's or the Government's emblem as its icon? The current one is a plain "M" (frontend/scripts/make-icons.py).
+
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 12h
+1. Why does the service worker not keep copies of pages for offline use?
+2. On a phone, the staff app can't be installed from `http://192.168.1.10`. Why, and what fixes it?
+
+#### Show answers
+1. Copies of staff pages would hold case data (importers, quantities, decisions) and stay on the device after sign-out, or on a lost phone. Only the "No connection" page is kept.
+2. Browsers allow service workers and installing only on https (or localhost). Step 13's Caddy serves the office server over https with its own certificate authority; once each device trusts that certificate, the app installs.
 
 ### Step 12f
 1. A staff member signs out, but someone had copied their token from the browser first. Before step 12f the token still worked. Why doesn't it now?
