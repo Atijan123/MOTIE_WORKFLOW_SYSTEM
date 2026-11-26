@@ -43,7 +43,9 @@ export function ScanWithCamera({ caseId, type, name, initialPages, page }: Props
   }
 
   return (
-    <details className="scan touch-only" open={pages.length > 0 || undefined}>
+    // Open while there are pages, or a message to read (after saving, the pages
+    // are gone but "Scanned and saved" must still be seen).
+    <details className="scan touch-only" open={pages.length > 0 || Boolean(state.done || state.error) || undefined}>
       <summary>Scan with camera</summary>
       <div className="stack">
         {/* Rear camera on phones; the photo isn't saved to the phone. */}
