@@ -29,6 +29,8 @@ HOST=etls.test
 WORK="$PWD/.ci-office"  # inside the checkout: Docker can mount it on Windows too
 
 cleanup() {
+    # The "USB drive" holds files the backup container wrote as root: empty it from inside.
+    compose --profile tools run --rm --entrypoint sh backup -c "rm -rf /backups/* /backups/.motie-backup-drive" >/dev/null 2>&1 || true
     compose --profile tools down --volumes --remove-orphans --timeout 5 >/dev/null 2>&1 || true
     rm -f .env
     rm -rf "$WORK"
@@ -166,7 +168,8 @@ code="$(compose exec -T api python -c "import urllib.request; print(urllib.reque
 check "the API is healthy after the restore" 200 "$code"
 
 echo "==> A damaged backup is refused before anything is touched"
-echo "tampered" >> "$daily/documents.tar.gz"
+# From inside the backup container: it wrote the files as root.
+compose --profile tools run --rm --entrypoint sh backup -c "echo tampered >> /backups/daily/$(basename "$daily")/documents.tar.gz"
 if bash scripts/restore.sh "$daily" --yes >/dev/null 2>&1; then
     echo "  FAILED: a damaged backup was restored" >&2; exit 1
 fi
