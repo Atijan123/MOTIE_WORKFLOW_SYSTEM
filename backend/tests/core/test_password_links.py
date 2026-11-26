@@ -62,7 +62,8 @@ async def test_the_link_sets_the_password_and_then_they_can_log_in(act, people, 
             select(AuditEvent.action).where(AuditEvent.entity_type == "user", AuditEvent.entity_id == str(user.id))
         )
     )
-    assert actions == ["user.created_for_walk_in", "user.password_link_sent", "user.password_set"]
+    # ...and since step 12d every login is audited too.
+    assert actions == ["user.created_for_walk_in", "user.password_link_sent", "user.password_set", "auth.login_succeeded"]
 
 
 async def test_a_link_works_once(act, people, client, db_session):
