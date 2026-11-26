@@ -59,7 +59,7 @@ Write for me, not for a reviewer: plain words, short paragraphs, real file paths
 
 ## CI
 
-GitHub Actions (.github/workflows/ci.yml) runs the backend tests, the frontend typecheck and unit tests, and every walk-through on each push. A step is done only when CI is green on its commit: quote the run link in the report. Repository: https://github.com/Atijan123/MOTIE_WORKFLOW_SYSTEM
+GitHub Actions (.github/workflows/ci.yml) runs the backend tests, the frontend typecheck and unit tests, and every walk-through on each push, all in Docker (Compose project `motie-ci`, with docker-compose.ci.yml on top). It runs on a self-hosted runner on the developer's PC (docs/SELF-HOSTED-RUNNER.md), or on GitHub's machines while the repository variable `CI_RUNS_ON` is set to `ubuntu-24.04`. A step is done only when CI is green on its commit: quote the run link in the report. Repository: https://github.com/Atijan123/MOTIE_WORKFLOW_SYSTEM
 
 ## Commands
 

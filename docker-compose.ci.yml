@@ -1,0 +1,56 @@
+# CI's changes to docker-compose.yml (step 12i). The workflow copies this file
+# to docker-compose.override.yml, which Compose reads automatically, and sets
+# COMPOSE_PROJECT_NAME=motie-ci. On a self-hosted runner (your PC) that keeps
+# CI apart from your own dev stack:
+#   - its own project name, so its own database, volumes and containers;
+#     a CI run can never reset your dev database;
+#   - no ports on the host, so it doesn't clash with a dev stack that's running;
+#   - its own image names, so it doesn't replace your dev images;
+#   - production builds of the two web apps (next build), with no source
+#     mounted and no file watching: much less memory than two `next dev`s.
+# Don't use it for development: nothing reloads when you edit.
+
+services:
+  db:
+    ports: !reset []
+
+  api:
+    image: motie-ci/backend
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    ports: !reset []
+    # The code is in the image; only uploaded documents need a volume.
+    volumes: !override
+      - documents:/data/documents
+
+  tools:
+    image: motie-ci/backend
+    volumes: !reset []
+
+  notifier:
+    image: motie-ci/backend
+    volumes: !reset []
+
+  web:
+    image: motie-ci/web
+    build:
+      context: ./frontend
+      target: prod
+      args:
+        PORTAL: applicant
+    environment:
+      # CI talks plain http between containers: the login cookie can't be "Secure" there.
+      COOKIE_SECURE: "false"
+    ports: !reset []
+    volumes: !reset []
+
+  staff:
+    image: motie-ci/staff
+    build:
+      context: ./frontend
+      target: prod
+      args:
+        PORTAL: staff
+    environment:
+      COOKIE_SECURE: "false"
+    ports: !reset []
+    volumes: !reset []

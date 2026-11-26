@@ -16,6 +16,19 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 12i — CI on a self-hosted runner on your PC (replaces the internet staging server) (2026-11-26)
+
+**Built:**
+- **The workflow runs everything in Docker** now (.github/workflows/ci.yml), so the same steps work on your Windows PC and on GitHub's machines: the backend tests in the `tools` container, the typecheck and unit tests as a Docker build step (`check` target in frontend/Dockerfile), the walk-throughs as before. Jobs run one after the other (one runner).
+- **Where it runs** is one setting: `runs-on: ${{ vars.CI_RUNS_ON || 'self-hosted' }}`. While the repository variable `CI_RUNS_ON` is `ubuntu-24.04` (set now, until your runner is installed), GitHub's machines run it; delete the variable and your runner does.
+- **Kept apart from your dev stack** (docker-compose.ci.yml, copied to the git-ignored docker-compose.override.yml by scripts/ci-prepare.sh): Compose project `motie-ci`, no host ports, its own image names, and production builds of the two web apps (`next build`; the `prod` target now takes `PORTAL` and listens on all addresses). A CI run can't reset your dev database.
+- **Safety:** pushes only (no `pull_request` trigger), only this repository (`if:` on each job), and the repository goes back to private once the runner is live.
+- **Clean-up after every job** (scripts/ci-cleanup.sh): the `motie-ci` containers and volumes, dangling images, build cache older than 7 days, Playwright's local results, the throwaway `.env`. Failure reports stay on GitHub for 7 days. It refuses to run for any project but `motie-ci`.
+- **Installing the runner:** scripts/runner/install-runner.ps1 (download, checksum check against GitHub's, registration through your `gh` login, a Windows service running as you; it asks for your Windows password in a Windows dialog) and scripts/runner/remove-runner.ps1. docs/SELF-HOSTED-RUNNER.md walks through install, register, service, status, update and removal, with every command you run marked.
+
+**Files:** .github/workflows/ci.yml; docker-compose.ci.yml, scripts/ci-prepare.sh, scripts/ci-cleanup.sh, scripts/runner/install-runner.ps1, remove-runner.ps1 (new); frontend/Dockerfile; .gitignore; docs/SELF-HOSTED-RUNNER.md (new); CLAUDE.md.
+**Try it:** follow docs/SELF-HOSTED-RUNNER.md once you have 10 GB free and Docker has 6 GB of memory. Until then CI runs on GitHub's machines.
+
 ### Step 12h — The staff app installs from the browser (PWA) (2026-11-26)
 
 **Built:**
@@ -1856,6 +1869,11 @@ The API can't see the browser: the browser talks to a Next.js server, which call
 **Here:** frontend/app/manifest.ts; frontend/public/sw.js; frontend/components/RegisterServiceWorker.tsx.
 **Learn more:** [web.dev: Learn PWA](https://web.dev/learn/pwa/)
 
+### Self-hosted CI runners
+**What:** a *runner* is the program that runs a CI job. GitHub's runners are fresh virtual machines, thrown away after each job. A *self-hosted* runner is the same program on your own machine: it asks GitHub for jobs, runs them there, and reports back. It's free and can use your local caches, but the machine keeps whatever a job leaves behind, so it must be cleaned, and it runs whatever code the workflow says, so only trusted code may reach it. That's why it must never serve pull requests from strangers, and why a public repository is the wrong place for one.
+**Here:** `runs-on` in .github/workflows/ci.yml; docker-compose.ci.yml; scripts/ci-prepare.sh and ci-cleanup.sh; docs/SELF-HOSTED-RUNNER.md.
+**Learn more:** [GitHub Docs: About self-hosted runners](https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners/about-self-hosted-runners) and its [security section](https://docs.github.com/en/actions/security-for-github-actions/security-guides/security-hardening-for-github-actions#hardening-for-self-hosted-runners)
+
 ## 3. Decisions
 
 ### Confirmed by the Ministry
@@ -1882,6 +1900,12 @@ These were open questions; the Ministry has answered them. The code follows them
 
 | Date | Decision | Alternatives considered | Why |
 | --- | --- | --- | --- |
+| 2026-11-26 | The runner on your PC, as a service under your own account | the default service account (NETWORK SERVICE); a separate Linux machine | Docker Desktop only answers its own user. A separate machine would be cleaner but you don't have one spare. |
+| 2026-11-26 | Every CI step in Docker, one workflow for both kinds of runner | separate workflows for Windows and Linux | One file to maintain, and `CI_RUNS_ON` switches between them in seconds. |
+| 2026-11-26 | CI's web apps are production builds | `next dev`, as on your laptop | Two dev servers watching files ran out of memory on this PC. Production builds use far less, start faster, and test what the office server will run. |
+| 2026-11-26 | A separate Compose project (`motie-ci`) with no host ports | CI uses your dev project | The demo seed resets the database: on your dev project it would wipe your dev data at every push. |
+| 2026-11-26 | Pushes only; the repository private again | allow pull requests | A pull request from a fork can carry its own workflow file and run it on your PC. |
+| 2026-11-26 | Keep CI's tagged images between runs; delete only dangling ones and old build cache | delete everything after each job | Rebuilding from nothing each time takes much longer; the tagged images take about 3 GB and are replaced, not added to. |
 | 2026-11-26 | The service worker caches only the offline page | cache pages for offline work | Case data on staff PCs and phones would outlive sign-out and survive a lost device. The office server is on the local network, so offline work isn't needed. |
 | 2026-11-26 | Icons drawn by a small script, committed as PNGs | a designer's logo; an image library | No new library, and you can change the colours or letter and run it again. A proper Ministry emblem can replace them later (open question). |
 | 2026-11-26 | Both apps get a manifest; the staff app is the one you asked for | staff only | `app/manifest.ts` is shared by both builds; giving the applicant portal its own name and start page costs nothing. |
@@ -2356,6 +2380,16 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 12i
+1. Why must a self-hosted runner never run workflows for pull requests from forks?
+2. The demo seed resets the database. Why can't a CI run on your PC wipe your dev database?
+3. Your runner is broken and you need CI today. What one command sends it back to GitHub's machines?
+
+#### Show answers
+1. A fork's pull request can change the workflow file itself, and the runner would run that code on your PC, as you, with access to Docker and your files.
+2. CI uses its own Compose project, `motie-ci` (COMPOSE_PROJECT_NAME in the workflow), so its database, volumes and containers are separate from yours (`motie_workflow_system`). reset-dev.sh only touches the project it runs in.
+3. `gh variable set CI_RUNS_ON --body ubuntu-24.04 --repo Atijan123/MOTIE_WORKFLOW_SYSTEM`.
 
 ### Step 12h
 1. Why does the service worker not keep copies of pages for offline use?

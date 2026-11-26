@@ -9,3 +9,6 @@ __pycache__/
 *.xlsx
 *.xlsm
 *.xls
+
+# CI only (scripts/ci-prepare.sh copies docker-compose.ci.yml here).
+docker-compose.override.yml

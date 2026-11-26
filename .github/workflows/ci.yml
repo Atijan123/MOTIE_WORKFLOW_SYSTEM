@@ -1,112 +1,85 @@
-# Continuous integration: every push and pull request runs the same checks you
-# run on your laptop, on a fresh GitHub machine. A step of the build is only
-# done when this is green on its commit (CLAUDE.md, "How to work").
+# Continuous integration: every push runs the same checks you run on your
+# laptop. A step of the build is only done when this is green on its commit
+# (CLAUDE.md, "How to work").
 #
-# Three jobs run side by side:
-#   backend   pytest against Postgres + pgvector (a "service container")
-#   frontend  TypeScript typecheck and the unit tests
-#   e2e       the whole stack in Docker Compose, seeded with demo data, then
-#             every Playwright walk-through; screenshots and traces are kept
-#             as a downloadable artifact when one fails
+# Where it runs (step 12i): on a self-hosted runner, your own Windows PC with
+# Docker Desktop (docs/SELF-HOSTED-RUNNER.md). To run on GitHub's machines
+# instead, set the repository variable CI_RUNS_ON to ubuntu-24.04
+# (Settings > Secrets and variables > Actions > Variables): the steps are the same.
+#
+# Everything runs in Docker, as Compose project "motie-ci" with
+# docker-compose.ci.yml on top: its own database and volumes, no host ports,
+# production builds of the web apps. So it never touches your dev stack.
+#
+# Three jobs, one after the other on a single runner:
+#   backend   pytest, in the tools container, against Postgres + pgvector
+#   frontend  TypeScript typecheck and the unit tests (a Docker build step)
+#   e2e       the whole stack, seeded with demo data, then every Playwright
+#             walk-through; the report and screenshots are kept 7 days
+# Each job ends by removing its containers, volumes and dangling images.
 name: CI
 
+# Pushes only, never pull requests: a pull request from someone else's fork
+# would run its own code on your PC. (The repository is private as well.)
 on:
   push:
-  pull_request:
 
-# No "cancel older runs": every step must be green on its own commit, so each
-# push gets its full run even when a newer one follows.
-
-# The jobs only read the code. Nothing here can push, comment or release.
 permissions:
   contents: read
 
+env:
+  COMPOSE_PROJECT_NAME: motie-ci
+  # Git Bash on Windows would otherwise rewrite /paths in arguments.
+  MSYS_NO_PATHCONV: "1"
+
+defaults:
+  run:
+    shell: bash
+
 jobs:
   backend:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    services:
-      db:
-        # The same image as docker-compose.yml.
-        image: pgvector/pgvector:pg16
-        env:
-          POSTGRES_USER: motie
-          POSTGRES_PASSWORD: ci-superuser-password
-          POSTGRES_DB: motie
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd "pg_isready -U motie -d motie"
-          --health-interval 5s --health-timeout 5s --health-retries 10
-    env:
-      # Throwaway passwords: this database lives only for this job.
-      POSTGRES_USER: motie
-      POSTGRES_PASSWORD: ci-superuser-password
-      POSTGRES_DB: motie
-      MIGRATION_DB_PASSWORD: ci-owner-password
-      APP_DB_PASSWORD: ci-app-password
-      DATABASE_URL: postgresql+asyncpg://motie_app:ci-app-password@localhost:5432/motie
-      MIGRATION_DATABASE_URL: postgresql+asyncpg://motie_owner:ci-owner-password@localhost:5432/motie
-      JWT_SECRET: ci-only-secret-not-used-anywhere-else-0123456789
-      APP_ENV: development
+    # Only this repository's own pushes (a fork's copy of this file can't use your runner).
+    if: github.repository == 'Atijan123/MOTIE_WORKFLOW_SYSTEM'
+    runs-on: ${{ vars.CI_RUNS_ON || 'self-hosted' }}
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: backend/requirements*.txt
-      - name: Install the backend's packages
-        run: pip install -r backend/requirements-dev.txt
-      - name: Create the database users (motie_owner, motie_app)
-        # The same script Postgres runs on a new dev volume; psql reaches the
-        # service container through these two variables.
-        env:
-          PGHOST: localhost
-          PGPASSWORD: ci-superuser-password
-        run: bash db/init/10-db-users.sh
+      - name: Prepare the CI stack
+        run: bash scripts/ci-prepare.sh
+      - name: Build the backend image
+        run: docker compose build api
       - name: Run the backend tests
-        working-directory: backend
-        run: pytest -v
+        run: docker compose run --rm tools pytest -q -p no:cacheprovider
+      - name: Clean up
+        if: always()
+        run: bash scripts/ci-cleanup.sh
 
   frontend:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    defaults:
-      run:
-        working-directory: frontend
+    if: github.repository == 'Atijan123/MOTIE_WORKFLOW_SYSTEM'
+    runs-on: ${{ vars.CI_RUNS_ON || 'self-hosted' }}
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-      - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
+      - name: Typecheck and unit tests
+        run: docker build --target check --tag motie-ci/frontend-check frontend
+      - name: Clean up
+        if: always()
+        run: bash scripts/ci-cleanup.sh
 
   e2e:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    if: github.repository == 'Atijan123/MOTIE_WORKFLOW_SYSTEM'
+    needs: [backend, frontend]
+    runs-on: ${{ vars.CI_RUNS_ON || 'self-hosted' }}
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-      - name: Write a .env for this run
-        # Random passwords each run; APP_ENV=development lets the demo seed run.
-        run: |
-          {
-            echo "POSTGRES_USER=motie"
-            echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)"
-            echo "POSTGRES_DB=motie"
-            echo "MIGRATION_DB_PASSWORD=$(openssl rand -hex 24)"
-            echo "APP_DB_PASSWORD=$(openssl rand -hex 24)"
-            echo "JWT_SECRET=$(openssl rand -hex 32)"
-            echo "APP_ENV=development"
-          } > .env
+      - name: Prepare the CI stack
+        run: bash scripts/ci-prepare.sh
       - name: Build the images
         run: docker compose --profile tools build
       - name: Reset and seed the demo data
-        # The same command as on your laptop: a fresh database, the dev users,
-        # the fictional cases and the fictional register (S13 needs it).
+        # The same command as on your laptop, on CI's own database: the dev
+        # users, the fictional cases and the fictional register (S13 needs it).
         run: bash scripts/seed-demo.sh --yes --discard-history
       - name: Start the applicant portal and the staff app
         run: docker compose up -d web staff
@@ -123,4 +96,7 @@ jobs:
           path: |
             frontend/e2e/playwright-report/
             frontend/e2e/test-results/
-          retention-days: 14
+          retention-days: 7
+      - name: Clean up
+        if: always()
+        run: bash scripts/ci-cleanup.sh
