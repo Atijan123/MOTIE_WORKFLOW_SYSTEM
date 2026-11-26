@@ -16,6 +16,16 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 13f — Updating the office server, with a backup first and a rollback (2026-11-26)
+
+**Built:**
+- **scripts/office-update.sh** updates the office server in five steps: (1) a backup, now; (2) the new version's code (`git`) and its images, built and tagged with the new version (`MOTIE_VERSION`) so the current version's images stay; (3) the database migrations; (4) start, and a health check over https through Caddy (the API's health *and* the staff login page); (5) if anything in 2–4 fails, it **rolls back**: the old code and images, and the database restored from step 1's backup, because a migration may already have changed it. Images two versions old are removed afterwards.
+- **Offline updates from a USB stick:** scripts/office-bundle.sh, run on any PC with internet, Git and Docker, writes `motie-update-<version>/`: the code as a git bundle, every image the office stack runs (`docker save`), and checksums. On the server: `sudo bash scripts/office-update.sh --from /media/usb/motie-update-<version>`, which loads the images instead of building and needs no internet.
+- **Tested in CI** (the `office` job): an update with a simulated failure right after its migrations (`OFFICE_UPDATE_SIMULATE_FAILURE=after-migrate`, used only by the test) must roll back, leaving the old version running, healthy and with its data; then a normal update must succeed and run the new version.
+
+**Files:** scripts/office-update.sh, scripts/office-bundle.sh (new); scripts/ci-office-smoke.sh.
+**Try it:** on the office server, `sudo bash scripts/office-update.sh` (docs/OFFICE-SETUP.md, "Updates"). The automatic test is the CI `office` job.
+
 ### Step 13e — A warning on the staff home page when the last backup is old (2026-11-26)
 
 **Built:** `GET /system/backup-status` (backend/app/api/backup_status.py) reads the time of the last good backup from `last-success` on the backup drive, which the office stack mounts into the API read-only. The staff home page (frontend/app/staff/page.staff.tsx) shows "The last backup was N days ago…" when it's more than `BACKUP_WARN_DAYS` (2) old, and "No backup can be found…" when the file is missing or unreadable, e.g. the USB drive is unplugged. Only office mode checks; elsewhere there are no backups to check.
@@ -1965,6 +1975,11 @@ The API can't see the browser: the browser talks to a Next.js server, which call
 **Here:** office/backup/backup.sh, restore-inside.sh; scripts/restore.sh; scripts/ci-office-smoke.sh (the restore test); backend/app/api/backup_status.py (13e).
 **Learn more:** [Backblaze: The 3-2-1 backup strategy](https://www.backblaze.com/blog/the-3-2-1-backup-strategy/) and [age: simple, modern file encryption](https://github.com/FiloSottile/age)
 
+### Safe updates: backup, migrate, health check, roll back
+**What:** an update changes two things at once: the code, and (through migrations) the database. If the new version fails, putting the old code back isn't enough: the old code may not understand the changed database. So the safe order is: take a backup *just before*; keep the old images; migrate; start; check the app really works; and if not, put back *both* the old code and the database from that backup. A health check is what decides: here the API's own database check and the staff login page, reached the way staff reach them, through Caddy. Rolling back loses anything done between the backup and the rollback, which is why updates are best done when nobody is working.
+**Here:** scripts/office-update.sh (`start_version()`, `health()`, `rollback()`); scripts/restore.sh does the database part.
+**Learn more:** [Martin Fowler: Blue-green deployment](https://martinfowler.com/bliki/BlueGreenDeployment.html) (the bigger version of keeping the old version ready)
+
 ## 3. Decisions
 
 ### Confirmed by the Ministry
@@ -1991,6 +2006,9 @@ These were open questions; the Ministry has answered them. The code follows them
 
 | Date | Decision | Alternatives considered | Why |
 | --- | --- | --- | --- |
+| 2026-11-26 | A rollback restores the database from the pre-update backup | downgrade migrations (`alembic downgrade`) | Our migrations have downgrades, but data migrations can't always be undone exactly, and a restore is the one path we test every day. |
+| 2026-11-26 | Images are built on the server (online) or loaded from a USB bundle (offline) | a container registry | Nothing to host or sign in to; the bundle is just files, checked with SHA256SUMS. |
+| 2026-11-26 | A test-only switch (`OFFICE_UPDATE_SIMULATE_FAILURE`) to make CI exercise the rollback | test the rollback by hand | A rollback that has never run is a rollback that may not work. The switch does nothing unless set. |
 | 2026-11-26 | `pg_dump` (a logical backup) each night | copying Postgres's data files; continuous archiving (WAL) | A dump can be restored into any Postgres 16, is checked by pg_restore, and is easy to explain. Continuous archiving loses less (minutes instead of a day) but needs more care; worth it later if a day's loss is too much (open question). |
 | 2026-11-26 | `age`, with the public key on the server and the private key off it | gpg; a password | You suggested age or gpg: age is simpler, with one small key file. A password would have to be on the server for the nightly job, so a stolen server would hold it. |
 | 2026-11-26 | The backup tools in their own image | install pg_dump and age on Ubuntu | pg_dump must match the database's version; in the image it always does, and the server stays plain Ubuntu plus Docker. |
@@ -2496,9 +2514,19 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 
 - [ ] **Backups (step 13d):** is losing up to a day's work acceptable if the server dies (backups are nightly)? Who takes the weekly encrypted archive off-site, where to, and who holds the two copies of the private key? How long must backups be kept (now 30 days of daily, 8 weeks of weekly)? Check against Gambian records rules.
 
+- [ ] **Updates (step 13f):** when may the office server be updated (e.g. after hours, with Records told)? Who does it: the ICT unit? Rolling back loses work done between the backup and the rollback (minutes), so updates should happen when nobody is working.
+
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 13f
+1. A new version's migration runs, then the API won't start. What state does office-update.sh leave the server in, and why does it restore the database too?
+2. The internet is down. How does a new version get onto the server?
+
+#### Show answers
+1. The old version, running, with the database as it was just before the update. The migration may already have changed the database, and the old code might not work with the changed tables, so it restores the backup taken at the start, then checks health again.
+2. On a PC with internet: `bash scripts/office-bundle.sh <version> /media/usb`. Carry the stick to the server and run `sudo bash scripts/office-update.sh --from /media/usb/motie-update-<version>`: it loads the images from the stick instead of building.
 
 ### Steps 13d and 13e
 1. The USB drive was unplugged a week ago. What do the nightly backup and the staff home page do?

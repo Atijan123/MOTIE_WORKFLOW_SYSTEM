@@ -166,4 +166,20 @@ if bash scripts/restore.sh "$daily" --yes >/dev/null 2>&1; then
 fi
 check "the data is still there after the refused restore" 1 "$(count_users)"
 
-echo "The office stack works over https, and its backups restore."
+# ------------------------------------------------------------- 13f: updates
+echo "==> An update that fails after its migrations is rolled back"
+before="$(grep -E '^MOTIE_VERSION=' .env | cut -d= -f2)"
+if OFFICE_UPDATE_SIMULATE_FAILURE=after-migrate bash scripts/office-update.sh --ref HEAD --no-fetch; then
+    echo "  FAILED: the update reported success" >&2; exit 1
+fi
+check "the version is back to what it was" "$before" "$(grep -E '^MOTIE_VERSION=' .env | cut -d= -f2)"
+check "the data survived the rollback" 1 "$(count_users)"
+code="$(compose exec -T api python -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8000/health/db').status)" | tr -d '\r')"
+check "the API is healthy after the rollback" 200 "$code"
+
+echo "==> A normal update"
+bash scripts/office-update.sh --ref HEAD --no-fetch
+check "it runs the version named after the commit" "$(git describe --tags --always)" "$(grep -E '^MOTIE_VERSION=' .env | cut -d= -f2)"
+check "the data is still there" 1 "$(count_users)"
+
+echo "The office stack works over https, its backups restore, and updates roll back on failure."
