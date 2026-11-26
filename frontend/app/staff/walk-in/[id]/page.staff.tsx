@@ -6,6 +6,8 @@ import { notFound, redirect } from "next/navigation";
 import { ActionForm, SubmitButton } from "@/components/ActionForm";
 import { ApplicationForm, type FormOptions } from "@/components/ApplicationForm";
 import { DocumentRow } from "@/components/DocumentUpload";
+import { scannedPages } from "@/components/staff/CasePanel";
+import { ScanWithCamera } from "@/components/staff/ScanWithCamera";
 import { api, apiOrNull } from "@/lib/api";
 import { requireUser } from "@/lib/session";
 import type { Case, FacilityLetter, Requirement } from "@/lib/types";
@@ -34,6 +36,7 @@ export default async function WalkIn({
   // Submitted already, or not one Records may edit: the usual case page.
   if (!submit) redirect(`/staff?case=${id}`);
   const blocked = submit.blocked_by ?? [];
+  const scan = await scannedPages(id, documents);
   const { saved } = await searchParams;
 
   return (
@@ -58,7 +61,9 @@ export default async function WalkIn({
           {documents
             .filter((d) => d.applies !== false)
             .map((d) => (
-              <DocumentRow key={d.type} requirement={d} upload={uploadWalkInDocument.bind(null, id, d.type)} />
+              <DocumentRow key={d.type} requirement={d} upload={uploadWalkInDocument.bind(null, id, d.type)}>
+                <ScanWithCamera caseId={id} type={d.type} name={d.name} initialPages={scan[d.type] ?? []} page={`/staff/walk-in/${id}`} />
+              </DocumentRow>
             ))}
         </ul>
       </section>

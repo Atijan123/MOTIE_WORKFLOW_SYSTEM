@@ -212,3 +212,9 @@ table.table { width: 100%; border-collapse: collapse; font-size: 15px; }
 .code-list { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .code-list code { font-family: ui-monospace, monospace; font-size: 15px; letter-spacing: 0.05em; }
 .recovery-codes { display: flex; flex-direction: column; gap: 12px; }
+
+/* Phone scanning (step 13g): only where there is a touch screen (phones, tablets). */
+@media (pointer: fine) { .touch-only { display: none; } }
+.scan summary { cursor: pointer; font-weight: 600; color: var(--info); padding: 6px 0; }
+.scan-pages { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; }
+.scan-pages img { width: 100%; height: auto; border: 1px solid var(--border); border-radius: 6px; background: #fff; }

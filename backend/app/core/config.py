@@ -54,6 +54,14 @@ class Settings(BaseSettings):
     document_storage_dir: str = "/data/documents"
     # Bigger uploads are refused (413) while they stream in, before they fill the disk.
     max_upload_bytes: int = 10 * 1024 * 1024
+    # Phone scanning (step 13g): one photo may be this big as it arrives (a
+    # phone's full-size photo), and a document this many pages. Each page is
+    # shrunk to SCAN_LONG_SIDE pixels and compressed, and the finished PDF must
+    # still fit MAX_UPLOAD_BYTES like any upload.
+    scan_max_photo_bytes: int = 20 * 1024 * 1024
+    scan_max_pages: int = Field(default=20, gt=0)
+    scan_long_side: int = Field(default=2000, ge=800)  # about 200 dpi on an A4 page
+    scan_jpeg_quality: int = Field(default=70, ge=30, le=95)
 
     # How emails leave. Only "fake" exists yet: it logs them and sends nothing.
     # [CONFIRM] the Ministry's mail server; then "smtp" with its settings.

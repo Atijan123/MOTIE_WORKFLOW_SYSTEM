@@ -15,7 +15,8 @@ const nextConfig = {
   experimental: {
     serverActions: {
       // Uploads go through a server action; the API refuses anything over 10 MB.
-      bodySizeLimit: "11mb",
+      // A phone's photo for scanning may be up to 20 MB (step 13g).
+      bodySizeLimit: "21mb",
     },
   },
   async headers() {

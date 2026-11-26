@@ -5,6 +5,7 @@ import { apiFetch } from "@/lib/api";
 
 const ALLOWED = [
   /^cases\/\d+\/documents\/\d+\/file$/,
+  /^cases\/\d+\/documents\/[a-z_]+\/scan\/pages\/\d+\/image$/, // a scanned page's preview (step 13g)
   /^etls\/facility-letters\/\d+\/letter\.pdf$/,
   /^etls\/facility-letters\/\d+\/letter-preview\.pdf$/,
   /^etls\/facility-letters\/\d+\/letters\/\d+\/file$/,

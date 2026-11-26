@@ -12,3 +12,7 @@ openpyxl==3.1.5
 # (pure Python, no image libraries); encryption of the authenticator secrets.
 qrcode==8.0
 cryptography==44.0.0
+# Step 13g (you approved pillow-heif): phone photos into one PDF. Pillow is
+# already here (fpdf2 needs it), now pinned; pillow-heif reads iPhones' HEIC.
+pillow==13.0.0
+pillow-heif==1.8.1

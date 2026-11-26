@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 
-import { expect, type Browser, type Page } from "@playwright/test";
+import { expect, type Browser, type BrowserContextOptions, type Page } from "@playwright/test";
 
 // The seeded dev users (backend/app/dev_seed.py), all with the same password.
 export const PASSWORD = process.env.DEV_SEED_PASSWORD || "dev password 123";
@@ -52,8 +52,8 @@ async function giveCode(page: Page, email: string) {
 }
 
 /** A fresh browser session (its own cookies), on that person's app, logged in as `email`. Staff also give their code (step 12e). */
-export async function loginAs(browser: Browser, email: string): Promise<Page> {
-  const context = await browser.newContext({ baseURL: appFor(email) });
+export async function loginAs(browser: Browser, email: string, options: BrowserContextOptions = {}): Promise<Page> {
+  const context = await browser.newContext({ ...options, baseURL: appFor(email) });
   const page = await context.newPage();
   await page.goto("/login");
   await page.getByLabel("Email").fill(email);

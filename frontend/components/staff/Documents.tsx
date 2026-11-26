@@ -3,8 +3,21 @@ import { markOriginalSeen } from "@/app/staff/actions";
 import { longDate } from "@/lib/dates";
 import type { Requirement } from "@/lib/types";
 
-/** The case's documents with view links; for papers whose original must be seen, the Records tick (S1). */
-export function Documents({ caseId, requirements, canSeeOriginals }: { caseId: number; requirements: Requirement[]; canSeeOriginals: boolean }) {
+import { ScanWithCamera } from "./ScanWithCamera";
+
+/** The case's documents with view links; for papers whose original must be seen, the Records tick (S1).
+ * `scan`: Records may photograph a document with a phone here (step 13g): the pages so far, per type. */
+export function Documents({
+  caseId,
+  requirements,
+  canSeeOriginals,
+  scan,
+}: {
+  caseId: number;
+  requirements: Requirement[];
+  canSeeOriginals: boolean;
+  scan?: Record<string, number[]>;
+}) {
   const shown = requirements.filter((r) => r.applies !== false);
   return (
     <section className="stack-lg" aria-labelledby="docs">
@@ -31,6 +44,9 @@ export function Documents({ caseId, requirements, canSeeOriginals }: { caseId: n
                       ✓ Original seen {latest.original_seen_at ? longDate(latest.original_seen_at) : ""}
                     </span>
                   )
+                ) : null}
+                {scan ? (
+                  <ScanWithCamera caseId={caseId} type={r.type} name={r.name} initialPages={scan[r.type] ?? []} page="/staff" />
                 ) : null}
               </div>
               {latest ? (

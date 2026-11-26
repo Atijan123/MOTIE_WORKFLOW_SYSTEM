@@ -5,6 +5,7 @@ import { api, apiOrNull } from "@/lib/api";
 import { longDate } from "@/lib/dates";
 import { goods, hsCode } from "@/lib/labels";
 import { passwordNeeded } from "@/lib/reauth";
+import { getMe } from "@/lib/session";
 import type { Case, FacilityLetter, HistoryEvent, Requirement, SessionInfo } from "@/lib/types";
 
 import { Actions } from "./Actions";
@@ -30,6 +31,10 @@ export async function CasePanel({ id }: { id: number }) {
   // make that step's move: the post holder, or someone acting for them.
   const canVerify = kase.available_actions.some((a) => a.to_status === "verified");
   const canSign = kase.available_actions.some((a) => a.to_status === "signed");
+  // Records may photograph documents with a phone on an open case (step 13g).
+  const me = await getMe();
+  const canScan = Boolean(me?.positions.includes("records_officer")) && !kase.status.is_final;
+  const scan = canScan ? await scannedPages(id, documents) : undefined;
   // A walk-in draft Records entered (step 13b): finished on its own page.
   const canFinishWalkIn = Boolean(kase.entered_by) && kase.available_actions.some((a) => a.to_status === "submitted");
 
@@ -63,7 +68,7 @@ export async function CasePanel({ id }: { id: number }) {
             </span>
           </div>
         ) : null}
-        <Documents caseId={id} requirements={documents} canSeeOriginals={canSeeOriginals} />
+        <Documents caseId={id} requirements={documents} canSeeOriginals={canSeeOriginals} scan={scan} />
         {letter && canVerify ? <DeskChecks caseId={id} letter={letter} documents={documents} /> : null}
         {canSign ? <Signing caseId={id} /> : null}
         <Actions caseId={id} actions={kase.available_actions} askPassword={passwordNeeded(kase.available_actions, login)} />
@@ -107,4 +112,13 @@ function Summary({ letter }: { letter: FacilityLetter }) {
       </div>
     </dl>
   );
+}
+
+/** The pages photographed so far for each document of the case (step 13g). */
+export async function scannedPages(caseId: number, documents: Requirement[]): Promise<Record<string, number[]>> {
+  const shown = documents.filter((d) => d.applies !== false);
+  const lists = await Promise.all(
+    shown.map((d) => api<{ page_no: number }[]>(`/cases/${caseId}/documents/${d.type}/scan`)),
+  );
+  return Object.fromEntries(shown.map((d, i) => [d.type, lists[i].map((p) => p.page_no)]));
 }

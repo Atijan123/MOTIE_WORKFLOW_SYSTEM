@@ -1,12 +1,12 @@
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Depends, Request, Response, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.documents import service, storage
+from app.core.documents import scanning, service, storage
 from app.core.documents.models import CaseDocument
 from app.core.identity.deps import get_current_user
 from app.core.identity.models import User
@@ -138,6 +138,88 @@ async def download_document(
         content_disposition_type="attachment",
         headers={"X-Content-Type-Options": "nosniff"},
     )
+
+
+# --- Scanning with a phone's camera (step 13g, documents/scanning.py) -----------------
+
+
+class ScanPageOut(BaseModel):
+    page_no: int
+    size_bytes: int
+
+
+def _pages_out(pages) -> list[ScanPageOut]:
+    return [ScanPageOut(page_no=p.page_no, size_bytes=p.size_bytes) for p in pages]
+
+
+def _photo_not_too_big(request: Request) -> None:
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > settings.scan_max_photo_bytes:
+        raise UploadTooLarge(f"A photo can be at most {settings.scan_max_photo_bytes // (1024 * 1024)} MB.")
+
+
+@router.get("/{case_id}/documents/{type_code}/scan", response_model=list[ScanPageOut])
+async def scan_pages(
+    case_id: int, type_code: str, user: User = Depends(get_current_user), session: AsyncSession = Depends(get_session)
+):
+    """The pages photographed so far for this document (yours only)."""
+    return _pages_out(await scanning.pages(session, case_id, type_code, user))
+
+
+@router.post("/{case_id}/documents/{type_code}/scan/pages", response_model=list[ScanPageOut], status_code=status.HTTP_201_CREATED)
+async def add_scan_page(
+    case_id: int, type_code: str, request: Request,
+    user: User = Depends(get_current_user), session: AsyncSession = Depends(get_session),
+):
+    """One photo (the raw body: JPEG, PNG or HEIC) as the next page."""
+    _photo_not_too_big(request)
+    return _pages_out(await scanning.add_page(session, case_id=case_id, type_code=type_code, chunks=request.stream(), actor=user))
+
+
+@router.put("/{case_id}/documents/{type_code}/scan/pages/{page_no}", response_model=list[ScanPageOut])
+async def retake_scan_page(
+    case_id: int, type_code: str, page_no: int, request: Request,
+    user: User = Depends(get_current_user), session: AsyncSession = Depends(get_session),
+):
+    """Take page `page_no` again: the new photo replaces it."""
+    _photo_not_too_big(request)
+    return _pages_out(await scanning.add_page(
+        session, case_id=case_id, type_code=type_code, chunks=request.stream(), actor=user, replace=page_no
+    ))
+
+
+@router.get("/{case_id}/documents/{type_code}/scan/pages/{page_no}/image")
+async def scan_page_image(
+    case_id: int, type_code: str, page_no: int,
+    user: User = Depends(get_current_user), session: AsyncSession = Depends(get_session),
+):
+    """The page as it will be in the PDF (upright, shrunk), for the preview."""
+    content = await scanning.page_image(session, case_id, type_code, page_no, user)
+    return Response(content, media_type="image/jpeg", headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"})
+
+
+@router.delete("/{case_id}/documents/{type_code}/scan/pages/{page_no}", response_model=list[ScanPageOut])
+async def remove_scan_page(
+    case_id: int, type_code: str, page_no: int,
+    user: User = Depends(get_current_user), session: AsyncSession = Depends(get_session),
+):
+    return _pages_out(await scanning.remove_page(session, case_id, type_code, page_no, user))
+
+
+@router.delete("/{case_id}/documents/{type_code}/scan", status_code=status.HTTP_204_NO_CONTENT)
+async def cancel_scan(
+    case_id: int, type_code: str, user: User = Depends(get_current_user), session: AsyncSession = Depends(get_session)
+):
+    await scanning.cancel(session, case_id, type_code, user)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/{case_id}/documents/{type_code}/scan/finish", response_model=DocumentOut, status_code=status.HTTP_201_CREATED)
+async def finish_scan(
+    case_id: int, type_code: str, user: User = Depends(get_current_user), session: AsyncSession = Depends(get_session)
+):
+    """Join the pages into one PDF, stored as an upload of this document."""
+    return _document_out(await scanning.finish(session, case_id=case_id, type_code=type_code, actor=user))
 
 
 @router.post("/{case_id}/documents/{document_id}/original-seen", response_model=DocumentOut)

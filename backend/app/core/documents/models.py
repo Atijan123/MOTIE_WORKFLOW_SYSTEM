@@ -11,6 +11,7 @@ from sqlalchemy import (
     ForeignKey,
     Identity,
     Index,
+    Integer,
     SmallInteger,
     Text,
     UniqueConstraint,
@@ -141,3 +142,25 @@ class IssuedDocument(Base):
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     cancelled_by: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("core.users.id"))
     cancellation_reason: Mapped[str | None] = mapped_column(Text)
+
+
+class ScanPage(Base):
+    """One page of a document being photographed with a phone (0047, step 13g).
+    Temporary: documents/scanning.py joins them into one PDF and deletes them."""
+
+    __tablename__ = "scan_pages"
+    __table_args__ = (
+        CheckConstraint("page_no > 0", name="scan_pages_page_no_positive"),
+        UniqueConstraint("case_id", "document_type", "user_id", "page_no", name="scan_pages_one_per_number"),
+        {"schema": "core"},
+    )
+    __mapper_args__ = {"eager_defaults": True}
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    case_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("core.cases.id"))
+    document_type: Mapped[str] = mapped_column(Text)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("core.users.id"))
+    page_no: Mapped[int] = mapped_column(SmallInteger)
+    storage_key: Mapped[str] = mapped_column(Text, unique=True)
+    size_bytes: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

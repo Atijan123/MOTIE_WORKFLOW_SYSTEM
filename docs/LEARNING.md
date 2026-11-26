@@ -16,6 +16,22 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 13g — Scanning paper documents with a phone's camera (2026-11-26)
+
+**Built:**
+- **"Scan with camera"** under each document on the Records case page and on the walk-in page, on phones and tablets only (it hides wherever there's a mouse: `.touch-only` in frontend/app/globals.css). It opens the **rear camera** (`capture="environment"`); Records photographs the document page by page, sees each page as the server made it, can **Retake** or **Remove** any page, then **Save N pages as one PDF** (frontend/components/staff/ScanWithCamera.tsx, frontend/app/staff/scan/actions.ts).
+- **Each photo goes to the server as it's taken** (`POST /cases/{id}/documents/{type}/scan/pages`, raw body like an upload) and is processed there (backend/app/core/documents/scanning.py, `process_page()`):
+  - checked by its first bytes: only JPEG, PNG or **HEIC** (iPhones; read with the new library **pillow-heif**, as you approved);
+  - refused (413) if bigger than `SCAN_MAX_PHOTO_BYTES` (20 MB) as it arrives, or if its header claims an absurd size (a "decompression bomb");
+  - **turned upright** from the photo's orientation tag (`ImageOps.exif_transpose`);
+  - **shrunk** to `SCAN_LONG_SIDE` (2000 px, about 200 dpi on A4) and **compressed** (JPEG quality `SCAN_JPEG_QUALITY`, 70), with **no metadata** (no location, no phone model).
+- **Pages wait on the server** (`core.scan_pages`, migration 0047; one set per person, case and document; at most `SCAN_MAX_PAGES`, 20; left over a day, they're cleared). **Finish** joins them into one PDF, one A4 page each, turned to suit the photo (`join_pages()`, with fpdf2, which embeds the JPEGs without compressing them again), and stores it through the ordinary upload (`documents.service.upload()`): the same permission check, 10 MB limit, file-type check and audit row as any upload. Then the pages and their files are deleted.
+- **Nothing is kept on the phone:** the preview images come from the server (`Cache-Control: no-store`), the file box is emptied after each photo, and photos taken through `capture="environment"` aren't saved to the phone's gallery.
+- Server actions now accept up to 21 MB (a full-size phone photo) instead of 11 MB (frontend/next.config.mjs).
+
+**Files:** backend/app/core/documents/scanning.py (new), router.py, models.py (`ScanPage`); backend/alembic/versions/0047_scan_pages.py; backend/app/core/config.py (`scan_*` settings); backend/requirements.txt (`pillow`, `pillow-heif`); backend/tests/core/test_scanning.py (new); frontend/components/staff/ScanWithCamera.tsx, Documents.tsx, CasePanel.tsx (`scannedPages()`); frontend/app/staff/scan/actions.ts (new), walk-in/[id]/page.staff.tsx; frontend/app/files/[...path]/route.ts; frontend/app/globals.css; frontend/next.config.mjs; frontend/e2e/tests/scan.spec.ts (new), helpers.ts.
+**Try it:** rebuild once (`docker compose build api`). On a phone on the same network as your PC, open the staff app, sign in as `records@motie.test`, open a case, tap **Scan with camera** under a document. (On the office server this needs the phone to trust the server's certificate: docs/OFFICE-SETUP.md.) Tests: `docker compose run --rm tools pytest tests/core/test_scanning.py -v`; `docker compose run --rm e2e npx playwright test tests/scan.spec.ts`.
+
 ### Step 13f — Updating the office server, with a backup first and a rollback (2026-11-26)
 
 **Built:**
@@ -1981,6 +1997,13 @@ The API can't see the browser: the browser talks to a Next.js server, which call
 **Here:** scripts/office-update.sh (`start_version()`, `health()`, `rollback()`); scripts/restore.sh does the database part.
 **Learn more:** [Martin Fowler: Blue-green deployment](https://martinfowler.com/bliki/BlueGreenDeployment.html) (the bigger version of keeping the old version ready)
 
+### Handling photos from phones safely (orientation, HEIC, decompression bombs, metadata)
+**What:** a phone photo is not just a picture. Phones usually don't rotate the pixels when held sideways; they store a tag that says "rotate me", which many programs ignore, so the page ends up sideways in a PDF. iPhones save photos as **HEIC**, which most software can't open. Photos carry **metadata** (EXIF): often the GPS location where they were taken and the phone's model, which don't belong in a Ministry file. And an image file can be a trap: a few kilobytes that claim to be 60,000 × 60,000 pixels, a **decompression bomb**, would use gigabytes of memory if decoded. So the server checks the file's first bytes (not its name), reads the header and refuses absurd sizes before decoding, applies the rotation tag, converts HEIC, shrinks the page to what's needed to read it, and saves a fresh JPEG without the metadata.
+**Stops:** sideways pages; unreadable HEIC files; a staff member's location being stored with every scan; a crafted image exhausting the server's memory; a non-image file passed off as a photo.
+**Doesn't stop:** a blurred or badly lit photo (Retake is for that); a genuine but wrong document; malware in a PDF uploaded the ordinary way (virus scanning is still an open item from step 6c).
+**Here:** `photo_kind()`, `process_page()` and `join_pages()` in backend/app/core/documents/scanning.py; the tests in backend/tests/core/test_scanning.py.
+**Learn more:** [Pillow docs: ImageOps.exif_transpose](https://pillow.readthedocs.io/en/stable/reference/ImageOps.html#PIL.ImageOps.exif_transpose) and [Wikipedia: Zip bomb](https://en.wikipedia.org/wiki/Zip_bomb) (decompression bombs, the same idea)
+
 ## 3. Decisions
 
 ### Confirmed by the Ministry
@@ -2007,6 +2030,11 @@ These were open questions; the Ministry has answered them. The code follows them
 
 | Date | Decision | Alternatives considered | Why |
 | --- | --- | --- | --- |
+| 2026-11-26 | Each photo is sent and processed as it's taken; pages wait on the server | send all photos at the end; join them in the browser | Small requests (one photo each) fit the existing upload path with no new upload library; the previews show exactly what the PDF will hold; nothing waits on the phone. Joining in the browser can't read HEIC on most phones. |
+| 2026-11-26 | The scanned PDF is stored through the ordinary upload | a separate "scan" storage | The same checks, limit and audit row as every upload, and the desk and the PS see it like any other document. |
+| 2026-11-26 | 2000 px long side, JPEG quality 70 | keep the full photo | About 200 dpi on A4: clearly readable, and around 300–500 KB a page instead of 3–5 MB, so a 20-page document stays under the 10 MB limit. `[CONFIRM]` with Records once they try it. |
+| 2026-11-26 | Shown only on touch screens | always shown | On a PC, "capture" just opens a file picker, which the Upload box already does. |
+| 2026-11-26 | Pages are one set per person, case and document | one shared set per case | Two officers scanning at once would otherwise mix their pages. |
 | 2026-11-26 | A rollback restores the database from the pre-update backup | downgrade migrations (`alembic downgrade`) | Our migrations have downgrades, but data migrations can't always be undone exactly, and a restore is the one path we test every day. |
 | 2026-11-26 | Images are built on the server (online) or loaded from a USB bundle (offline) | a container registry | Nothing to host or sign in to; the bundle is just files, checked with SHA256SUMS. |
 | 2026-11-26 | A test-only switch (`OFFICE_UPDATE_SIMULATE_FAILURE`) to make CI exercise the rollback | test the rollback by hand | A rollback that has never run is a rollback that may not work. The switch does nothing unless set. |
@@ -2517,9 +2545,21 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 
 - [ ] **Updates (step 13f):** when may the office server be updated (e.g. after hours, with Records told)? Who does it: the ICT unit? Rolling back loses work done between the backup and the rollback (minutes), so updates should happen when nobody is working.
 
+- [ ] **Phone scanning (step 13g):** which phones will Records use (their own, or a Ministry phone or tablet)? Is 2000 pixels sharp enough for the desk to read stamps and small print? Should a scan also record that the original was seen in person (it doesn't now)?
+
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 13g
+1. A Records officer photographs a page with the phone held sideways. Why does it end up upright in the PDF?
+2. Why does `process_page()` look at the image's size before decoding it?
+3. Where are the pages kept between taking the first photo and pressing "Save as one PDF"?
+
+#### Show answers
+1. The phone stores the pixels sideways plus an orientation tag; `ImageOps.exif_transpose()` in `process_page()` applies the tag, then the page is saved without it.
+2. Opening an image reads only its header; decoding reads the pixels. A decompression bomb claims a huge size in a tiny file; checking `width × height` first refuses it before it can take gigabytes of memory.
+3. On the server: each processed page is a JPEG in the documents folder with a row in `core.scan_pages`. The phone only shows previews fetched from the server; nothing is stored on it. Pages left unfinished for a day are cleared.
 
 ### Step 13f
 1. A new version's migration runs, then the API won't start. What state does office-update.sh leave the server in, and why does it restore the database too?
