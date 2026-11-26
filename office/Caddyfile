@@ -1,0 +1,42 @@
+# Caddy on the office server (step 13c): HTTPS for the staff app on the local
+# network, with certificates from Caddy's own certificate authority ("tls
+# internal"). Each staff PC and phone must trust that authority's root
+# certificate once: docs/OFFICE-SETUP.md, "Trusting the server's certificate".
+{
+	# No admin API listening, not even inside the container.
+	admin off
+}
+
+{$OFFICE_HOSTNAME} {
+	tls internal
+
+	# The API's health check, for scripts/office-update.sh and the daily
+	# checks. Nothing else of the API is reachable from the network: browsers
+	# talk to the staff app, which calls the API inside Docker.
+	handle /api/health* {
+		uri strip_prefix /api
+		reverse_proxy api:8000
+	}
+
+	handle {
+		reverse_proxy staff:3000 {
+			# The browser's real address, for the staff IP allowlist (step 12c).
+			# Set here, replacing anything a browser sends.
+			header_up X-Real-IP {remote_host}
+		}
+	}
+
+	header {
+		# Browsers remember to use https only, for a year.
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "same-origin"
+		-Server
+	}
+
+	encode gzip
+	log {
+		output stdout
+		format console
+	}
+}

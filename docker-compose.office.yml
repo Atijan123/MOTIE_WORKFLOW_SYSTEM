@@ -1,0 +1,124 @@
+# The Ministry's office server (step 13c, docs/OFFICE-SETUP.md). Real data:
+#
+#     docker compose -f docker-compose.office.yml up -d
+#
+# Everything comes in through Caddy, on the office network only, with https
+# from Caddy's internal certificate authority. No other container has a port
+# on the server; Postgres, uploads and Caddy's keys live in named volumes.
+# There is no applicant portal: office mode (APP_ENV=office) refuses it anyway.
+#
+# Settings come from .env on the server (start from office/env.example).
+name: motie-office
+
+x-backend: &backend
+  build:
+    context: ./backend
+  image: motie/office-backend:${MOTIE_VERSION:-local}
+  restart: unless-stopped
+  depends_on:
+    db:
+      condition: service_healthy
+
+x-backend-env: &backend-env
+  APP_ENV: office
+  DATABASE_URL: postgresql+asyncpg://motie_app:${APP_DB_PASSWORD:?Set APP_DB_PASSWORD in .env}@db:5432/${POSTGRES_DB:?Set POSTGRES_DB in .env}
+  JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+  MFA_SECRET_KEY: ${MFA_SECRET_KEY:?Set MFA_SECRET_KEY in .env}
+  STAFF_PORTAL_KEY: ${STAFF_PORTAL_KEY:?Set STAFF_PORTAL_KEY in .env}
+  # Staff requests must come through this address (step 12b).
+  STAFF_PORTAL_HOSTS: ${OFFICE_HOSTNAME:?Set OFFICE_HOSTNAME in .env}
+  OFFICE_NETWORK: ${OFFICE_NETWORK:?Set OFFICE_NETWORK in .env}
+  STAFF_IP_ALLOWLIST: ${STAFF_IP_ALLOWLIST:-}
+  FACILITY_LETTER_REFERENCE_FORMAT: ${FACILITY_LETTER_REFERENCE_FORMAT:-}
+  PUBLIC_BASE_URL: https://${OFFICE_HOSTNAME}
+  STAFF_EMAILS_ENABLED: ${STAFF_EMAILS_ENABLED:-false}
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    env_file: .env
+    # Durability (docs/OFFICE-SETUP.md, "Power cuts"): these are Postgres's
+    # defaults, written out so nobody "speeds it up" by turning them off. With
+    # them, a change is on disk before Postgres reports it saved, so a power
+    # cut loses nothing that was confirmed.
+    command: ["postgres", "-c", "fsync=on", "-c", "synchronous_commit=on", "-c", "full_page_writes=on"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    # A clean shutdown can take a while on a busy database: time to finish
+    # before Docker stops it (the UPS shutdown waits for this too).
+    stop_grace_period: 60s
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  api:
+    <<: *backend
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      <<: *backend-env
+    volumes:
+      - documents:/data/documents
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/db')"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  staff:
+    build:
+      context: ./frontend
+      target: prod
+      args:
+        PORTAL: staff
+    image: motie/office-staff:${MOTIE_VERSION:-local}
+    restart: unless-stopped
+    environment:
+      PORTAL: staff
+      PORTAL_KEY: ${STAFF_PORTAL_KEY}
+      API_URL: http://api:8000
+    depends_on:
+      - api
+
+  caddy:
+    image: caddy:2.8.4
+    restart: unless-stopped
+    environment:
+      OFFICE_HOSTNAME: ${OFFICE_HOSTNAME}
+    ports:
+      # Only on the server's office-network address (OFFICE_BIND_IP, e.g.
+      # 192.168.10.5), never on an internet-facing one. The firewall and the
+      # router (no port forwarding) also keep it off the internet.
+      - "${OFFICE_BIND_IP:?Set OFFICE_BIND_IP in .env}:80:80"
+      - "${OFFICE_BIND_IP}:443:443"
+    volumes:
+      - ./office/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Caddy's certificate authority and certificates: keep them (and back
+      # them up), or every PC and phone must trust a new one.
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - staff
+      - api
+
+  tools:
+    # Migrations, the history import, creating staff accounts, e.g.
+    #   docker compose -f docker-compose.office.yml run --rm tools alembic upgrade head
+    <<: *backend
+    restart: "no"
+    profiles: ["tools"]
+    command: ["alembic", "current"]
+    environment:
+      <<: *backend-env
+      MIGRATION_DATABASE_URL: postgresql+asyncpg://motie_owner:${MIGRATION_DB_PASSWORD:?Set MIGRATION_DB_PASSWORD in .env}@db:5432/${POSTGRES_DB}
+    volumes:
+      - documents:/data/documents
+
+volumes:
+  pgdata:
+  documents:
+  caddy_data:
+  caddy_config:

@@ -66,6 +66,23 @@ jobs:
         if: always()
         run: bash scripts/ci-cleanup.sh
 
+  office:
+    # The office server's stack (docker-compose.office.yml, step 13c): built,
+    # started and checked over https through Caddy's internal certificate authority.
+    if: github.repository == 'Atijan123/MOTIE_WORKFLOW_SYSTEM'
+    needs: [backend, frontend]
+    runs-on: ${{ vars.CI_RUNS_ON || 'self-hosted' }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start the office stack and check it over https
+        run: bash scripts/ci-office-smoke.sh
+      - name: Clean up
+        if: always()
+        run: |
+          docker image prune --force
+          docker builder prune --force --filter until=168h
+
   e2e:
     if: github.repository == 'Atijan123/MOTIE_WORKFLOW_SYSTEM'
     needs: [backend, frontend]

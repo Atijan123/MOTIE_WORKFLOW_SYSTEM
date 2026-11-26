@@ -16,6 +16,19 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 13c — The office stack: docker-compose.office.yml with Caddy and its own certificate authority (2026-11-26)
+
+**Built:**
+- **docker-compose.office.yml**, Compose project `motie-office`: Postgres (named volume `pgdata`), the API and the staff app as production images, and **Caddy**, the only container with ports on the server. There is no applicant portal. The API runs with `APP_ENV=office` (13a) and only accepts staff requests addressed to `OFFICE_HOSTNAME`.
+- **office/Caddyfile:** HTTPS at `OFFICE_HOSTNAME` (e.g. `etls.office`) with certificates from **Caddy's internal certificate authority** (`tls internal`). Each PC and phone trusts its root certificate once; docs/OFFICE-SETUP.md (13h) will say how. http:// is redirected to https://, browsers are told to use https only for a year (HSTS), and Caddy sets `X-Real-IP` itself, which the staff IP allowlist relies on. Only `/api/health` of the API is reachable through Caddy, for checks: browsers only ever talk to the staff app.
+- **Only on the office network:** Caddy listens on `OFFICE_BIND_IP`, the server's office-network address, not on every address; the firewall and the router (13h) keep it off the internet.
+- **Durable by default:** Postgres's `fsync`, `synchronous_commit` and `full_page_writes` are written out as on, and Docker gives it 60 seconds to shut down cleanly (power cuts and the UPS: 13h).
+- **office/env.example:** every setting the server needs, with how to make each secret.
+- **CI checks the office stack** (new `office` job, scripts/ci-office-smoke.sh): builds and starts it with throwaway settings, migrates, then over real HTTPS, trusting only Caddy's downloaded root certificate, checks the API's health, the staff login page, the http→https redirect, the HSTS header, and that the API's other endpoints aren't reachable.
+
+**Files:** docker-compose.office.yml, office/Caddyfile, office/env.example, scripts/ci-office-smoke.sh (new); .github/workflows/ci.yml.
+**Try it:** this is for the office server (13h's guide). On your PC the CI job is the test: see the `office` job in the run's log.
+
 ### Step 13b (part 2) — "Print applicant copy" on the Outgoing tab (2026-11-26)
 
 **Built:**
@@ -1916,6 +1929,13 @@ The API can't see the browser: the browser talks to a Next.js server, which call
 **Here:** `startup_problems()` in backend/app/core/config.py, called by `lifespan()` in backend/app/main.py. The same idea already appeared in step 12: an empty staff allowlist lets nobody in; a "dev-" key outside development is no key.
 **Learn more:** [OWASP: Fail securely](https://owasp.org/www-community/Fail_securely)
 
+### A private certificate authority (Caddy's "tls internal")
+**What:** https needs a certificate that the browser trusts. On the internet, a public authority (e.g. Let's Encrypt) checks you own the domain and signs one. A server on a private network with a name like `etls.office` can't get one: no public authority can see it. So Caddy runs its **own** small certificate authority: it makes a root certificate once, keeps its private key in the `caddy_data` volume, and signs short-lived certificates for the server with it. Browsers don't know this root, so each PC and phone is told to trust it once. After that, the connection is encrypted and the browser checks it's really the office server, exactly as on the internet.
+**Stops:** someone on the office Wi-Fi reading passwords, codes or case data off the network; a fake "etls.office" on the network (it couldn't present a certificate signed by the trusted root).
+**Doesn't stop:** anyone who gets the root's private key (in `caddy_data`: back it up, and guard it like the database); a PC that's compromised itself. If staff learn to click past certificate warnings, it stops nothing: they should never see one once the root is trusted.
+**Here:** `tls internal` in office/Caddyfile; the `caddy_data` volume in docker-compose.office.yml; scripts/ci-office-smoke.sh downloads the root and checks the server with it.
+**Learn more:** [Caddy docs: Automatic HTTPS, "Local HTTPS"](https://caddyserver.com/docs/automatic-https#local-https)
+
 ## 3. Decisions
 
 ### Confirmed by the Ministry
@@ -1942,6 +1962,11 @@ These were open questions; the Ministry has answered them. The code follows them
 
 | Date | Decision | Alternatives considered | Why |
 | --- | --- | --- | --- |
+| 2026-11-26 | Caddy's internal certificate authority | self-signed certificate; a Ministry or Government CA; plain http | Self-signed certificates must be re-trusted at every renewal. A Government CA would be best if the ICT unit has one (open question). http would send passwords and codes in the clear on the office Wi-Fi. |
+| 2026-11-26 | Only `/api/health` of the API goes through Caddy | the whole API | Browsers never call the API (step 9a: the Next.js server does), so exposing it would only add a door. The health check is for scripts. |
+| 2026-11-26 | Caddy binds to the office-network address only (`OFFICE_BIND_IP`) | every address (0.0.0.0) | If the server ever gets a second network card (e.g. a 4G dongle), the app isn't on it. |
+| 2026-11-26 | Images are built on the server from the code (tagged `MOTIE_VERSION`) | download them from a registry | Nothing to publish or log in to; 13f's update script builds the new version and keeps the old images to roll back to. |
+| 2026-11-26 | CI starts the office stack and checks it over https | test only the code | A typo in the Caddyfile or the compose file would otherwise only show on the day of installation. |
 | 2026-11-26 | The list shows copies until they're marked handed over | a "Print" button only, nothing recorded | A printed copy left on a desk is easily forgotten; the list is Records' to-do, and the record answers "did the importer get their letter, and from whom?". |
 | 2026-11-26 | The copy is printed after GRA's copy is sent, as the 10b rule says | print it with the GRA copy, before "Mark sent to GRA" | One rule for the applicant's copy, whether downloaded or printed. `[CONFIRM]` if the office would rather print all copies at once. |
 | 2026-11-26 | The walk-in screen reuses the applicant's form, moved to components/ | a separate staff form | One form to keep right; a change to the facility letter form shows in both apps. |
@@ -2432,9 +2457,19 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 
 - [ ] **Handing over the applicant's copy (step 13b):** does the importer collect it at Records, or is it posted? Should they sign for it (the record now says who handed it over and when, not who received it)? May all copies be printed together, before GRA's is sent? `[CONFIRM]`
 
+- [ ] **The server's name and address (ICT):** what name will staff type (`OFFICE_HOSTNAME`, e.g. `etls.office`), can the office router's DNS point it at the server, and which fixed address will the server have (`OFFICE_BIND_IP`)? Does the Government have its own certificate authority we should use instead of Caddy's?
+
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 13c
+1. A staff PC shows a certificate warning for https://etls.office. What's missing, and why must staff never click past it?
+2. Why can't someone on the office network call the API's `/cases` endpoints directly through Caddy?
+
+#### Show answers
+1. The PC doesn't trust Caddy's root certificate yet (docs/OFFICE-SETUP.md). Clicking past a warning means accepting *any* certificate, including one from a fake server on the network that collects passwords.
+2. Caddy only passes `/api/health*` to the API; everything else goes to the staff app, which has no `/api/...` pages. And even inside Docker, the API needs the staff app's portal key (step 12b).
 
 ### Step 13b (part 2)
 1. A walk-in letter is cancelled after being sent to GRA, and a corrected one is signed. Does the old copy stay on the "to hand over" list?
