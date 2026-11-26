@@ -32,6 +32,7 @@ Newest first. Each entry: what was built, the files involved, how to run and tes
 - **Phones on the office Wi-Fi:** the office range (guests on a different one), trusting the certificate, two-step sign-in on a phone, installing the app, scanning, and signing out.
 
 Also: `COMPOSE_FILE=docker-compose.office.yml` in office/env.example; links from README.md and CLAUDE.md.
+- **Fonts kept in the repository:** a CI run failed building the staff app because `next/font/google` downloads the fonts from Google *while building*, and Google's answer was unusable that time. On the office server, an online update with a poor connection would fail the same way. The two fonts (IBM Plex Sans and Source Serif 4, both under the SIL Open Font Licence) are now files in frontend/app/fonts/, loaded with `next/font/local` (frontend/app/layout.tsx), so building needs no internet.
 
 **Files:** docs/OFFICE-SETUP.md (new); office/env.example; README.md; CLAUDE.md.
 **Try it:** read it through once before the day; then follow it on the office server, or first on a spare PC as a rehearsal (the restore drill in section 13 is the same rehearsal).
@@ -2050,6 +2051,7 @@ These were open questions; the Ministry has answered them. The code follows them
 
 | Date | Decision | Alternatives considered | Why |
 | --- | --- | --- | --- |
+| 2026-11-26 | The fonts are files in the repository (`next/font/local`) | download them from Google at build time (`next/font/google`, as before) | Building must work with no or poor internet at the office; a CI build already failed on a bad answer from Google. The licence allows it. |
 | 2026-11-26 | Ubuntu Server 24.04 LTS | Windows Server; another Linux | Free, supported until 2029 (2034 with Ubuntu Pro), Docker's own packages, and the most help online. |
 | 2026-11-26 | A UPS with NUT shutting the server down | rely on Postgres surviving power cuts | Postgres does survive them, but the file system, a cheap disk's cache and the PC coming back on are less certain; a clean shutdown avoids all three. |
 | 2026-11-26 | Swap two backup drives weekly, one always off-site | one drive always plugged in | A drive left plugged in can be encrypted by ransomware or lost in the same fire as the server. |

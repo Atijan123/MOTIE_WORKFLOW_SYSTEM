@@ -1,15 +1,26 @@
 import type { Metadata, Viewport } from "next";
-import { IBM_Plex_Sans, Source_Serif_4 } from "next/font/google";
+import localFont from "next/font/local";
 
 import { RegisterServiceWorker } from "@/components/RegisterServiceWorker";
 
 import "./globals.css";
 
-// next/font downloads the fonts once, at build time, and serves them from
-// this site: no request to Google from the user's browser, and only the
-// weights listed here. Text shows in a fallback font until they arrive.
-const sans = IBM_Plex_Sans({ subsets: ["latin"], weight: ["400", "500", "600"], variable: "--font-sans", display: "swap" });
-const serif = Source_Serif_4({ subsets: ["latin"], weight: ["600"], variable: "--font-serif", display: "swap" });
+// The fonts are files in app/fonts/ (both under the SIL Open Font Licence,
+// app/fonts/LICENCE.md), not downloaded from Google when the app is built:
+// the office server must be able to build with no internet (step 13h).
+// Each is a "variable" font: one file holds every weight.
+const sans = localFont({
+  src: "./fonts/IBMPlexSans-latin.woff2",
+  weight: "400 600",
+  variable: "--font-sans",
+  display: "swap",
+});
+const serif = localFont({
+  src: "./fonts/SourceSerif4-latin.woff2",
+  weight: "600",
+  variable: "--font-serif",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: { default: "MOTIE ETLS Services", template: "%s · MOTIE ETLS Services" },
