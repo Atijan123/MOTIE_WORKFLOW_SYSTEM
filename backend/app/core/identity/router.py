@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.identity import password_links
+from app.core.identity import login_guard, password_links
 from app.core.identity.channel import OUTSIDE_NETWORK_MESSAGE, Channel, came_through, staff_ip_allowed
 from app.core.identity.deps import get_channel, get_current_user
 from app.core.identity.models import User
@@ -23,19 +23,37 @@ async def login(
     # The staff app from outside the Ministry network: refuse before looking
     # at the password at all, so it can't be used to guess passwords (step 12c).
     if channel.portal == "staff" and not staff_ip_allowed(channel):
+        await login_guard.record(session, email=body.email, channel=channel, outcome="outside_network")
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=OUTSIDE_NETWORK_MESSAGE)
+    # Locked account or too many tries from this IP: refuse before the
+    # password is checked, so a locked account can't be guessed at (step 12d).
+    try:
+        await login_guard.check(session, body.email, channel)
+    except login_guard.LoginRefused as refused:
+        await login_guard.record(session, email=body.email, channel=channel, outcome="refused")
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=refused.message,
+            headers={"Retry-After": str(refused.minutes * 60)},
+        )
     user = await authenticate(session, body.email, body.password)
     # A staff account through the applicant portal (or the reverse) gets the
     # same answer as a wrong password: a phished or guessed staff password is
     # no use from the public site. The login pages say which app is whose.
     if user is not None and not came_through(channel, user.portal):
+        # Recorded against the account: a right staff password on the public
+        # site is a sign it has leaked. (Counted as a failure all the same.)
+        await login_guard.record(session, email=body.email, channel=channel, outcome="wrong_portal", user=user)
         user = None
+    elif user is None:
+        await login_guard.record(session, email=body.email, channel=channel, outcome="bad_password")
     if user is None:
         # One message for every failure (unknown email, wrong password,
         # deactivated account), so it reveals nothing.
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect email or password"
         )
+    await login_guard.record(session, email=body.email, channel=channel, outcome="success", user=user)
     return TokenResponse(
         access_token=create_access_token(user.id),
         expires_in=settings.access_token_minutes * 60,

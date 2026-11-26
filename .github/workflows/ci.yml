@@ -14,10 +14,8 @@ on:
   push:
   pull_request:
 
-# A newer push to the same branch makes the older run pointless: cancel it.
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+# No "cancel older runs": every step must be green on its own commit, so each
+# push gets its full run even when a newer one follows.
 
 # The jobs only read the code. Nothing here can push, comment or release.
 permissions:

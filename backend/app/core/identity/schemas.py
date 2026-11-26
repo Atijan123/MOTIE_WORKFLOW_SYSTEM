@@ -5,8 +5,8 @@ from pydantic import BaseModel, Field
 
 
 class LoginRequest(BaseModel):
-    email: str
-    password: str
+    email: str = Field(max_length=320)
+    password: str = Field(max_length=1000)  # bounded: hashing a huge input wastes CPU
 
 
 class SetPasswordRequest(BaseModel):

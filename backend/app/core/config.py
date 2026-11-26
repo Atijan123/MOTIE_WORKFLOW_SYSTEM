@@ -72,6 +72,16 @@ class Settings(BaseSettings):
     staff_portal_hosts: str = ""
     applicant_portal_hosts: str = ""
 
+    # --- Login protection (step 12d) ----------------------------------------------
+    # An account is locked after this many failed tries within the window, and
+    # unlocks when the window has passed. [CONFIRM] 5 tries / 15 minutes.
+    lockout_failures: int = Field(default=5, ge=3)
+    lockout_minutes: int = Field(default=15, gt=0)
+    # At most this many login tries from one IP address per window, whatever
+    # the accounts: stops one machine guessing across many accounts.
+    login_ip_limit: int = Field(default=20, ge=5)
+    login_ip_window_minutes: int = Field(default=5, gt=0)
+
     # --- Staff only from the Ministry network (step 12c) ------------------------
     # The networks staff may work from, comma-separated: single addresses or
     # ranges ("10.20.0.0/16, 196.46.1.7"), e.g. the office LAN and the VPN.

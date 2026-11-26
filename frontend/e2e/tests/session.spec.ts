@@ -44,3 +44,21 @@ test("the staff app has no applicant screens", async ({ browser }) => {
   const response = await page.goto("/applications");
   expect(response?.status()).toBe(404);
 });
+
+// Step 12d: five failures lock the account. A made-up email, unique per run,
+// so no seeded account is locked for the tests after this one.
+test("five wrong passwords lock the account", async ({ browser }) => {
+  const page = await (await browser.newContext({ baseURL: APPLICANT_URL })).newPage();
+  const email = `lockout-${Date.now()}@e2e.test`;
+  await page.goto("/login");
+  for (let i = 0; i < 5; i++) {
+    await page.getByLabel("Email").fill(email);
+    await page.getByLabel("Password").fill("not the password");
+    await page.getByRole("button", { name: "Log in" }).click();
+    await expect(page.getByText("Incorrect email or password")).toBeVisible();
+  }
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Password").fill("not the password");
+  await page.getByRole("button", { name: "Log in" }).click();
+  await expect(page.getByText(/Too many failed attempts: this account is locked/)).toBeVisible();
+});

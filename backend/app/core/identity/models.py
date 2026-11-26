@@ -152,3 +152,25 @@ class PasswordLink(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class LoginAttempt(Base):
+    """One try at logging in (0043), for lockout and rate limiting. Written and
+    counted by identity/login_guard.py; the app may never change or delete one."""
+
+    __tablename__ = "login_attempts"
+    __table_args__ = (
+        CheckConstraint("length(email) <= 320", name="login_attempts_email_length"),
+        Index("login_attempts_email_idx", "email", "attempted_at"),
+        Index("login_attempts_ip_idx", "client_ip", "attempted_at"),
+        {"schema": "core"},
+    )
+    __mapper_args__ = {"eager_defaults": True}
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    attempted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    email: Mapped[str] = mapped_column(Text)
+    client_ip: Mapped[str | None] = mapped_column(Text)
+    portal: Mapped[str | None] = mapped_column(Text)
+    outcome: Mapped[str] = mapped_column(Text)
+    user_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("core.users.id"))

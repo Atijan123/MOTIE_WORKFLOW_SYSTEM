@@ -16,6 +16,19 @@ Kept up to date by Claude Code after every build step. Read the newest build log
 
 Newest first. Each entry: what was built, the files involved, how to run and test it.
 
+### Step 12d — Login protection: lockout, per-IP rate limit, every login audited (2026-11-26)
+
+**Built:**
+- **`core.login_attempts`** (migration 0043): one row per login try, with the email typed, the IP, the portal and the outcome (`success`, `bad_password`, `wrong_portal`, `outside_network`, `refused`; `bad_code` arrives with step 12e). The app may add and read rows, never change or delete them.
+- **Lockout:** 5 failed tries within 15 minutes lock that email, even against the right password, until the oldest of those 5 is 15 minutes old (`check()` in backend/app/core/identity/login_guard.py). Failures before the last successful login don't count. Tries refused *because* of the lock are recorded as `refused` and don't count, so knocking on a locked account doesn't keep it locked for ever. An email with no account locks exactly the same way, so "locked" doesn't reveal whether an account exists. Answer: 429 "Too many failed attempts: this account is locked. Try again in N minutes.", with a `Retry-After` header.
+- **Per-IP rate limit:** at most 20 tries per 5 minutes from one IP, across all accounts: 429 "Too many sign-in attempts from this network…". Only when the IP is known (always behind Caddy; never in development).
+- **Every login and every failure is in the audit log** (`record()`): `auth.login_succeeded` against the user, `auth.login_failed` against the email typed (entity type `login`) with the outcome, portal and IP. A *right* staff password typed into the public portal is recorded against the account: it's a sign the password has leaked.
+- **Settings:** `LOCKOUT_FAILURES`, `LOCKOUT_MINUTES`, `LOGIN_IP_LIMIT`, `LOGIN_IP_WINDOW_MINUTES` (backend/app/core/config.py). Login inputs are now length-limited (email 320, password 1000 characters).
+- **Two CI fixes found on the way.** (1) The workflow cancelled a branch's older run when a newer push came, so steps 12b and 12c never finished a run on their own commit. The `concurrency` block is gone: every commit gets its whole run. (2) On a fresh machine, `web` and `staff` both filled the shared `web_node_modules` volume at once and collided ("failed to create symlink"); `staff` now starts after `web`. That race was in step 12b; this commit is the first to carry the fix.
+
+**Files:** backend/alembic/versions/0043_login_attempts.py; backend/app/core/identity/login_guard.py (new), models.py (`LoginAttempt`), router.py (`login()`), schemas.py; backend/app/core/config.py; backend/tests/core/test_login_protection.py (new); frontend/e2e/tests/session.spec.ts; docker-compose.yml; .github/workflows/ci.yml.
+**Try it:** at http://localhost:3001, type a made-up email and a wrong password six times: the sixth answer is the lock. See the rows: `docker compose exec db psql -U motie -d motie -c "SELECT attempted_at, email, outcome FROM core.login_attempts ORDER BY id DESC LIMIT 10"`. Tests: `docker compose run --rm tools pytest tests/core/test_login_protection.py -v`.
+
 ### Step 12c — Staff work only from the Ministry network (IP allowlist) (2026-11-26)
 
 **Built:**
@@ -1769,6 +1782,13 @@ The API can't see the browser: the browser talks to a Next.js server, which call
 **Here:** `staff_ip_check_on()` and `staff_networks()` in backend/app/core/config.py; `staff_ip_allowed()` in backend/app/core/identity/channel.py.
 **Learn more:** [OWASP: Defense in depth](https://owasp.org/www-community/Defense_in_Depth) and [Python docs: ipaddress](https://docs.python.org/3/library/ipaddress.html)
 
+### Account lockout and rate limiting
+**What:** an online password guess costs an attacker almost nothing, so without limits they can try thousands. **Lockout** limits guesses against one account (5 per 15 minutes here). **Rate limiting** limits tries from one place (20 per 5 minutes per IP), which also catches *password spraying*: one common password tried against many accounts, which never trips any single account's lock. The details matter: count by the email *typed*, so a lock doesn't reveal which accounts exist; don't count tries that were refused, or an attacker could keep a victim locked out for ever just by knocking; unlock by time, so nobody has to be phoned at night.
+**Stops:** guessing a staff or applicant password online; spraying common passwords across many accounts from one machine.
+**Doesn't stop:** a password stolen by phishing or malware (two-step login, step 12e, is for that); guessing spread across many IPs (a botnet), which is slowed only by the per-account lock; deliberately locking someone out for 15 minutes by typing wrong passwords for them (a small nuisance, the price of lockout); guessing offline against a stolen copy of the database (Argon2 hashing, step 2, makes that slow).
+**Here:** `check()` and `record()` in backend/app/core/identity/login_guard.py; `login()` in backend/app/core/identity/router.py; `core.login_attempts` (0043).
+**Learn more:** [OWASP Authentication Cheat Sheet: Protect against automated attacks](https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html#protect-against-automated-attacks)
+
 ## 3. Decisions
 
 ### Confirmed by the Ministry
@@ -1795,6 +1815,13 @@ These were open questions; the Ministry has answered them. The code follows them
 
 | Date | Decision | Alternatives considered | Why |
 | --- | --- | --- | --- |
+| 2026-11-26 | Attempts in their own table, counted with indexed queries; the audit log gets a row too | count rows in the audit log | The audit log's details are JSON; counting there would be slow and awkward. The audit log stays the record people read. |
+| 2026-11-26 | Unlock by time (15 minutes), no admin unlock yet | lock until an admin unlocks | No one has to be on call, and a deliberate lock-out costs the victim 15 minutes at most. An admin "unlock now" can follow if the Ministry wants it (open question). |
+| 2026-11-26 | Refused tries are recorded but don't count | count every try | Otherwise anyone could keep an account locked for ever. |
+| 2026-11-26 | A staff password through the portal counts as a failure | don't count it (it was the right password) | Five such tries without a lock would tell someone on the public site that the password was right. |
+| 2026-11-26 | Per-IP limit only when the IP is known | count unknown IPs as one | In development there's no proxy, so all tries would share one bucket and the walk-throughs would trip it. Behind Caddy the IP is always known. |
+| 2026-11-26 | 429 Too Many Requests, with `Retry-After` | 401; 423 Locked | 429 is the standard answer for "slow down", and clients understand `Retry-After`. 401 would hide the lock from the person locked out. |
+| 2026-11-26 | No "cancel older runs" in CI | cancel older runs on the same branch (common to save minutes) | Your rule is that every step's own commit must be green, so every commit needs its whole run. |
 | 2026-11-26 | The allowlist is checked in the API, not only in Caddy | only a Caddy `remote_ip` rule | The API is where the rule can't be bypassed by a misconfigured proxy, and where it can be tested. Caddy can add the same rule in front (step 12i). |
 | 2026-11-26 | Checked on every staff request, not only at login | login only | A session started at the office shouldn't keep working on another network. |
 | 2026-11-26 | The staff login from outside is refused before the password is checked | check the password, then refuse | Then the login can't tell an outsider whether a password was right. |
@@ -2231,9 +2258,22 @@ Items marked `[CONFIRM]` in the code, to check with the Ministry.
 
 - [ ] **Staff networks (step 12c):** which address ranges are the Ministry's office network and VPN? These go in `STAFF_IP_ALLOWLIST`. Is there a VPN for staff working away from the office? Is the office Wi-Fi for visitors on a separate range from staff PCs? `[CONFIRM]` with the ICT unit.
 
+- [ ] **Lockout and rate limit (step 12d):** are 5 failed tries in 15 minutes, unlocking after 15 minutes, right for staff and applicants alike? `[CONFIRM]` Should an admin be able to unlock an account at once, or should the person be emailed when their account is locked? Is 20 tries per 5 minutes from one IP right? An office where everyone shares one internet address counts as one IP; that is fine for the staff app (it's on the office network) but matters for the public portal if many applicants sit behind one address (a cyber café).
+- [ ] **How long to keep login attempts** (`core.login_attempts`)? They're needed only for 15 minutes for the lock, but are useful for investigations. Suggest 1 year, then delete (by the owner, as a scheduled job). Check against Gambian records rules.
+
 ## 5. Check yourself
 
 Questions per step. Try to answer before reading the answers.
+
+### Step 12d
+1. An attacker types a victim's email with wrong passwords, over and over. Why does the victim's account unlock 15 minutes after the fifth failure, not 15 minutes after the attacker stops?
+2. Why does an email with no account lock exactly like a real one?
+3. What is password spraying, and which of the two limits catches it?
+
+#### Show answers
+1. Tries made while the account is locked are recorded as `refused`, and `check()` only counts `bad_password`, `wrong_portal` and `bad_code`. So the five failures that caused the lock are the only ones that count, and the lock ends when the oldest of them leaves the 15-minute window.
+2. Lockout is counted by the email typed, not by the account. If only real accounts locked, "locked" after five tries would tell an attacker the email has an account (user enumeration, step 2c).
+3. Trying one common password against many different accounts. No single account sees five failures, so lockout never trips; the per-IP limit (20 tries per 5 minutes from one address) does.
 
 ### Step 12c
 1. The allowlist is on and the API gets a staff request with no `X-Client-IP`. What happens, and why is that the right answer?

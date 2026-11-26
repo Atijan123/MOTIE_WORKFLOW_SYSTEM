@@ -118,6 +118,10 @@ services:
       - "127.0.0.1:3002:3000"
     depends_on:
       - api
+      # After web: on a fresh machine Docker fills the empty web_node_modules
+      # volume from the image when the first container starts. Two containers
+      # filling it at once collide (CI, 2026-11-26).
+      - web
 
   notifier:
     # Sends the emails waiting in core.notifications, every NOTIFICATION_POLL_SECONDS
