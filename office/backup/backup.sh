@@ -34,7 +34,9 @@ fail() { log "BACKUP FAILED: $*" >&2; exit 1; }
 [ -f "$ROOT/.motie-backup-drive" ] || fail "no backup drive at $ROOT (the file .motie-backup-drive is missing). Is the USB drive plugged in and mounted?"
 touch "$ROOT/.write-test" 2>/dev/null && rm -f "$ROOT/.write-test" || fail "can't write to the backup drive at $ROOT."
 
-stamp="$(date +%Y-%m-%d_%H%M)"
+# To the second: two backups in one minute (e.g. one by hand, then an update's)
+# must not share a name.
+stamp="$(date +%Y-%m-%d_%H%M%S)"
 final="$ROOT/daily/$stamp"
 partial="$ROOT/daily/.partial-$stamp"
 mkdir -p "$ROOT/daily" "$ROOT/offsite"
@@ -58,7 +60,9 @@ tar --create --gzip --file "$partial/documents.tar.gz" --directory /documents .
 } > "$partial/backup.txt"
 (cd "$partial" && sha256sum database.dump documents.tar.gz backup.txt > SHA256SUMS)
 
-mv "$partial" "$final"
+[ ! -e "$final" ] || fail "$final already exists."
+# -T: rename the folder itself; never move it *into* an existing one.
+mv -T "$partial" "$final"
 date -u '+%Y-%m-%dT%H:%M:%SZ' > "$ROOT/last-success.tmp" && mv "$ROOT/last-success.tmp" "$ROOT/last-success"
 log "Backup done: $final"
 
